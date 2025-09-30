@@ -103,12 +103,7 @@ impl PolicyStore {
                     // For anonymous access, we look for statements with Principal: "*"
                     if statement.effect == IAMEffect::Allow {
                         // Check if principal matches (looking for "*")
-                        let principal_matches = match &statement.principal {
-                            Some(Principal::Wildcard) => true,
-                            _ => false,
-                        };
-
-                        if principal_matches {
+                        if matches!(&statement.principal, Some(Principal::Wildcard)) {
                             // Check if action matches
                             let action_matches = match &statement.action {
                                 Some(IAMAction::Single(action)) => {
