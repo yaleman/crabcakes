@@ -6,6 +6,7 @@ use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
+use tracing::{info, warn, error, debug};
 
 use crate::filesystem::FilesystemService;
 use crate::xml_responses::{ListBucketResponse, ListBucketsResponse};
@@ -41,19 +42,39 @@ impl S3Handler {
         let query = req.uri().query().unwrap_or("");
         let bucket_name = self.extract_bucket_name(&req);
 
+        info!(
+            method = %method,
+            path = %path,
+            query = %query,
+            bucket = %bucket_name,
+            "Incoming S3 request"
+        );
+
         let response = match (method, path, query) {
             (&Method::GET, "/", query) if query.contains("list-type=2") => {
+                debug!("Handling ListBucket request");
                 self.handle_list_bucket(query, &bucket_name).await
             }
-            (&Method::GET, "/", _) => self.handle_list_buckets(&bucket_name).await,
+            (&Method::GET, "/", _) => {
+                debug!("Handling ListBuckets request");
+                self.handle_list_buckets(&bucket_name).await
+            }
             (&Method::HEAD, key, _) if !key.is_empty() && key != "/" => {
+                debug!(key = %&key[1..], "Handling HeadObject request");
                 self.handle_head_object(&key[1..]).await
             }
             (&Method::GET, key, _) if !key.is_empty() && key != "/" => {
+                debug!(key = %&key[1..], "Handling GetObject request");
                 self.handle_get_object(&key[1..]).await
             }
-            _ => self.not_found_response(),
+            _ => {
+                warn!(method = %method, path = %path, "Unknown request pattern");
+                self.not_found_response()
+            }
         };
+
+        let status = response.status();
+        info!(status = %status.as_u16(), "Request completed");
 
         Ok(response)
     }
@@ -83,6 +104,11 @@ impl S3Handler {
             .list_directory(prefix, max_keys, continuation_token)
         {
             Ok((entries, next_token)) => {
+                debug!(
+                    count = entries.len(),
+                    has_more = next_token.is_some(),
+                    "Listed directory entries"
+                );
                 let response = ListBucketResponse::new(
                     bucket_name.to_string(),
                     prefix.unwrap_or("").to_string(),
@@ -98,10 +124,16 @@ impl S3Handler {
                         .header("Content-Length", xml.len())
                         .body(Full::new(Bytes::from(xml)))
                         .unwrap(),
-                    Err(_) => self.internal_error_response(),
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize ListBucket response");
+                        self.internal_error_response()
+                    }
                 }
             }
-            Err(_) => self.internal_error_response(),
+            Err(e) => {
+                error!(error = %e, "Failed to list directory");
+                self.internal_error_response()
+            }
         }
     }
 
@@ -121,15 +153,21 @@ impl S3Handler {
 
     async fn handle_head_object(&self, key: &str) -> Response<Full<Bytes>> {
         match self.filesystem.get_file_metadata(key) {
-            Ok(metadata) => Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", metadata.content_type)
-                .header("Content-Length", metadata.size)
-                .header("Last-Modified", metadata.last_modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string())
-                .header("ETag", metadata.etag)
-                .body(Full::new(Bytes::new()))
-                .unwrap(),
-            Err(_) => self.not_found_response(),
+            Ok(metadata) => {
+                debug!(key = %key, size = metadata.size, "HeadObject success");
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", metadata.content_type)
+                    .header("Content-Length", metadata.size)
+                    .header("Last-Modified", metadata.last_modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string())
+                    .header("ETag", metadata.etag)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap()
+            }
+            Err(e) => {
+                warn!(key = %key, error = %e, "HeadObject failed: file not found");
+                self.not_found_response()
+            }
         }
     }
 
@@ -140,21 +178,33 @@ impl S3Handler {
                     Ok(mut file) => {
                         let mut contents = Vec::new();
                         match file.read_to_end(&mut contents).await {
-                            Ok(_) => Response::builder()
-                                .status(StatusCode::OK)
-                                .header("Content-Type", metadata.content_type)
-                                .header("Content-Length", metadata.size)
-                                .header("Last-Modified", metadata.last_modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string())
-                                .header("ETag", metadata.etag)
-                                .body(Full::new(Bytes::from(contents)))
-                                .unwrap(),
-                            Err(_) => self.internal_error_response(),
+                            Ok(bytes_read) => {
+                                debug!(key = %key, size = bytes_read, "GetObject success");
+                                Response::builder()
+                                    .status(StatusCode::OK)
+                                    .header("Content-Type", metadata.content_type)
+                                    .header("Content-Length", metadata.size)
+                                    .header("Last-Modified", metadata.last_modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string())
+                                    .header("ETag", metadata.etag)
+                                    .body(Full::new(Bytes::from(contents)))
+                                    .unwrap()
+                            }
+                            Err(e) => {
+                                error!(key = %key, error = %e, "Failed to read file contents");
+                                self.internal_error_response()
+                            }
                         }
                     }
-                    Err(_) => self.not_found_response(),
+                    Err(e) => {
+                        error!(key = %key, error = %e, "Failed to open file");
+                        self.not_found_response()
+                    }
                 }
             }
-            Err(_) => self.not_found_response(),
+            Err(e) => {
+                warn!(key = %key, error = %e, "GetObject failed: file not found");
+                self.not_found_response()
+            }
         }
     }
 

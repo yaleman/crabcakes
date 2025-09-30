@@ -4,6 +4,7 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 use mime_guess::MimeGuess;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -33,9 +34,12 @@ impl FilesystemService {
 
     pub fn get_file_metadata(&self, key: &str) -> Result<FileMetadata, std::io::Error> {
         let file_path = self.root_dir.join(key);
+        debug!(key = %key, path = ?file_path, "Getting file metadata");
+
         let metadata = fs::metadata(&file_path)?;
 
         if !metadata.is_file() {
+            warn!(key = %key, "Path is not a file");
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Path is not a file",
@@ -70,6 +74,12 @@ impl FilesystemService {
     }
 
     pub fn list_directory(&self, prefix: Option<&str>, max_keys: usize, continuation_token: Option<&str>) -> Result<(Vec<DirectoryEntry>, Option<String>), std::io::Error> {
+        debug!(
+            prefix = ?prefix,
+            max_keys = max_keys,
+            continuation_token = ?continuation_token,
+            "Listing directory"
+        );
         let mut entries = Vec::new();
         let start_after = continuation_token.unwrap_or("");
 

@@ -6,6 +6,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
+use tracing::{info, error, debug};
 
 use crate::filesystem::FilesystemService;
 use crate::s3_handlers::S3Handler;
@@ -51,13 +52,19 @@ impl Server {
         // Create S3 handler
         let s3_handler = Arc::new(S3Handler::new(filesystem));
 
-        eprintln!("Serving files from: {:?}", self.root_dir);
-        eprintln!("Listening on http://{}", addr);
+        info!(
+            root_dir = ?self.root_dir,
+            address = %addr,
+            "Starting S3 server"
+        );
 
         let listener = TcpListener::bind(addr).await?;
+        info!("Server listening on http://{}", addr);
 
         loop {
-            let (stream, _) = listener.accept().await?;
+            let (stream, remote_addr) = listener.accept().await?;
+            debug!(remote_addr = %remote_addr, "Accepted new connection");
+
             let io = TokioIo::new(stream);
             let handler = Arc::clone(&s3_handler);
 
@@ -72,7 +79,7 @@ impl Server {
                     )
                     .await
                 {
-                    eprintln!("Error serving connection: {:?}", err);
+                    error!(error = %err, remote_addr = %remote_addr, "Error serving connection");
                 }
             });
         }
