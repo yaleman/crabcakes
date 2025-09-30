@@ -201,6 +201,110 @@ impl FilesystemService {
         // Get metadata for the newly written file
         self.get_file_metadata(key)
     }
+
+    pub async fn create_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
+        debug!(bucket = %bucket, "Creating bucket");
+
+        // Validate bucket name
+        if bucket.is_empty() || bucket.len() > 63 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Bucket name must be between 1 and 63 characters",
+            ));
+        }
+
+        // Check for valid characters (lowercase letters, numbers, hyphens)
+        if !bucket.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Bucket name can only contain lowercase letters, numbers, and hyphens",
+            ));
+        }
+
+        // Bucket name cannot start or end with a hyphen
+        if bucket.starts_with('-') || bucket.ends_with('-') {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Bucket name cannot start or end with a hyphen",
+            ));
+        }
+
+        let bucket_path = self.root_dir.join(bucket);
+
+        // Check if bucket already exists
+        if bucket_path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "Bucket already exists",
+            ));
+        }
+
+        // Create the directory
+        async_fs::create_dir(&bucket_path).await?;
+        debug!(bucket = %bucket, "Bucket created successfully");
+        Ok(())
+    }
+
+    pub async fn delete_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
+        debug!(bucket = %bucket, "Deleting bucket");
+        let bucket_path = self.root_dir.join(bucket);
+
+        // Check if bucket exists
+        if !bucket_path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Bucket does not exist",
+            ));
+        }
+
+        // Check if it's a directory
+        if !bucket_path.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Path is not a bucket",
+            ));
+        }
+
+        // Check if bucket is empty
+        let mut entries = async_fs::read_dir(&bucket_path).await?;
+        if entries.next_entry().await?.is_some() {
+            return Err(std::io::Error::other("Bucket is not empty"));
+        }
+
+        // Remove the directory
+        async_fs::remove_dir(&bucket_path).await?;
+        debug!(bucket = %bucket, "Bucket deleted successfully");
+        Ok(())
+    }
+
+    pub async fn delete_file(&self, key: &str) -> Result<(), std::io::Error> {
+        let file_path = self.root_dir.join(key);
+        debug!(key = %key, path = ?file_path, "Deleting file");
+
+        // S3 behavior: deleting a non-existent object is a success
+        if !file_path.exists() {
+            debug!(key = %key, "File does not exist, returning success (S3 behavior)");
+            return Ok(());
+        }
+
+        // Ensure it's a file, not a directory
+        if file_path.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Cannot delete a directory as an object",
+            ));
+        }
+
+        // Delete the file
+        async_fs::remove_file(&file_path).await?;
+        debug!(key = %key, "File deleted successfully");
+        Ok(())
+    }
+
+    pub fn bucket_exists(&self, bucket: &str) -> bool {
+        let bucket_path = self.root_dir.join(bucket);
+        bucket_path.exists() && bucket_path.is_dir()
+    }
 }
 
 fn calculate_etag_from_metadata(metadata: &fs::Metadata) -> String {

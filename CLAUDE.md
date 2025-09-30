@@ -61,6 +61,22 @@ Returns the full object content with metadata headers
 ### PutObject (PUT /key)
 Uploads an object to the specified key
 
+### DeleteObject (DELETE /key)
+Deletes an object at the specified key. Returns 204 No Content even if the object doesn't exist (S3 idempotent behavior).
+
+### HeadBucket (HEAD /bucket)
+Checks if a bucket exists. Returns 200 OK if it exists, 404 Not Found otherwise.
+
+### CreateBucket (PUT /bucket)
+Creates a new bucket (top-level directory). Validates bucket name according to S3 rules:
+- 1-63 characters
+- Lowercase letters, numbers, and hyphens only
+- Cannot start or end with hyphen
+Returns 409 Conflict if bucket already exists.
+
+### DeleteBucket (DELETE /bucket)
+Deletes an empty bucket. Returns 409 Conflict with BucketNotEmpty error if the bucket contains objects.
+
 ### Path-Style Request Handling
 The server supports AWS CLI path-style requests where the bucket name appears in the URL path:
 - `GET /bucket1/test.txt` → retrieves file at `./data/bucket1/test.txt`
@@ -182,7 +198,7 @@ bash manual_test.sh                     # Run manual AWS CLI tests
 The project includes:
 - 5 unit tests in `src/filesystem.rs`
 - Unit tests in `src/auth.rs` for authentication parsing and resource extraction
-- 9 integration tests in `src/tests/server_tests.rs`
+- 17 integration tests in `src/tests/server_tests.rs`
 - Policy evaluation tests in `src/tests/policy_tests.rs`
 - Manual test script using AWS CLI
 

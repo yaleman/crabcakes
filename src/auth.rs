@@ -223,15 +223,24 @@ impl AuthContext {
 }
 
 /// Map S3 HTTP operations to IAM actions
-pub fn http_method_to_s3_action(method: &str, path: &str, query: &str) -> &'static str {
-    match method {
-        "GET" if query.contains("list-type=2") => "s3:ListBucket",
-        "GET" if path == "/" => "s3:ListAllMyBuckets",
-        "GET" => "s3:GetObject",
-        "HEAD" => "s3:GetObject", // HeadObject uses GetObject permission
-        "PUT" => "s3:PutObject",
-        "DELETE" => "s3:DeleteObject",
-        "POST" if query.contains("delete") => "s3:DeleteObject",
+pub fn http_method_to_s3_action(method: &str, path: &str, query: &str, is_bucket_operation: bool) -> &'static str {
+    match (method, path, query, is_bucket_operation) {
+        // Special cases
+        ("GET", _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
+        ("GET", "/", _, _) => "s3:ListAllMyBuckets",
+
+        // Bucket operations
+        ("HEAD", _, _, true) => "s3:ListBucket", // HeadBucket uses ListBucket permission
+        ("PUT", _, _, true) => "s3:CreateBucket",
+        ("DELETE", _, _, true) => "s3:DeleteBucket",
+
+        // Object operations
+        ("GET", _, _, false) => "s3:GetObject",
+        ("HEAD", _, _, false) => "s3:GetObject", // HeadObject uses GetObject permission
+        ("PUT", _, _, false) => "s3:PutObject",
+        ("DELETE", _, _, false) => "s3:DeleteObject",
+        ("POST", _, q, false) if q.contains("delete") => "s3:DeleteObject",
+
         _ => "s3:Unknown",
     }
 }
@@ -305,24 +314,41 @@ mod tests {
     #[test]
     fn test_http_method_to_s3_action() {
         assert_eq!(
-            http_method_to_s3_action("GET", "/", ""),
+            http_method_to_s3_action("GET", "/", "", false),
             "s3:ListAllMyBuckets"
         );
         assert_eq!(
-            http_method_to_s3_action("GET", "/bucket1", "list-type=2"),
+            http_method_to_s3_action("GET", "/bucket1", "list-type=2", false),
             "s3:ListBucket"
         );
         assert_eq!(
-            http_method_to_s3_action("GET", "/bucket1/test.txt", ""),
+            http_method_to_s3_action("GET", "/bucket1/test.txt", "", false),
             "s3:GetObject"
         );
         assert_eq!(
-            http_method_to_s3_action("HEAD", "/bucket1/test.txt", ""),
+            http_method_to_s3_action("HEAD", "/bucket1/test.txt", "", false),
             "s3:GetObject"
         );
         assert_eq!(
-            http_method_to_s3_action("PUT", "/bucket1/test.txt", ""),
+            http_method_to_s3_action("PUT", "/bucket1/test.txt", "", false),
             "s3:PutObject"
+        );
+        assert_eq!(
+            http_method_to_s3_action("DELETE", "/bucket1/test.txt", "", false),
+            "s3:DeleteObject"
+        );
+        // Bucket operations
+        assert_eq!(
+            http_method_to_s3_action("HEAD", "/bucket1", "", true),
+            "s3:ListBucket"
+        );
+        assert_eq!(
+            http_method_to_s3_action("PUT", "/bucket1", "", true),
+            "s3:CreateBucket"
+        );
+        assert_eq!(
+            http_method_to_s3_action("DELETE", "/bucket1", "", true),
+            "s3:DeleteBucket"
         );
     }
 }

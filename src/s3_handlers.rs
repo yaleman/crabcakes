@@ -152,13 +152,20 @@ impl S3Handler {
             }
         };
 
+        // Parse path-style bucket requests: /bucket/ or /bucket/key
+        let (is_bucket_operation, key) = self.parse_path(&path);
+        let key = key.to_string();
+
         // Determine S3 action and resource for authorization
-        let s3_action = http_method_to_s3_action(method.as_str(), &path, &query);
-        let (bucket, key) = extract_bucket_and_key(&path);
+        let s3_action = http_method_to_s3_action(method.as_str(), &path, &query, is_bucket_operation);
+        let (bucket, extracted_key) = extract_bucket_and_key(&path);
+
+        // Use extracted bucket from path for path-style requests, fall back to host header
+        let bucket_for_operation = bucket.as_ref().unwrap_or(&bucket_name);
 
         // Build IAM request and evaluate policy
         let iam_request =
-            match auth_context.build_iam_request(s3_action, bucket.as_deref(), key.as_deref()) {
+            match auth_context.build_iam_request(s3_action, bucket.as_deref(), extracted_key.as_deref()) {
                 Ok(req) => req,
                 Err(e) => {
                     error!(error = %e, "Failed to build IAM request");
@@ -187,10 +194,6 @@ impl S3Handler {
         // If list-type=2 is in the query, it's ALWAYS a ListBucket operation
         let is_list_operation = query.contains("list-type=2");
 
-        // Parse path-style bucket requests: /bucket/ or /bucket/key
-        let (is_bucket_operation, key) = self.parse_path(&path);
-        let key = key.to_string();
-
         let response = match (
             &method,
             is_list_operation,
@@ -201,7 +204,7 @@ impl S3Handler {
             // Any GET with list-type=2 is a ListBucket request
             (&Method::GET, true, _, _, query) => {
                 debug!("Handling ListBucket request (list-type=2 query)");
-                self.handle_list_bucket(query, &bucket_name, &path).await
+                self.handle_list_bucket(query, bucket_for_operation, &path).await
             }
             // GET / - ListBuckets
             (&Method::GET, false, false, "", _) if path == "/" => {
@@ -212,23 +215,43 @@ impl S3Handler {
             (&Method::GET, false, true, _, _) => {
                 debug!("Handling ListBucket request (path-style, no query)");
                 // Treat as ListBucket with default parameters
-                self.handle_list_bucket("list-type=2", &bucket_name, &path)
+                self.handle_list_bucket("list-type=2", bucket_for_operation, &path)
                     .await
             }
-            // HEAD /key or HEAD /bucket/key
-            (&Method::HEAD, false, _, key, _) if !key.is_empty() => {
+            // HEAD /bucket - HeadBucket
+            (&Method::HEAD, false, true, "", _) => {
+                debug!(bucket = %bucket_for_operation, "Handling HeadBucket request");
+                self.handle_head_bucket(bucket_for_operation).await
+            }
+            // HEAD /key or HEAD /bucket/key - HeadObject
+            (&Method::HEAD, false, false, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling HeadObject request");
                 self.handle_head_object(key).await
             }
-            // GET /key or GET /bucket/key
-            (&Method::GET, false, _, key, _) if !key.is_empty() => {
+            // GET /key or GET /bucket/key - GetObject
+            (&Method::GET, false, false, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling GetObject request");
                 self.handle_get_object(key).await
             }
-            // PUT /key or PUT /bucket/key
-            (&Method::PUT, false, _, key, _) if !key.is_empty() => {
+            // PUT /bucket - CreateBucket
+            (&Method::PUT, false, true, "", _) => {
+                debug!(bucket = %bucket_for_operation, "Handling CreateBucket request");
+                self.handle_create_bucket(bucket_for_operation).await
+            }
+            // PUT /key or PUT /bucket/key - PutObject
+            (&Method::PUT, false, false, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling PutObject request");
                 self.handle_put_object(buffered_body, key).await
+            }
+            // DELETE /bucket - DeleteBucket
+            (&Method::DELETE, false, true, "", _) => {
+                debug!(bucket = %bucket_for_operation, "Handling DeleteBucket request");
+                self.handle_delete_bucket(bucket_for_operation).await
+            }
+            // DELETE /key or DELETE /bucket/key - DeleteObject
+            (&Method::DELETE, false, false, key, _) if !key.is_empty() => {
+                debug!(key = %key, "Handling DeleteObject request");
+                self.handle_delete_object(key).await
             }
             _ => {
                 warn!(method = %method, path = %path, "Unknown request pattern");
@@ -510,6 +533,92 @@ impl S3Handler {
         }
     }
 
+    async fn handle_create_bucket(&self, bucket: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling CreateBucket request");
+
+        match self.filesystem.create_bucket(bucket).await {
+            Ok(()) => {
+                debug!(bucket = %bucket, "CreateBucket success");
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Location", format!("/{}", bucket))
+                    .body(Full::new(Bytes::new()))
+                    .unwrap()
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    warn!(bucket = %bucket, "Bucket already exists");
+                    self.bucket_already_exists_response(bucket)
+                } else if e.kind() == std::io::ErrorKind::InvalidInput {
+                    warn!(bucket = %bucket, error = %e, "Invalid bucket name");
+                    self.invalid_bucket_name_response(&e.to_string())
+                } else {
+                    error!(bucket = %bucket, error = %e, "Failed to create bucket");
+                    self.internal_error_response()
+                }
+            }
+        }
+    }
+
+    async fn handle_delete_bucket(&self, bucket: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling DeleteBucket request");
+
+        match self.filesystem.delete_bucket(bucket).await {
+            Ok(()) => {
+                debug!(bucket = %bucket, "DeleteBucket success");
+                Response::builder()
+                    .status(StatusCode::NO_CONTENT)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap()
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    warn!(bucket = %bucket, "Bucket does not exist");
+                    self.no_such_bucket_response(bucket)
+                } else if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("not empty") {
+                    warn!(bucket = %bucket, "Bucket is not empty");
+                    self.bucket_not_empty_response(bucket)
+                } else {
+                    error!(bucket = %bucket, error = %e, "Failed to delete bucket");
+                    self.internal_error_response()
+                }
+            }
+        }
+    }
+
+    async fn handle_delete_object(&self, key: &str) -> Response<Full<Bytes>> {
+        debug!(key = %key, "Handling DeleteObject request");
+
+        match self.filesystem.delete_file(key).await {
+            Ok(()) => {
+                debug!(key = %key, "DeleteObject success");
+                Response::builder()
+                    .status(StatusCode::NO_CONTENT)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap()
+            }
+            Err(e) => {
+                error!(key = %key, error = %e, "Failed to delete file");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_head_bucket(&self, bucket: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling HeadBucket request");
+
+        if self.filesystem.bucket_exists(bucket) {
+            debug!(bucket = %bucket, "HeadBucket success - bucket exists");
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Full::new(Bytes::new()))
+                .unwrap()
+        } else {
+            warn!(bucket = %bucket, "Bucket does not exist");
+            self.no_such_bucket_response(bucket)
+        }
+    }
+
     fn not_found_response(&self) -> Response<Full<Bytes>> {
         Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -549,6 +658,50 @@ impl S3Handler {
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>",
             )))
+            .unwrap()
+    }
+
+    fn bucket_already_exists_response(&self, bucket: &str) -> Response<Full<Bytes>> {
+        Response::builder()
+            .status(StatusCode::CONFLICT)
+            .header("Content-Type", "application/xml")
+            .body(Full::new(Bytes::from(format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketAlreadyExists</Code><Message>The requested bucket name '{}' is not available.</Message></Error>",
+                bucket
+            ))))
+            .unwrap()
+    }
+
+    fn bucket_not_empty_response(&self, bucket: &str) -> Response<Full<Bytes>> {
+        Response::builder()
+            .status(StatusCode::CONFLICT)
+            .header("Content-Type", "application/xml")
+            .body(Full::new(Bytes::from(format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketNotEmpty</Code><Message>The bucket '{}' you tried to delete is not empty.</Message></Error>",
+                bucket
+            ))))
+            .unwrap()
+    }
+
+    fn no_such_bucket_response(&self, bucket: &str) -> Response<Full<Bytes>> {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header("Content-Type", "application/xml")
+            .body(Full::new(Bytes::from(format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchBucket</Code><Message>The specified bucket '{}' does not exist.</Message></Error>",
+                bucket
+            ))))
+            .unwrap()
+    }
+
+    fn invalid_bucket_name_response(&self, reason: &str) -> Response<Full<Bytes>> {
+        Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("Content-Type", "application/xml")
+            .body(Full::new(Bytes::from(format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidBucketName</Code><Message>{}</Message></Error>",
+                reason
+            ))))
             .unwrap()
     }
 }
