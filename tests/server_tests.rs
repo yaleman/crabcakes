@@ -171,3 +171,66 @@ async fn test_list_objects_with_prefix() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_path_style_bucket_listing() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+
+    // Test root listing (no bucket in path): GET /?list-type=2
+    let response = reqwest::get(format!("http://127.0.0.1:{}/?list-type=2", port))
+        .await
+        .expect("Failed to make request");
+
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("Failed to read response body");
+    assert!(body.contains("<ListBucketResult>"));
+    assert!(body.contains("<Contents>"));
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_list_with_file_prefix() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+
+    // Test listing with a file prefix
+    // Since testfiles are at root of temp dir, use root path with prefix
+    let response = reqwest::get(format!(
+        "http://127.0.0.1:{}/?list-type=2&prefix=test.txt",
+        port
+    ))
+    .await
+    .expect("Failed to make request");
+
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("Failed to read response body");
+    assert!(body.contains("<ListBucketResult>"));
+    assert!(body.contains("<Prefix>test.txt</Prefix>"));
+    assert!(body.contains("<Key>test.txt</Key>"));
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_list_with_path_style_file_prefix() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+
+    // Test path with file prefix: GET /test.txt?list-type=2
+    // This should list objects with prefix test.txt
+    let response = reqwest::get(format!(
+        "http://127.0.0.1:{}/test.txt?list-type=2",
+        port
+    ))
+    .await
+    .expect("Failed to make request");
+
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("Failed to read response body");
+    assert!(body.contains("<ListBucketResult>"), "Expected ListBucketResult, got: {}", body);
+    assert!(body.contains("<Key>test.txt</Key>"), "Expected to find test.txt in listing");
+
+    handle.abort();
+}

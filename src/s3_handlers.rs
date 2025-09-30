@@ -50,22 +50,38 @@ impl S3Handler {
             "Incoming S3 request"
         );
 
-        let response = match (method, path, query) {
-            (&Method::GET, "/", query) if query.contains("list-type=2") => {
-                debug!("Handling ListBucket request");
-                self.handle_list_bucket(query, &bucket_name).await
+        // If list-type=2 is in the query, it's ALWAYS a ListBucket operation
+        let is_list_operation = query.contains("list-type=2");
+
+        // Parse path-style bucket requests: /bucket/ or /bucket/key
+        let (is_bucket_operation, key) = self.parse_path(path);
+
+        let response = match (method, is_list_operation, is_bucket_operation, key, query) {
+            // Any GET with list-type=2 is a ListBucket request
+            (&Method::GET, true, _, _, query) => {
+                debug!("Handling ListBucket request (list-type=2 query)");
+                self.handle_list_bucket(query, &bucket_name, path).await
             }
-            (&Method::GET, "/", _) => {
+            // GET / - ListBuckets
+            (&Method::GET, false, false, "", _) if path == "/" => {
                 debug!("Handling ListBuckets request");
                 self.handle_list_buckets(&bucket_name).await
             }
-            (&Method::HEAD, key, _) if !key.is_empty() && key != "/" => {
-                debug!(key = %&key[1..], "Handling HeadObject request");
-                self.handle_head_object(&key[1..]).await
+            // Path-style bucket root without query: GET /bucket/ or GET /bucket
+            (&Method::GET, false, true, _, _) => {
+                debug!("Handling ListBucket request (path-style, no query)");
+                // Treat as ListBucket with default parameters
+                self.handle_list_bucket("list-type=2", &bucket_name, path).await
             }
-            (&Method::GET, key, _) if !key.is_empty() && key != "/" => {
-                debug!(key = %&key[1..], "Handling GetObject request");
-                self.handle_get_object(&key[1..]).await
+            // HEAD /key or HEAD /bucket/key
+            (&Method::HEAD, false, _, key, _) if !key.is_empty() => {
+                debug!(key = %key, "Handling HeadObject request");
+                self.handle_head_object(key).await
+            }
+            // GET /key or GET /bucket/key
+            (&Method::GET, false, _, key, _) if !key.is_empty() => {
+                debug!(key = %key, "Handling GetObject request");
+                self.handle_get_object(key).await
             }
             _ => {
                 warn!(method = %method, path = %path, "Unknown request pattern");
@@ -79,15 +95,48 @@ impl S3Handler {
         Ok(response)
     }
 
-    async fn handle_list_bucket(&self, query: &str, bucket_name: &str) -> Response<Full<Bytes>> {
-        let mut prefix = None;
+    /// Parse the path to determine if it's a bucket operation and extract the key
+    /// Returns (is_bucket_operation, key)
+    fn parse_path<'a>(&self, path: &'a str) -> (bool, &'a str) {
+        let path = path.trim_start_matches('/');
+
+        if path.is_empty() {
+            // Root path: /
+            return (false, "");
+        }
+
+        // Check if path has a file extension - if so, it's definitely a key
+        if path.contains('.') && !path.ends_with('/') {
+            return (false, path);
+        }
+
+        // Split on first slash to separate bucket from key
+        if let Some(slash_pos) = path.find('/') {
+            let key = &path[slash_pos + 1..];
+            if key.is_empty() {
+                // Path ends with slash: /bucket/
+                (true, "")
+            } else {
+                // Path has key: /bucket/key
+                (false, key)
+            }
+        } else {
+            // No slash, no extension: /bucket (bucket operation)
+            (true, "")
+        }
+    }
+
+    async fn handle_list_bucket(&self, query: &str, bucket_name: &str, path: &str) -> Response<Full<Bytes>> {
+        let mut prefix: Option<String> = None;
         let mut max_keys = 1000;
         let mut continuation_token = None;
 
+        // Parse query parameters
+        let mut query_prefix = None;
         for param in query.split('&') {
             if let Some((key, value)) = param.split_once('=') {
                 match key {
-                    "prefix" => prefix = Some(value),
+                    "prefix" => query_prefix = Some(value.to_string()),
                     "max-keys" => {
                         if let Ok(mk) = value.parse::<usize>() {
                             max_keys = mk.min(1000);
@@ -99,9 +148,54 @@ impl S3Handler {
             }
         }
 
+        // Extract bucket name from path if present (path-style request)
+        // e.g., /bucket1?list-type=2 or /bucket1/key?list-type=2
+        let path_trimmed = path.trim_start_matches('/');
+        let bucket_from_path = if !path_trimmed.is_empty() && path_trimmed != "/" {
+            if let Some(slash_pos) = path_trimmed.find('/') {
+                // Has a slash, extract bucket part
+                Some(&path_trimmed[..slash_pos])
+            } else {
+                // No slash - could be bucket or file
+                Some(path_trimmed)
+            }
+        } else {
+            None
+        };
+
+        // Determine the prefix based on path and query
+        if let Some(bucket) = bucket_from_path {
+            if let Some(query_prefix) = query_prefix {
+                // Combine bucket with query prefix: /bucket1?prefix=test.txt -> bucket1/test.txt
+                prefix = Some(format!("{}/{}", bucket, query_prefix));
+            } else {
+                // No query prefix - check if path has more parts or looks like a file
+                if let Some(slash_pos) = path_trimmed.find('/') {
+                    // Path like /bucket1/test.txt -> prefix=bucket1/test.txt
+                    let key_part = &path_trimmed[slash_pos + 1..];
+                    if !key_part.is_empty() {
+                        prefix = Some(format!("{}/{}", bucket, key_part));
+                    } else {
+                        // Just the bucket: /bucket1/ -> prefix=bucket1/
+                        prefix = Some(format!("{}/", bucket));
+                    }
+                } else if bucket.contains('.') {
+                    // Path like /test.txt (no slash, has dot) - treat as file prefix, not bucket
+                    prefix = Some(bucket.to_string());
+                } else {
+                    // Path like /bucket1 (no slash, no dot) - treat as bucket
+                    prefix = Some(format!("{}/", bucket));
+                }
+            }
+        } else if let Some(query_prefix) = query_prefix {
+            // No bucket in path, just use query prefix as-is
+            // e.g., /?list-type=2&prefix=test -> prefix=test
+            prefix = Some(query_prefix);
+        }
+
         match self
             .filesystem
-            .list_directory(prefix, max_keys, continuation_token)
+            .list_directory(prefix.as_deref(), max_keys, continuation_token)
         {
             Ok((entries, next_token)) => {
                 debug!(
@@ -111,7 +205,7 @@ impl S3Handler {
                 );
                 let response = ListBucketResponse::new(
                     bucket_name.to_string(),
-                    prefix.unwrap_or("").to_string(),
+                    prefix.unwrap_or_default(),
                     max_keys,
                     entries,
                     next_token,
