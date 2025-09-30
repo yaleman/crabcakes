@@ -1,11 +1,127 @@
+use std::str::FromStr;
+use std::sync::Arc;
+
 use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
-use tracing::debug;
+use scratchstack_aws_principal;
+use scratchstack_aws_signature::{
+    service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
+    GetSigningKeyResponse, KSecretKey, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
+};
+use tower::BoxError;
+use tracing::{debug, warn};
+
+use crate::credentials::CredentialStore;
+use crate::error::CrabCakesError;
 
 /// Extract authentication context from HTTP request
 pub struct AuthContext {
     pub principal: Principal,
     pub username: Option<String>,
+}
+
+/// Verification result for AWS SigV4 signature
+pub struct VerifiedRequest {
+    pub access_key_id: String,
+    pub principal: scratchstack_aws_principal::Principal,
+}
+
+/// Verify AWS Signature V4 for a request
+pub async fn verify_sigv4(
+    req: http::Request<Vec<u8>>,
+    credentials_store: Arc<CredentialStore>,
+    region: &str,
+    require_signature: bool,
+) -> Result<VerifiedRequest, CrabCakesError> {
+    // Check if Authorization header exists
+    let has_auth = req.headers().get(AUTHORIZATION).is_some();
+
+    if !has_auth && !require_signature {
+        // Allow anonymous requests if signature not required
+        warn!("No authorization header found, but signature not required - allowing anonymous");
+        return Err(CrabCakesError::other("No authorization header"));
+    } else if !has_auth {
+        return Err(CrabCakesError::other("Missing authorization header"));
+    }
+
+    // Create a closure that will fetch signing keys
+    let get_signing_key = {
+        let cred_store = credentials_store.clone();
+        move |request: GetSigningKeyRequest| {
+            let cred_store = cred_store.clone();
+            async move {
+                let access_key = request.access_key().to_string();
+                debug!(access_key = %access_key, "Looking up signing key");
+
+                // Get the credential from the store
+                let credential = cred_store
+                    .get_credential(&access_key)
+                    .ok_or_else(|| BoxError::from(format!("Unknown access key: {}", access_key)))?;
+
+                // Convert secret key to KSecretKey
+                let secret_key = KSecretKey::from_str(&credential.secret_access_key)
+                    .map_err(|e| BoxError::from(format!("Invalid secret key: {}", e)))?;
+
+                // Generate signing key
+                let signing_key = secret_key.to_ksigning(
+                    request.request_date(),
+                    request.region(),
+                    request.service(),
+                );
+
+                // Create a mock principal (we'll use the access key as username)
+                let principal = scratchstack_aws_principal::User::new(
+                    "aws",
+                    "000000000000", // Mock account ID
+                    "/",
+                    &access_key,
+                )
+                .map_err(|e| BoxError::from(format!("Failed to create principal: {}", e)))?;
+
+                Ok(GetSigningKeyResponse::builder()
+                    .principal(principal)
+                    .signing_key(signing_key)
+                    .build()?)
+            }
+        }
+    };
+
+    // Wrap the closure in a tower::Service
+    let mut service = service_for_signing_key_fn(get_signing_key);
+
+    // S3-specific signature options
+    let signature_options = SignatureOptions::url_encode_form();
+
+    // Validate the request
+    let (_parts, _body, auth) = sigv4_validate_request(
+        req,
+        region,
+        "s3",
+        &mut service,
+        chrono::Utc::now(),
+        &NO_ADDITIONAL_SIGNED_HEADERS,
+        signature_options,
+    )
+    .await
+    .map_err(|e| CrabCakesError::other(format!("Signature verification failed: {}", e)))?;
+
+    // Extract username from principal identities
+    let access_key_id = auth
+        .principal()
+        .as_slice()
+        .iter()
+        .find_map(|identity| match identity {
+            scratchstack_aws_principal::PrincipalIdentity::User(user) => {
+                Some(user.user_name().to_string())
+            }
+            _ => None,
+        })
+        .ok_or_else(|| CrabCakesError::other("No user identity found in principal"))?;
+
+    Ok(VerifiedRequest {
+        access_key_id,
+        principal: auth.principal().clone(),
+    })
 }
 
 impl AuthContext {

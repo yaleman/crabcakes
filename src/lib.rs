@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod cli;
+pub mod credentials;
 pub mod error;
 pub mod filesystem;
 pub mod policy;
