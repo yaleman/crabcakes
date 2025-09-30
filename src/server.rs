@@ -113,7 +113,7 @@ impl Server {
             region = %self.region,
             require_signature = %self.require_signature,
             address = %addr,
-            "Starting S3 server"
+            "Starting crabcakes..."
         );
 
         let listener = TcpListener::bind(addr).await?;
