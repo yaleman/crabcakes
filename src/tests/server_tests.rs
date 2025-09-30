@@ -618,3 +618,232 @@ async fn test_bucket_already_exists() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_delete_objects_batch() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Create test objects to delete
+    let test_key1 = "batch-delete-1.txt";
+    let test_key2 = "batch-delete-2.txt";
+    let test_key3 = "batch-delete-3.txt";
+
+    // Upload test objects
+    client
+        .put_object()
+        .bucket("bucket1")
+        .key(test_key1)
+        .body("content1".as_bytes().to_vec().into())
+        .send()
+        .await
+        .expect("Failed to upload test object 1");
+
+    client
+        .put_object()
+        .bucket("bucket1")
+        .key(test_key2)
+        .body("content2".as_bytes().to_vec().into())
+        .send()
+        .await
+        .expect("Failed to upload test object 2");
+
+    client
+        .put_object()
+        .bucket("bucket1")
+        .key(test_key3)
+        .body("content3".as_bytes().to_vec().into())
+        .send()
+        .await
+        .expect("Failed to upload test object 3");
+
+    // Delete objects in batch
+    let delete_result = client
+        .delete_objects()
+        .bucket("bucket1")
+        .delete(
+            aws_sdk_s3::types::Delete::builder()
+                .objects(
+                    aws_sdk_s3::types::ObjectIdentifier::builder()
+                        .key(test_key1)
+                        .build()
+                        .unwrap(),
+                )
+                .objects(
+                    aws_sdk_s3::types::ObjectIdentifier::builder()
+                        .key(test_key2)
+                        .build()
+                        .unwrap(),
+                )
+                .objects(
+                    aws_sdk_s3::types::ObjectIdentifier::builder()
+                        .key(test_key3)
+                        .build()
+                        .unwrap(),
+                )
+                .build()
+                .unwrap(),
+        )
+        .send()
+        .await;
+
+    assert!(
+        delete_result.is_ok(),
+        "DeleteObjects failed: {:?}",
+        delete_result.err()
+    );
+
+    let response = delete_result.unwrap();
+    let deleted = response.deleted();
+    let errors = response.errors();
+
+    // Debug: print what we got back
+    eprintln!("Deleted count: {}", deleted.len());
+    eprintln!("Errors count: {}", errors.len());
+
+    for d in deleted {
+        eprintln!("Deleted: {:?}", d.key());
+    }
+
+    for e in errors {
+        eprintln!("Error: {:?} - {:?}", e.key(), e.message());
+    }
+
+    // Expect 3 deleted objects
+    assert_eq!(deleted.len(), 3, "Expected 3 deleted objects");
+
+    // Give the server a moment to process the deletions
+    sleep(Duration::from_millis(50)).await;
+
+    // Verify all objects are deleted
+    for key in [test_key1, test_key2, test_key3] {
+        let head_result = client.head_object().bucket("bucket1").key(key).send().await;
+        assert!(
+            head_result.is_err(),
+            "Object {} should not exist after batch delete",
+            key
+        );
+    }
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_copy_object() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    let source_key = "test.txt";
+    let dest_key = "test-copy.txt";
+
+    // Copy existing object
+    let copy_result = client
+        .copy_object()
+        .bucket("bucket1")
+        .key(dest_key)
+        .copy_source(format!("bucket1/{}", source_key))
+        .send()
+        .await;
+
+    assert!(
+        copy_result.is_ok(),
+        "CopyObject failed: {:?}",
+        copy_result.err()
+    );
+
+    // Verify destination object exists
+    let head_result = client
+        .head_object()
+        .bucket("bucket1")
+        .key(dest_key)
+        .send()
+        .await;
+
+    assert!(head_result.is_ok(), "Destination object should exist");
+
+    // Verify content matches
+    let get_result = client
+        .get_object()
+        .bucket("bucket1")
+        .key(dest_key)
+        .send()
+        .await;
+
+    assert!(get_result.is_ok(), "Failed to get copied object");
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_copy_object_nonexistent_source() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Try to copy non-existent object
+    let copy_result = client
+        .copy_object()
+        .bucket("bucket1")
+        .key("dest.txt")
+        .copy_source("bucket1/nonexistent.txt")
+        .send()
+        .await;
+
+    assert!(
+        copy_result.is_err(),
+        "CopyObject should fail for nonexistent source"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_get_bucket_location() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Get bucket location
+    let location_result = client.get_bucket_location().bucket("bucket1").send().await;
+
+    assert!(
+        location_result.is_ok(),
+        "GetBucketLocation failed: {:?}",
+        location_result.err()
+    );
+
+    let location = location_result.unwrap();
+    // In test mode, region defaults to "crabcakes"
+    let constraint = location.location_constraint();
+    assert!(constraint.is_some(), "LocationConstraint should be present");
+    let constraint_value = constraint.unwrap().as_str();
+    assert_eq!(
+        constraint_value, "crabcakes",
+        "Expected region to be 'crabcakes'"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_get_bucket_location_nonexistent() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Try to get location of non-existent bucket
+    let location_result = client
+        .get_bucket_location()
+        .bucket("nonexistent-bucket")
+        .send()
+        .await;
+
+    assert!(
+        location_result.is_err(),
+        "GetBucketLocation should fail for nonexistent bucket"
+    );
+
+    handle.abort();
+}

@@ -15,7 +15,7 @@ use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::xml_responses::{
     CopyObjectResponse, DeleteError, DeleteRequest, DeleteResponse, DeletedObject,
-    GetBucketLocationResponse, ListBucketResponse, ListBucketsResponse,
+    GetBucketLocationResponse, ListBucketResponse, ListBucketV1Response, ListBucketsResponse,
 };
 
 pub struct S3Handler {
@@ -207,19 +207,23 @@ impl S3Handler {
             }
         }
 
-        // If list-type=2 is in the query, it's ALWAYS a ListBucket operation
-        let is_list_operation = query.contains("list-type=2");
+        // Determine if this is a V2 list operation (has list-type=2)
+        let is_list_v2_operation = query.contains("list-type=2");
+
+        // Detect if this is a V1 list operation (bucket-level GET with certain query params)
+        let has_list_v1_params =
+            query.contains("prefix=") || query.contains("marker=") || query.contains("max-keys=");
 
         let response = match (
             &method,
-            is_list_operation,
+            is_list_v2_operation,
             is_bucket_operation,
             key.as_str(),
             query.as_str(),
         ) {
-            // Any GET with list-type=2 is a ListBucket request
+            // Any GET with list-type=2 is a ListBucketV2 request
             (&Method::GET, true, _, _, query) => {
-                debug!("Handling ListBucket request (list-type=2 query)");
+                debug!("Handling ListBucketV2 request (list-type=2 query)");
                 self.handle_list_bucket(query, bucket_for_operation, &path)
                     .await
             }
@@ -233,10 +237,16 @@ impl S3Handler {
                 debug!(bucket = %bucket_for_operation, "Handling GetBucketLocation request");
                 self.handle_get_bucket_location(bucket_for_operation).await
             }
-            // Path-style bucket root without query: GET /bucket/ or GET /bucket
+            // GET /bucket with V1 list parameters - ListBucketV1
+            (&Method::GET, false, true, _, query) if has_list_v1_params && !query.is_empty() => {
+                debug!("Handling ListBucketV1 request (legacy API with query params)");
+                self.handle_list_bucket_v1(query, bucket_for_operation, &path)
+                    .await
+            }
+            // Path-style bucket root without query: GET /bucket/ or GET /bucket - default to V2
             (&Method::GET, false, true, _, _) => {
-                debug!("Handling ListBucket request (path-style, no query)");
-                // Treat as ListBucket with default parameters
+                debug!("Handling ListBucket request (path-style, no query - default to V2)");
+                // Treat as ListBucket V2 with default parameters
                 self.handle_list_bucket("list-type=2", bucket_for_operation, &path)
                     .await
             }
@@ -284,7 +294,8 @@ impl S3Handler {
             // POST /?delete - DeleteObjects (batch delete)
             (&Method::POST, false, _, _, query) if query.contains("delete") => {
                 debug!("Handling DeleteObjects request (batch delete)");
-                self.handle_delete_objects(buffered_body).await
+                self.handle_delete_objects(buffered_body, bucket_for_operation)
+                    .await
             }
             _ => {
                 warn!(method = %method, path = %path, "Unknown request pattern");
@@ -434,6 +445,115 @@ impl S3Handler {
             }
             Err(e) => {
                 error!(error = %e, "Failed to list directory");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_list_bucket_v1(
+        &self,
+        query: &str,
+        bucket_name: &str,
+        path: &str,
+    ) -> Response<Full<Bytes>> {
+        let mut max_keys = 1000;
+        let mut marker = String::new();
+
+        // Parse query parameters (V1 uses marker instead of continuation-token)
+        let mut query_prefix = None;
+        for param in query.split('&') {
+            if let Some((key, value)) = param.split_once('=') {
+                match key {
+                    "prefix" => query_prefix = Some(value.to_string()),
+                    "max-keys" => {
+                        if let Ok(mk) = value.parse::<usize>() {
+                            max_keys = mk.min(1000);
+                        }
+                    }
+                    "marker" => marker = value.to_string(),
+                    _ => {}
+                }
+            }
+        }
+
+        // Extract bucket name from path if present (same logic as V2)
+        let path_trimmed = path.trim_start_matches('/');
+        let bucket_from_path = if !path_trimmed.is_empty() && path_trimmed != "/" {
+            if let Some(slash_pos) = path_trimmed.find('/') {
+                Some(&path_trimmed[..slash_pos])
+            } else {
+                Some(path_trimmed)
+            }
+        } else {
+            None
+        };
+
+        // Determine the prefix based on path and query
+        let prefix = if let Some(bucket) = bucket_from_path {
+            if let Some(query_prefix) = query_prefix {
+                format!("{}/{}", bucket, query_prefix)
+            } else if let Some(slash_pos) = path_trimmed.find('/') {
+                let key_part = &path_trimmed[slash_pos + 1..];
+                if !key_part.is_empty() {
+                    path_trimmed.to_string()
+                } else {
+                    format!("{}/", bucket)
+                }
+            } else {
+                format!("{}/", bucket)
+            }
+        } else if let Some(qp) = query_prefix {
+            format!("{}/{}", bucket_name, qp)
+        } else {
+            format!("{}/", bucket_name)
+        };
+
+        let prefix_str = prefix.as_str();
+        debug!(
+            prefix = %prefix_str,
+            max_keys = max_keys,
+            marker = %marker,
+            "Listing objects (V1)"
+        );
+
+        // List files with pagination (use marker as continuation token for V1)
+        let marker_opt = if marker.is_empty() {
+            None
+        } else {
+            Some(marker.as_str())
+        };
+
+        match self
+            .filesystem
+            .list_directory(Some(prefix_str), max_keys, marker_opt)
+        {
+            Ok((entries, next_marker)) => {
+                debug!(count = entries.len(), "Listed objects (V1)");
+
+                let response = ListBucketV1Response::new(
+                    bucket_name.to_string(),
+                    prefix_str.to_string(),
+                    marker,
+                    max_keys,
+                    entries,
+                    next_marker,
+                );
+
+                match response.to_xml() {
+                    Ok(xml) => Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/xml")
+                        .header("Content-Length", xml.len())
+                        .body(Full::new(Bytes::from(xml)))
+                        .unwrap(),
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize ListBucketV1 response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to list files");
                 self.internal_error_response()
             }
         }
@@ -639,8 +759,12 @@ impl S3Handler {
         }
     }
 
-    async fn handle_delete_objects(&self, body: BufferedBody) -> Response<Full<Bytes>> {
-        debug!("Handling DeleteObjects request (batch delete)");
+    async fn handle_delete_objects(
+        &self,
+        body: BufferedBody,
+        bucket: &str,
+    ) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling DeleteObjects request (batch delete)");
 
         // Parse XML request body
         let body_bytes = match body.to_vec().await {
@@ -665,11 +789,12 @@ impl S3Handler {
         let mut deleted = Vec::new();
         let mut errors = Vec::new();
 
-        // Delete each object
+        // Delete each object (prepend bucket name to key)
         for obj in delete_request.objects {
-            match self.filesystem.delete_file(&obj.key).await {
+            let full_key = format!("{}/{}", bucket, obj.key);
+            match self.filesystem.delete_file(&full_key).await {
                 Ok(()) => {
-                    debug!(key = %obj.key, "Object deleted successfully");
+                    debug!(key = %obj.key, full_key = %full_key, "Object deleted successfully");
                     if !delete_request.quiet {
                         deleted.push(DeletedObject { key: obj.key });
                     }

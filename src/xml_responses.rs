@@ -221,3 +221,66 @@ impl GetBucketLocationResponse {
         Ok(xml)
     }
 }
+
+// ListObjectsV1 response structure (legacy API)
+#[derive(Serialize)]
+#[serde(rename = "ListBucketResult")]
+pub struct ListBucketV1Response {
+    #[serde(rename = "Name")]
+    pub name: String,
+    #[serde(rename = "Prefix")]
+    pub prefix: String,
+    #[serde(rename = "Marker")]
+    pub marker: String,
+    #[serde(rename = "MaxKeys")]
+    pub max_keys: usize,
+    #[serde(rename = "IsTruncated")]
+    pub is_truncated: bool,
+    #[serde(rename = "Contents")]
+    pub contents: Vec<S3Object>,
+    #[serde(rename = "NextMarker", skip_serializing_if = "Option::is_none")]
+    pub next_marker: Option<String>,
+}
+
+impl ListBucketV1Response {
+    pub fn new(
+        bucket_name: String,
+        prefix: String,
+        marker: String,
+        max_keys: usize,
+        entries: Vec<DirectoryEntry>,
+        next_marker: Option<String>,
+    ) -> Self {
+        let contents = entries
+            .into_iter()
+            .map(|entry| S3Object {
+                key: entry.key,
+                last_modified: entry
+                    .last_modified
+                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                    .to_string(),
+                etag: entry.etag,
+                size: entry.size,
+                storage_class: "STANDARD".to_string(),
+            })
+            .collect();
+
+        let is_truncated = next_marker.is_some();
+
+        Self {
+            name: bucket_name,
+            prefix,
+            marker,
+            max_keys,
+            is_truncated,
+            contents,
+            next_marker,
+        }
+    }
+
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}

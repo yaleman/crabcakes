@@ -40,42 +40,64 @@ The server:
 
 The server implements the following S3 operations:
 
-### ListBuckets (GET /)
+### Bucket Operations
+
+#### ListBuckets (GET /)
 Returns a list of all top-level directories as "buckets"
 
-### ListObjectsV2 (GET /?list-type=2)
-Lists objects with optional prefix filtering and pagination. Supports both:
-- Virtual-hosted style: `GET /?list-type=2&prefix=test`
-- Path-style: `GET /bucket1/?list-type=2` or `GET /bucket1?prefix=test.txt`
-
-### HeadObject (HEAD /key)
-Returns metadata for an object without the body. Includes:
-- Content-Type (detected via mime_guess)
-- Content-Length
-- ETag (generated from file size and modification time)
-- Last-Modified
-
-### GetObject (GET /key)
-Returns the full object content with metadata headers
-
-### PutObject (PUT /key)
-Uploads an object to the specified key
-
-### DeleteObject (DELETE /key)
-Deletes an object at the specified key. Returns 204 No Content even if the object doesn't exist (S3 idempotent behavior).
-
-### HeadBucket (HEAD /bucket)
+#### HeadBucket (HEAD /bucket)
 Checks if a bucket exists. Returns 200 OK if it exists, 404 Not Found otherwise.
 
-### CreateBucket (PUT /bucket)
+#### CreateBucket (PUT /bucket)
 Creates a new bucket (top-level directory). Validates bucket name according to S3 rules:
 - 1-63 characters
 - Lowercase letters, numbers, and hyphens only
 - Cannot start or end with hyphen
 Returns 409 Conflict if bucket already exists.
 
-### DeleteBucket (DELETE /bucket)
+#### DeleteBucket (DELETE /bucket)
 Deletes an empty bucket. Returns 409 Conflict with BucketNotEmpty error if the bucket contains objects.
+
+#### GetBucketLocation (GET /bucket?location)
+Returns the configured region for the bucket. Region is set via `--region` flag or `CRABCAKES_REGION` env var (default: "crabcakes").
+
+### Object Listing Operations
+
+#### ListObjectsV2 (GET /?list-type=2)
+Lists objects with optional prefix filtering and pagination. Supports both:
+- Virtual-hosted style: `GET /?list-type=2&prefix=test`
+- Path-style: `GET /bucket1/?list-type=2` or `GET /bucket1?prefix=test.txt`
+
+Pagination uses `continuation-token` and `max-keys` parameters.
+
+#### ListObjectsV1 (GET /?prefix= or /?marker=)
+Legacy listing API for backward compatibility. Detected when query contains `prefix=`, `marker=`, or `max-keys=` without `list-type=2`.
+
+Pagination uses `marker` parameter instead of `continuation-token`.
+
+### Object Operations
+
+#### HeadObject (HEAD /key)
+Returns metadata for an object without the body. Includes:
+- Content-Type (detected via mime_guess)
+- Content-Length
+- ETag (generated from file size and modification time)
+- Last-Modified
+
+#### GetObject (GET /key)
+Returns the full object content with metadata headers
+
+#### PutObject (PUT /key)
+Uploads an object to the specified key
+
+#### CopyObject (PUT /dest-key with x-amz-copy-source header)
+Server-side copy of an object. No data transferred through client. Source specified in `x-amz-copy-source` header as `/bucket/key` or `bucket/key`.
+
+#### DeleteObject (DELETE /key)
+Deletes an object at the specified key. Returns 204 No Content even if the object doesn't exist (S3 idempotent behavior).
+
+#### DeleteObjects (POST /?delete)
+Batch delete multiple objects in a single request. Accepts XML request body with list of keys to delete. Returns XML response with successfully deleted objects and any errors. Supports `quiet` mode to reduce response size.
 
 ### Path-Style Request Handling
 The server supports AWS CLI path-style requests where the bucket name appears in the URL path:
@@ -184,6 +206,7 @@ cargo run --quiet -- --root-dir /path/to/data           # Serve from custom dire
 cargo run --quiet -- --policy-dir /path/to/policies     # Load policies from custom directory
 cargo run --quiet -- --credentials-dir /path/to/creds   # Load credentials from custom directory
 cargo run --quiet -- --require-signature false          # Disable signature verification (testing only)
+cargo run --quiet -- --region us-east-1                 # Set region (default: crabcakes)
 RUST_LOG=debug cargo run --quiet                        # Run with debug logging
 ```
 
@@ -198,7 +221,7 @@ bash manual_test.sh                     # Run manual AWS CLI tests
 The project includes:
 - 5 unit tests in `src/filesystem.rs`
 - Unit tests in `src/auth.rs` for authentication parsing and resource extraction
-- 17 integration tests in `src/tests/server_tests.rs`
+- 22 integration tests in `src/tests/server_tests.rs`
 - Policy evaluation tests in `src/tests/policy_tests.rs`
 - Manual test script using AWS CLI
 
@@ -237,13 +260,14 @@ Dev dependencies:
 ## Configuration
 
 The server accepts configuration via:
-- CLI flags: `--host`, `--port`, `--root-dir`, `--policy-dir`, `--credentials-dir`, `--require-signature`
-- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_POLICY_DIR`, `CRABCAKES_CREDENTIALS_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`
+- CLI flags: `--host`, `--port`, `--root-dir`, `--policy-dir`, `--credentials-dir`, `--require-signature`, `--region`
+- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_POLICY_DIR`, `CRABCAKES_CREDENTIALS_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`, `CRABCAKES_REGION`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
 - Policy directory defaults to `./policies` (if it doesn't exist, server starts with no policies)
 - Credentials directory defaults to `./credentials` (if it doesn't exist, signature verification will fail)
 - Signature verification defaults to `true` (set to `false` to disable)
+- Region defaults to `"crabcakes"` and is returned by GetBucketLocation
 
 ## Testing Guidelines
 
