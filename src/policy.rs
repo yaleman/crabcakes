@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, sync::Arc};
 
-use iam_rs::{Decision, IAMPolicy, IAMRequest, evaluate_policies};
+use iam_rs::{Decision, IAMAction, IAMEffect, IAMPolicy, IAMRequest, IAMResource, Principal, evaluate_policies};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -89,6 +89,68 @@ impl PolicyStore {
             resource = %request.resource,
             "Evaluating request"
         );
+
+        // Handle wildcard/anonymous principals specially, since iam-rs treats them as errors
+        // Check if any policy explicitly allows anonymous access
+        if matches!(request.principal, Principal::Wildcard) {
+            debug!("Handling wildcard/anonymous request");
+
+            // Look for policies that allow wildcard principals
+            for policy in self.policies.values() {
+                // Check each statement in the policy
+                for statement in &policy.statement {
+                    // Check if this statement allows the action and resource
+                    // For anonymous access, we look for statements with Principal: "*"
+                    if statement.effect == IAMEffect::Allow {
+                        // Check if principal matches (looking for "*")
+                        let principal_matches = match &statement.principal {
+                            Some(Principal::Wildcard) => true,
+                            _ => false,
+                        };
+
+                        if principal_matches {
+                            // Check if action matches
+                            let action_matches = match &statement.action {
+                                Some(IAMAction::Single(action)) => {
+                                    action == &request.action || action == "*" || action == "s3:*"
+                                }
+                                Some(IAMAction::Multiple(actions)) => {
+                                    actions.iter().any(|a| a == &request.action || a == "*" || a == "s3:*")
+                                }
+                                _ => false,
+                            };
+
+                            if action_matches {
+                                // Check if resource matches
+                                let resource_matches = match &statement.resource {
+                                    Some(IAMResource::Single(resource)) => {
+                                        resource == &request.resource.to_string()
+                                            || resource == "*"
+                                            || resource == "arn:aws:s3:::*"
+                                    }
+                                    Some(IAMResource::Multiple(resources)) => {
+                                        resources.iter().any(|r| {
+                                            r == &request.resource.to_string()
+                                                || r == "*"
+                                                || r == "arn:aws:s3:::*"
+                                        })
+                                    }
+                                    _ => false,
+                                };
+
+                                if resource_matches {
+                                    debug!("Anonymous request allowed by policy");
+                                    return Ok(true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            debug!("No policy allows anonymous access for this request");
+            return Ok(false);
+        }
 
         // check for a result in the cache
         let hashed_request = hash_request(request);

@@ -48,7 +48,8 @@ async fn start_test_server(temp_dir: &Path) -> (tokio::task::JoinHandle<()>, u16
 }
 
 async fn create_s3_client(port: u16) -> Client {
-    let creds = Credentials::new("test", "test", None, None, "test");
+    // Use alice's test credentials that match credentials/alice.json
+    let creds = Credentials::new("alice", "alicesecret123", None, None, "test");
     let config = aws_config::defaults(BehaviorVersion::latest())
         .credentials_provider(creds)
         .region(Region::new("us-east-1"))

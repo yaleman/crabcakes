@@ -31,10 +31,15 @@ async fn test_wildcard_principal() {
     );
 
     let result = policy_store.evaluate_request(&iam_request).await;
+    // With the allow-all policy, wildcard principals should be allowed
     assert!(
-        result.is_err(),
-        "Policy evaluation succeeded when it should fail: {:?}",
-        result
+        result.is_ok(),
+        "Policy evaluation failed: {:?}",
+        result.err()
+    );
+    assert!(
+        result.unwrap(),
+        "Expected allow-all policy to allow wildcard access"
     );
 }
 
