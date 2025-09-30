@@ -14,8 +14,10 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
 - `src/s3_handlers.rs` - S3 API request routing and handler implementations
 - `src/filesystem.rs` - Filesystem service for file operations
 - `src/xml_responses.rs` - AWS S3-compliant XML response serialization
-- `src/auth.rs` - Authentication context extraction and IAM request building
-- `src/policy.rs` - IAM policy loading and evaluation
+- `src/auth.rs` - AWS Signature V4 verification and authentication context building
+- `src/credentials.rs` - Credential storage and loading from JSON files
+- `src/body_buffer.rs` - Smart request body buffering (memory/disk spillover)
+- `src/policy.rs` - IAM policy loading and evaluation (with wildcard principal support)
 - `src/error.rs` - Centralized error handling
 - `src/lib.rs` - Library module declarations
 - `src/tests/` - Test modules (server_tests.rs, policy_tests.rs)
@@ -25,10 +27,13 @@ The server:
 - Binds to a configurable host/port (defaults: 127.0.0.1:8090)
 - Serves files from a configurable root directory (defaults: ./data)
 - Loads IAM policies from a configurable policy directory (defaults: ./policies)
+- Loads credentials from a configurable credentials directory (defaults: ./credentials)
+- Verifies AWS Signature V4 signatures on all requests (configurable via --require-signature)
 - Uses Tokio for async operations and connection handling
 - Implements AWS S3-compatible API with XML responses
 - Enforces IAM policy-based authorization on all S3 operations
-- CLI accepts `--host`, `--port`, `--root-dir`, and `--policy-dir` flags or environment variables
+- Smart body buffering: memory for <50MB, disk spillover for ≥50MB
+- CLI accepts `--host`, `--port`, `--root-dir`, `--policy-dir`, `--credentials-dir`, and `--require-signature` flags or environment variables
 - Uses tracing for structured logging (configure with RUST_LOG environment variable)
 
 ## S3 API Operations
@@ -61,15 +66,68 @@ The server supports AWS CLI path-style requests where the bucket name appears in
 - `GET /bucket1/test.txt` → retrieves file at `./data/bucket1/test.txt`
 - `GET /bucket1?list-type=2&prefix=test.txt` → lists files with prefix `bucket1/test.txt`
 
+## AWS Signature V4 Authentication
+
+The server implements full AWS Signature V4 (SigV4) authentication for production-ready request signing:
+
+### Credential Management
+- Credentials stored in JSON files in `--credentials-dir` (default: `./credentials`)
+- Each credential file contains:
+  ```json
+  {
+    "access_key_id": "alice",
+    "secret_access_key": "alicesecret123"
+  }
+  ```
+- CredentialStore loads all JSON files at startup
+- Credentials mapped by access_key_id for fast lookup during signature verification
+
+### Signature Verification Flow
+1. **Request Buffering**: Body is buffered before verification
+   - Small requests (<50MB) buffered in memory
+   - Large requests (≥50MB) automatically spill to disk (uses `tempfile` crate)
+   - Necessary because SigV4 requires complete body for signature computation
+2. **Signature Verification**: Using `scratchstack-aws-signature` crate
+   - Extracts Authorization header
+   - Parses access_key_id from Credential field
+   - Looks up secret_access_key from CredentialStore
+   - Derives signing key from secret + date + region + service
+   - Computes signature and compares with request signature
+3. **Principal Extraction**: Extracts authenticated user from verified request
+4. **Policy Evaluation**: Uses authenticated principal for IAM authorization
+
+### Configuration
+- `--credentials-dir <path>` or `CRABCAKES_CREDENTIALS_DIR`: Directory containing credential JSON files (default: `./credentials`)
+- `--require-signature <bool>` or `CRABCAKES_REQUIRE_SIGNATURE`: Whether to require signature verification (default: `true`)
+- Region: Currently hardcoded to `us-east-1` (can be made configurable)
+
+### Test Mode
+- `Server::test_mode()` disables signature verification (`require_signature=false`)
+- Allows integration tests to run without signing requests
+- Uses wildcard principal with allow-all policy for authorization
+
+### Request Body Buffering
+The `BufferedBody` enum handles smart body buffering:
+- **Memory variant**: Holds `Vec<u8>` for small requests
+- **Disk variant**: Holds `NamedTempFile` and size for large requests
+- **Threshold**: 50MB (configurable via `MEMORY_THRESHOLD` constant)
+- **Auto-cleanup**: Temp files automatically deleted when BufferedBody is dropped
+- **Async I/O**: Uses tokio for async file operations
+
+### Security Considerations
+- Test credentials in `credentials/` directory are for testing only
+- Production credentials should never be committed to git
+- Signature verification ensures request integrity and authenticity
+- Time-based signature expiration handled by scratchstack-aws-signature
+
 ## IAM Authorization
 
 The server implements AWS IAM-compatible policy-based authorization:
 
-### Authentication
-- Extracts authentication from request headers:
-  - `x-amz-user` header (simplified for testing)
-  - `Authorization` header (AWS Signature V4 format - access key extraction)
-- Falls back to anonymous/wildcard principal if no auth found
+### Authentication Context
+After signature verification (or if signatures not required), authentication context is built:
+- **Authenticated requests**: Principal set to `arn:aws:iam:::user/{username}` from verified access_key_id
+- **Anonymous requests**: Principal set to `Principal::Wildcard` (requires policy with `"Principal": "*"`)
 
 ### Authorization Flow
 1. Extract authentication context from request
@@ -103,11 +161,13 @@ See `test_policies/` directory for examples:
 
 ```bash
 cargo build --quiet                                     # Build the project
-cargo run --quiet                                       # Run with defaults (127.0.0.1:8090, ./data, ./policies)
+cargo run --quiet                                       # Run with defaults (127.0.0.1:8090, ./data, ./policies, ./credentials, require_signature=true)
 cargo run --quiet -- --port 3000                        # Run on custom port
 cargo run --quiet -- --host 0.0.0.0 --port 8080         # Run on all interfaces
 cargo run --quiet -- --root-dir /path/to/data           # Serve from custom directory
 cargo run --quiet -- --policy-dir /path/to/policies     # Load policies from custom directory
+cargo run --quiet -- --credentials-dir /path/to/creds   # Load credentials from custom directory
+cargo run --quiet -- --require-signature false          # Disable signature verification (testing only)
 RUST_LOG=debug cargo run --quiet                        # Run with debug logging
 ```
 
@@ -146,22 +206,28 @@ Key dependencies:
 - `mime_guess` - Content-Type detection
 - `quick-xml` + `serde` - XML serialization for S3 responses
 - `iam-rs` - IAM policy evaluation (local path dependency)
-- `serde_json` - JSON parsing for policy files
+- `serde_json` - JSON parsing for policy and credential files
 - `sha2` - SHA256 hashing for policy evaluation cache
+- `scratchstack-aws-signature` - AWS Signature V4 verification
+- `scratchstack-aws-principal` - AWS principal types for signature verification
+- `tower` - Service trait for signature verification
+- `http` - HTTP types for signature verification
+- `tempfile` - Temporary files for large request body spillover
 
 Dev dependencies:
 - `aws-sdk-s3` + `aws-config` - AWS CLI compatibility testing
 - `reqwest` - HTTP client for integration tests
-- `tempfile` - Temporary directories for test isolation
 
 ## Configuration
 
 The server accepts configuration via:
-- CLI flags: `--host`, `--port`, `--root-dir`, `--policy-dir`
-- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_POLICY_DIR`
+- CLI flags: `--host`, `--port`, `--root-dir`, `--policy-dir`, `--credentials-dir`, `--require-signature`
+- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_POLICY_DIR`, `CRABCAKES_CREDENTIALS_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
 - Policy directory defaults to `./policies` (if it doesn't exist, server starts with no policies)
+- Credentials directory defaults to `./credentials` (if it doesn't exist, signature verification will fail)
+- Signature verification defaults to `true` (set to `false` to disable)
 
 ## Testing Guidelines
 
