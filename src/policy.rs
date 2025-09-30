@@ -2,7 +2,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, sync::Arc};
 
-use iam_rs::{Decision, IAMAction, IAMEffect, IAMPolicy, IAMRequest, IAMResource, Principal, evaluate_policies};
+use iam_rs::{
+    Decision, IAMAction, IAMEffect, IAMPolicy, IAMRequest, IAMResource, Principal,
+    evaluate_policies,
+};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -109,9 +112,9 @@ impl PolicyStore {
                                 Some(IAMAction::Single(action)) => {
                                     action == &request.action || action == "*" || action == "s3:*"
                                 }
-                                Some(IAMAction::Multiple(actions)) => {
-                                    actions.iter().any(|a| a == &request.action || a == "*" || a == "s3:*")
-                                }
+                                Some(IAMAction::Multiple(actions)) => actions
+                                    .iter()
+                                    .any(|a| a == &request.action || a == "*" || a == "s3:*"),
                                 _ => false,
                             };
 

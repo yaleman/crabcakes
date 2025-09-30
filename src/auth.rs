@@ -5,8 +5,8 @@ use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
 use scratchstack_aws_principal;
 use scratchstack_aws_signature::{
-    service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
-    GetSigningKeyResponse, KSecretKey, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
+    GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
+    SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
 use tower::BoxError;
 use tracing::{debug, warn};
@@ -223,11 +223,17 @@ impl AuthContext {
 }
 
 /// Map S3 HTTP operations to IAM actions
-pub fn http_method_to_s3_action(method: &str, path: &str, query: &str, is_bucket_operation: bool) -> &'static str {
+pub fn http_method_to_s3_action(
+    method: &str,
+    path: &str,
+    query: &str,
+    is_bucket_operation: bool,
+) -> &'static str {
     match (method, path, query, is_bucket_operation) {
         // Special cases
         ("GET", _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
         ("GET", "/", _, _) => "s3:ListAllMyBuckets",
+        ("POST", _, q, _) if q.contains("delete") => "s3:DeleteObject", // DeleteObjects batch
 
         // Bucket operations
         ("HEAD", _, _, true) => "s3:ListBucket", // HeadBucket uses ListBucket permission
@@ -239,7 +245,6 @@ pub fn http_method_to_s3_action(method: &str, path: &str, query: &str, is_bucket
         ("HEAD", _, _, false) => "s3:GetObject", // HeadObject uses GetObject permission
         ("PUT", _, _, false) => "s3:PutObject",
         ("DELETE", _, _, false) => "s3:DeleteObject",
-        ("POST", _, q, false) if q.contains("delete") => "s3:DeleteObject",
 
         _ => "s3:Unknown",
     }

@@ -31,4 +31,7 @@ pub struct Cli {
 
     #[clap(long, default_value = "true", env = "CRABCAKES_REQUIRE_SIGNATURE")]
     pub require_signature: bool,
+
+    #[clap(long, default_value = "crabcakes", env = "CRABCAKES_REGION")]
+    pub region: String,
 }

@@ -31,6 +31,7 @@ impl Server {
         policy_dir: PathBuf,
         credentials_dir: PathBuf,
         require_signature: bool,
+        region: String,
     ) -> Self {
         Self {
             host,
@@ -39,7 +40,7 @@ impl Server {
             policy_dir,
             credentials_dir,
             require_signature,
-            region: "us-east-1".to_string(), // Default region
+            region,
         }
     }
 
@@ -62,7 +63,8 @@ impl Server {
                     root_dir,
                     policy_dir,
                     credentials_dir,
-                    false, // Don't require signatures in test mode
+                    false,                   // Don't require signatures in test mode
+                    "crabcakes".to_string(), // Use default region for tests
                 );
                 return Ok((server, port));
             }

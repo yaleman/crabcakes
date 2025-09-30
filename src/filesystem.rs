@@ -214,7 +214,10 @@ impl FilesystemService {
         }
 
         // Check for valid characters (lowercase letters, numbers, hyphens)
-        if !bucket.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        if !bucket
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Bucket name can only contain lowercase letters, numbers, and hyphens",
@@ -304,6 +307,37 @@ impl FilesystemService {
     pub fn bucket_exists(&self, bucket: &str) -> bool {
         let bucket_path = self.root_dir.join(bucket);
         bucket_path.exists() && bucket_path.is_dir()
+    }
+
+    pub async fn copy_file(
+        &self,
+        source_key: &str,
+        dest_key: &str,
+    ) -> Result<FileMetadata, std::io::Error> {
+        let source_path = self.root_dir.join(source_key);
+        let dest_path = self.root_dir.join(dest_key);
+
+        debug!(source = %source_key, dest = %dest_key, "Copying file");
+
+        // Ensure source file exists
+        if !source_path.exists() || !source_path.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Source file does not exist",
+            ));
+        }
+
+        // Ensure destination directory exists
+        if let Some(parent) = dest_path.parent() {
+            async_fs::create_dir_all(parent).await?;
+        }
+
+        // Copy the file
+        async_fs::copy(&source_path, &dest_path).await?;
+        debug!(source = %source_key, dest = %dest_key, "File copied successfully");
+
+        // Get metadata for the newly copied file
+        self.get_file_metadata(dest_key)
     }
 }
 

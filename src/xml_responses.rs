@@ -1,6 +1,6 @@
 use chrono::Utc;
 use quick_xml::se::to_string;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::filesystem::DirectoryEntry;
 
@@ -132,6 +132,89 @@ impl ListBucketsResponse {
         }
     }
 
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
+// DeleteObjects request/response structures
+#[derive(Deserialize)]
+#[serde(rename = "Delete")]
+pub struct DeleteRequest {
+    #[serde(rename = "Object")]
+    pub objects: Vec<DeleteObject>,
+    #[serde(rename = "Quiet", default)]
+    pub quiet: bool,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteObject {
+    #[serde(rename = "Key")]
+    pub key: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename = "DeleteResult")]
+pub struct DeleteResponse {
+    #[serde(rename = "Deleted", skip_serializing_if = "Vec::is_empty")]
+    pub deleted: Vec<DeletedObject>,
+    #[serde(rename = "Error", skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<DeleteError>,
+}
+
+#[derive(Serialize)]
+pub struct DeletedObject {
+    #[serde(rename = "Key")]
+    pub key: String,
+}
+
+#[derive(Serialize)]
+pub struct DeleteError {
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "Code")]
+    pub code: String,
+    #[serde(rename = "Message")]
+    pub message: String,
+}
+
+impl DeleteResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
+// CopyObject response structure
+#[derive(Serialize)]
+#[serde(rename = "CopyObjectResult")]
+pub struct CopyObjectResponse {
+    #[serde(rename = "LastModified")]
+    pub last_modified: String,
+    #[serde(rename = "ETag")]
+    pub etag: String,
+}
+
+impl CopyObjectResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
+// GetBucketLocation response structure
+#[derive(Serialize)]
+#[serde(rename = "LocationConstraint")]
+pub struct GetBucketLocationResponse {
+    #[serde(rename = "$value")]
+    pub location: String,
+}
+
+impl GetBucketLocationResponse {
     pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);

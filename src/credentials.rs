@@ -31,9 +31,7 @@ impl CredentialStore {
 
         if !credentials_dir.is_dir() {
             error!(credentials_dir = ?credentials_dir, "Credentials path is not a directory");
-            return Err(CrabCakesError::other(
-                "Credentials path is not a directory",
-            ));
+            return Err(CrabCakesError::other("Credentials path is not a directory"));
         }
 
         // Read all JSON files from the credentials directory

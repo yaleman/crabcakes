@@ -13,7 +13,10 @@ use crate::body_buffer::BufferedBody;
 use crate::credentials::CredentialStore;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
-use crate::xml_responses::{ListBucketResponse, ListBucketsResponse};
+use crate::xml_responses::{
+    CopyObjectResponse, DeleteError, DeleteRequest, DeleteResponse, DeletedObject,
+    GetBucketLocationResponse, ListBucketResponse, ListBucketsResponse,
+};
 
 pub struct S3Handler {
     filesystem: Arc<FilesystemService>,
@@ -92,14 +95,15 @@ impl S3Handler {
                     "Request signature verified successfully"
                 );
                 // Recreate BufferedBody from vec for later use
-                Ok((Some(verified.access_key_id), BufferedBody::Memory(body_vec), parts))
+                Ok((
+                    Some(verified.access_key_id),
+                    BufferedBody::Memory(body_vec),
+                    parts,
+                ))
             }
             Err(e) => {
                 warn!(error = %e, "Signature verification failed");
-                Err(self.unauthorized_response(&format!(
-                    "Signature verification failed: {}",
-                    e
-                )))
+                Err(self.unauthorized_response(&format!("Signature verification failed: {}", e)))
             }
         }
     }
@@ -127,12 +131,20 @@ impl S3Handler {
             .unwrap_or("bucket")
             .to_string();
 
+        // Check for x-amz-copy-source header to detect CopyObject operation
+        let copy_source = parts
+            .headers
+            .get("x-amz-copy-source")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
         info!(
             method = %method,
             path = %path,
             query = %query,
             bucket = %bucket_name,
             authenticated_user = ?authenticated_username,
+            copy_source = ?copy_source,
             "Incoming S3 request"
         );
 
@@ -157,21 +169,25 @@ impl S3Handler {
         let key = key.to_string();
 
         // Determine S3 action and resource for authorization
-        let s3_action = http_method_to_s3_action(method.as_str(), &path, &query, is_bucket_operation);
+        let s3_action =
+            http_method_to_s3_action(method.as_str(), &path, &query, is_bucket_operation);
         let (bucket, extracted_key) = extract_bucket_and_key(&path);
 
         // Use extracted bucket from path for path-style requests, fall back to host header
         let bucket_for_operation = bucket.as_ref().unwrap_or(&bucket_name);
 
         // Build IAM request and evaluate policy
-        let iam_request =
-            match auth_context.build_iam_request(s3_action, bucket.as_deref(), extracted_key.as_deref()) {
-                Ok(req) => req,
-                Err(e) => {
-                    error!(error = %e, "Failed to build IAM request");
-                    return Ok(self.internal_error_response());
-                }
-            };
+        let iam_request = match auth_context.build_iam_request(
+            s3_action,
+            bucket.as_deref(),
+            extracted_key.as_deref(),
+        ) {
+            Ok(req) => req,
+            Err(e) => {
+                error!(error = %e, "Failed to build IAM request");
+                return Ok(self.internal_error_response());
+            }
+        };
 
         match self.policy_store.evaluate_request(&iam_request).await {
             Ok(true) => {
@@ -204,12 +220,18 @@ impl S3Handler {
             // Any GET with list-type=2 is a ListBucket request
             (&Method::GET, true, _, _, query) => {
                 debug!("Handling ListBucket request (list-type=2 query)");
-                self.handle_list_bucket(query, bucket_for_operation, &path).await
+                self.handle_list_bucket(query, bucket_for_operation, &path)
+                    .await
             }
             // GET / - ListBuckets
             (&Method::GET, false, false, "", _) if path == "/" => {
                 debug!("Handling ListBuckets request");
                 self.handle_list_buckets(&bucket_name).await
+            }
+            // GET /bucket?location - GetBucketLocation
+            (&Method::GET, false, true, _, query) if query.contains("location") => {
+                debug!(bucket = %bucket_for_operation, "Handling GetBucketLocation request");
+                self.handle_get_bucket_location(bucket_for_operation).await
             }
             // Path-style bucket root without query: GET /bucket/ or GET /bucket
             (&Method::GET, false, true, _, _) => {
@@ -234,9 +256,15 @@ impl S3Handler {
                 self.handle_get_object(key).await
             }
             // PUT /bucket - CreateBucket
-            (&Method::PUT, false, true, "", _) => {
+            (&Method::PUT, false, true, "", _) if copy_source.is_none() => {
                 debug!(bucket = %bucket_for_operation, "Handling CreateBucket request");
                 self.handle_create_bucket(bucket_for_operation).await
+            }
+            // PUT /key with x-amz-copy-source header - CopyObject
+            (&Method::PUT, false, false, key, _) if !key.is_empty() && copy_source.is_some() => {
+                debug!(key = %key, copy_source = ?copy_source, "Handling CopyObject request");
+                let source = copy_source.as_ref().unwrap();
+                self.handle_copy_object(source, key).await
             }
             // PUT /key or PUT /bucket/key - PutObject
             (&Method::PUT, false, false, key, _) if !key.is_empty() => {
@@ -252,6 +280,11 @@ impl S3Handler {
             (&Method::DELETE, false, false, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling DeleteObject request");
                 self.handle_delete_object(key).await
+            }
+            // POST /?delete - DeleteObjects (batch delete)
+            (&Method::POST, false, _, _, query) if query.contains("delete") => {
+                debug!("Handling DeleteObjects request (batch delete)");
+                self.handle_delete_objects(buffered_body).await
             }
             _ => {
                 warn!(method = %method, path = %path, "Unknown request pattern");
@@ -575,7 +608,9 @@ impl S3Handler {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     warn!(bucket = %bucket, "Bucket does not exist");
                     self.no_such_bucket_response(bucket)
-                } else if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("not empty") {
+                } else if e.kind() == std::io::ErrorKind::Other
+                    && e.to_string().contains("not empty")
+                {
                     warn!(bucket = %bucket, "Bucket is not empty");
                     self.bucket_not_empty_response(bucket)
                 } else {
@@ -599,6 +634,144 @@ impl S3Handler {
             }
             Err(e) => {
                 error!(key = %key, error = %e, "Failed to delete file");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_delete_objects(&self, body: BufferedBody) -> Response<Full<Bytes>> {
+        debug!("Handling DeleteObjects request (batch delete)");
+
+        // Parse XML request body
+        let body_bytes = match body.to_vec().await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!(error = %e, "Failed to read request body");
+                return self.internal_error_response();
+            }
+        };
+
+        let delete_request: DeleteRequest = match quick_xml::de::from_reader(body_bytes.as_ref()) {
+            Ok(req) => req,
+            Err(e) => {
+                error!(error = %e, "Failed to parse DeleteObjects XML request");
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(Bytes::from("Invalid XML request")))
+                    .unwrap();
+            }
+        };
+
+        let mut deleted = Vec::new();
+        let mut errors = Vec::new();
+
+        // Delete each object
+        for obj in delete_request.objects {
+            match self.filesystem.delete_file(&obj.key).await {
+                Ok(()) => {
+                    debug!(key = %obj.key, "Object deleted successfully");
+                    if !delete_request.quiet {
+                        deleted.push(DeletedObject { key: obj.key });
+                    }
+                }
+                Err(e) => {
+                    warn!(key = %obj.key, error = %e, "Failed to delete object");
+                    errors.push(DeleteError {
+                        key: obj.key,
+                        code: "InternalError".to_string(),
+                        message: e.to_string(),
+                    });
+                }
+            }
+        }
+
+        // Build response
+        let response = DeleteResponse { deleted, errors };
+
+        match response.to_xml() {
+            Ok(xml) => {
+                debug!("DeleteObjects completed successfully");
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/xml")
+                    .body(Full::new(Bytes::from(xml)))
+                    .unwrap()
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to serialize DeleteObjects response");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_copy_object(&self, copy_source: &str, dest_key: &str) -> Response<Full<Bytes>> {
+        debug!(copy_source = %copy_source, dest_key = %dest_key, "Handling CopyObject request");
+
+        // Parse copy source - format is /bucket/key or bucket/key
+        let source_key = copy_source.trim_start_matches('/');
+
+        match self.filesystem.copy_file(source_key, dest_key).await {
+            Ok(metadata) => {
+                debug!(source = %source_key, dest = %dest_key, "CopyObject success");
+
+                // Build response
+                let response = CopyObjectResponse {
+                    last_modified: metadata
+                        .last_modified
+                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                        .to_string(),
+                    etag: metadata.etag,
+                };
+
+                match response.to_xml() {
+                    Ok(xml) => Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/xml")
+                        .body(Full::new(Bytes::from(xml)))
+                        .unwrap(),
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize CopyObject response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    warn!(source = %source_key, "Source object not found");
+                    self.not_found_response()
+                } else {
+                    error!(source = %source_key, dest = %dest_key, error = %e, "Failed to copy object");
+                    self.internal_error_response()
+                }
+            }
+        }
+    }
+
+    async fn handle_get_bucket_location(&self, bucket: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling GetBucketLocation request");
+
+        // Check if bucket exists
+        if !self.filesystem.bucket_exists(bucket) {
+            warn!(bucket = %bucket, "Bucket does not exist");
+            return self.no_such_bucket_response(bucket);
+        }
+
+        // Return the configured region
+        let response = GetBucketLocationResponse {
+            location: self.region.clone(),
+        };
+
+        match response.to_xml() {
+            Ok(xml) => {
+                debug!(bucket = %bucket, region = %self.region, "GetBucketLocation success");
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/xml")
+                    .body(Full::new(Bytes::from(xml)))
+                    .unwrap()
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to serialize GetBucketLocation response");
                 self.internal_error_response()
             }
         }

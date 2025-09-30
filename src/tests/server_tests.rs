@@ -435,7 +435,10 @@ async fn test_delete_bucket() {
 
     // Verify bucket is gone
     let head_result = client.head_bucket().bucket(bucket_name).send().await;
-    assert!(head_result.is_err(), "Bucket should not exist after deletion");
+    assert!(
+        head_result.is_err(),
+        "Bucket should not exist after deletion"
+    );
 
     handle.abort();
 }
@@ -471,10 +474,7 @@ async fn test_delete_bucket_not_empty() {
 
     // Verify the error is correct (BucketNotEmpty = Conflict)
     let err = delete_result.unwrap_err();
-    let status = err
-        .raw_response()
-        .map(|r| r.status().as_u16())
-        .unwrap_or(0);
+    let status = err.raw_response().map(|r| r.status().as_u16()).unwrap_or(0);
     assert_eq!(status, 409, "Expected 409 Conflict for BucketNotEmpty");
 
     handle.abort();
@@ -556,7 +556,10 @@ async fn test_delete_object() {
         .key(test_key)
         .send()
         .await;
-    assert!(head_result.is_err(), "Object should not exist after deletion");
+    assert!(
+        head_result.is_err(),
+        "Object should not exist after deletion"
+    );
 
     handle.abort();
 }
@@ -610,10 +613,7 @@ async fn test_bucket_already_exists() {
 
     // Verify the error is correct (BucketAlreadyExists = Conflict)
     let err = create_result.unwrap_err();
-    let status = err
-        .raw_response()
-        .map(|r| r.status().as_u16())
-        .unwrap_or(0);
+    let status = err.raw_response().map(|r| r.status().as_u16()).unwrap_or(0);
     assert_eq!(status, 409, "Expected 409 Conflict for BucketAlreadyExists");
 
     handle.abort();

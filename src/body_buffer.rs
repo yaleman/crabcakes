@@ -1,7 +1,7 @@
 use std::io::Write;
 
-use hyper::body::Incoming;
 use http_body_util::BodyExt;
+use hyper::body::Incoming;
 use tempfile::NamedTempFile;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, info};
@@ -26,7 +26,8 @@ impl BufferedBody {
 
         // Collect the body
         while let Some(frame) = body.frame().await {
-            let frame = frame.map_err(|e| CrabCakesError::other(format!("Body read error: {}", e)))?;
+            let frame =
+                frame.map_err(|e| CrabCakesError::other(format!("Body read error: {}", e)))?;
 
             if let Some(data) = frame.data_ref() {
                 // Check if we should spill to disk
@@ -38,28 +39,41 @@ impl BufferedBody {
                     );
 
                     // Create temporary file
-                    let mut temp_file = NamedTempFile::new()
-                        .map_err(|e| CrabCakesError::other(format!("Failed to create temp file: {}", e)))?;
+                    let mut temp_file = NamedTempFile::new().map_err(|e| {
+                        CrabCakesError::other(format!("Failed to create temp file: {}", e))
+                    })?;
 
                     // Write existing buffer to disk
-                    temp_file.write_all(&buffer)
-                        .map_err(|e| CrabCakesError::other(format!("Failed to write to temp file: {}", e)))?;
+                    temp_file.write_all(&buffer).map_err(|e| {
+                        CrabCakesError::other(format!("Failed to write to temp file: {}", e))
+                    })?;
 
                     // Write current data
-                    temp_file.write_all(data)
-                        .map_err(|e| CrabCakesError::other(format!("Failed to write to temp file: {}", e)))?;
+                    temp_file.write_all(data).map_err(|e| {
+                        CrabCakesError::other(format!("Failed to write to temp file: {}", e))
+                    })?;
 
                     // Continue reading rest of body to disk
                     while let Some(frame) = body.frame().await {
-                        let frame = frame.map_err(|e| CrabCakesError::other(format!("Body read error: {}", e)))?;
+                        let frame = frame.map_err(|e| {
+                            CrabCakesError::other(format!("Body read error: {}", e))
+                        })?;
                         if let Some(data) = frame.data_ref() {
-                            temp_file.write_all(data)
-                                .map_err(|e| CrabCakesError::other(format!("Failed to write to temp file: {}", e)))?;
+                            temp_file.write_all(data).map_err(|e| {
+                                CrabCakesError::other(format!(
+                                    "Failed to write to temp file: {}",
+                                    e
+                                ))
+                            })?;
                         }
                     }
 
-                    let final_size = temp_file.as_file().metadata()
-                        .map_err(|e| CrabCakesError::other(format!("Failed to get file metadata: {}", e)))?
+                    let final_size = temp_file
+                        .as_file()
+                        .metadata()
+                        .map_err(|e| {
+                            CrabCakesError::other(format!("Failed to get file metadata: {}", e))
+                        })?
                         .len() as usize;
 
                     debug!(size = final_size, path = ?temp_file.path(), "Buffered large body to disk");
@@ -84,11 +98,13 @@ impl BufferedBody {
             BufferedBody::Memory(data) => Ok(data),
             BufferedBody::Disk { file, size } => {
                 let mut buffer = Vec::with_capacity(size);
-                let mut async_file = tokio::fs::File::from_std(file.reopen()
-                    .map_err(|e| CrabCakesError::other(format!("Failed to reopen temp file: {}", e)))?);
+                let mut async_file = tokio::fs::File::from_std(file.reopen().map_err(|e| {
+                    CrabCakesError::other(format!("Failed to reopen temp file: {}", e))
+                })?);
 
-                async_file.read_to_end(&mut buffer).await
-                    .map_err(|e| CrabCakesError::other(format!("Failed to read temp file: {}", e)))?;
+                async_file.read_to_end(&mut buffer).await.map_err(|e| {
+                    CrabCakesError::other(format!("Failed to read temp file: {}", e))
+                })?;
 
                 Ok(buffer)
             }

@@ -23,6 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         cli.policy_dir,
         cli.credentials_dir,
         cli.require_signature,
+        cli.region,
     );
     server.run().await
 }
