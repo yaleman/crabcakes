@@ -20,6 +20,7 @@ mime_guess = "2.0"
 quick-xml = { version = "0.38.3", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.145"
+sha2 = "0.10.9"
 tokio = { version = "1.47.1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

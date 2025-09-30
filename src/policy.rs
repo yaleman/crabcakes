@@ -1,14 +1,26 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::{collections::HashMap, sync::Arc};
 
 use iam_rs::{Decision, IAMPolicy, IAMRequest, evaluate_policies};
+use sha2::{Digest, Sha256};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::error::CrabCakesError;
 
+fn hash_request(request: &IAMRequest) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{:?}", request.principal));
+    hasher.update(&request.action);
+    hasher.update(request.resource.to_string());
+    // Note: Context is not included in the hash for simplicity
+    format!("{:x}", hasher.finalize())
+}
+
 pub struct PolicyStore {
     policies: HashMap<String, IAMPolicy>,
+    result_cache: Arc<RwLock<HashMap<String, Decision>>>,
 }
 
 impl PolicyStore {
@@ -20,7 +32,10 @@ impl PolicyStore {
 
         if !policy_dir.exists() {
             warn!(policy_dir = ?policy_dir, "Policy directory does not exist, starting with no policies");
-            return Ok(Self { policies });
+            return Ok(Self {
+                policies,
+                result_cache: Arc::new(RwLock::new(Default::default())),
+            });
         }
 
         if !policy_dir.is_dir() {
@@ -52,7 +67,10 @@ impl PolicyStore {
         }
 
         info!(count = policies.len(), "Loaded IAM policies");
-        Ok(Self { policies })
+        Ok(Self {
+            policies,
+            result_cache: Arc::new(RwLock::new(Default::default())),
+        })
     }
 
     /// Load a single policy from a JSON file
@@ -64,13 +82,7 @@ impl PolicyStore {
 
     /// Evaluate a request against all loaded policies
     /// Returns true if the request is allowed, false if denied or no policy matches
-    pub fn evaluate_request(&self, request: &IAMRequest) -> Result<bool, CrabCakesError> {
-        // AWS IAM evaluation logic:
-        // 1. Default deny
-        // 2. Check all policies
-        // 3. Explicit deny wins over allow
-        // 4. At least one allow is needed (unless there's an explicit deny)
-
+    pub async fn evaluate_request(&self, request: &IAMRequest) -> Result<bool, CrabCakesError> {
         debug!(
             principal = ?request.principal,
             action = %request.action,
@@ -78,11 +90,27 @@ impl PolicyStore {
             "Evaluating request"
         );
 
-        // TODO: check if there's a wildcard/anonymous request and check if the resource/action matches the policy.
+        // check for a result in the cache
+        let hashed_request = hash_request(request);
+        let res = {
+            let cache = self.result_cache.read().await;
+            if let Some(cached_result) = cache.get(&hashed_request) {
+                debug!("Cache hit for request");
+                cached_result.clone()
+            } else {
+                drop(cache);
+                let res = evaluate_policies(&self.policies(), request)
+                    .inspect_err(|e| error!(error = %e, "Error evaluating policies"))?;
+                // store the result in the cache
+                {
+                    let mut cache = self.result_cache.write().await;
+                    cache.insert(hashed_request, res.clone());
+                }
+                res
+            }
+        };
 
-        match evaluate_policies(&self.policies(), request).inspect_err(|e| {
-            error!(error = %e, "Error evaluating policies");
-        })? {
+        match res {
             Decision::Allow => {
                 debug!("Request allowed by policies");
                 Ok(true)

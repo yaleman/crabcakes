@@ -30,7 +30,7 @@ async fn test_wildcard_principal() {
         iam_rs::Arn::parse("arn:aws:s3:::bucket1").expect("Failed to generate ARN"),
     );
 
-    let result = policy_store.evaluate_request(&iam_request);
+    let result = policy_store.evaluate_request(&iam_request).await;
     assert!(
         result.is_err(),
         "Policy evaluation succeeded when it should fail: {:?}",
@@ -56,7 +56,7 @@ async fn test_alice_policy() {
 
     debug!("Policies loaded: {:?}", policy_store.policies());
 
-    let result = policy_store.evaluate_request(&iam_request);
+    let result = policy_store.evaluate_request(&iam_request).await;
     assert!(
         result.is_ok(),
         "Policy evaluation failed: {:?}",

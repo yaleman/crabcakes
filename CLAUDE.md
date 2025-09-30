@@ -85,6 +85,7 @@ The server implements AWS IAM-compatible policy-based authorization:
   - Explicit deny wins over allow
   - At least one allow is needed
 - Loads all JSON policy files from `--policy-dir` at startup
+- Caches policy evaluation results using SHA256 hashing for performance
 - Supports standard IAM policy syntax with:
   - Principal matching (AWS ARNs, wildcards)
   - Action matching (S3 actions with wildcards)
@@ -146,6 +147,7 @@ Key dependencies:
 - `quick-xml` + `serde` - XML serialization for S3 responses
 - `iam-rs` - IAM policy evaluation (local path dependency)
 - `serde_json` - JSON parsing for policy files
+- `sha2` - SHA256 hashing for policy evaluation cache
 
 Dev dependencies:
 - `aws-sdk-s3` + `aws-config` - AWS CLI compatibility testing

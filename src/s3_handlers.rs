@@ -71,7 +71,7 @@ impl S3Handler {
                 }
             };
 
-        match self.policy_store.evaluate_request(&iam_request) {
+        match self.policy_store.evaluate_request(&iam_request).await {
             Ok(true) => {
                 debug!("Authorization granted");
             }

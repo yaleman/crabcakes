@@ -34,9 +34,8 @@ impl Server {
         root_dir: PathBuf,
     ) -> Result<(Self, u16), Box<dyn std::error::Error + Send + Sync>> {
         // Try to find an available port in the high port range
+        let addr = "127.0.0.1:0".to_string();
         for _ in 0..100 {
-            let addr = format!("127.0.0.1:0");
-
             // Try to bind to the port
             if let Ok(listener) = TcpListener::bind(&addr).await {
                 // Use test_policies directory for tests
