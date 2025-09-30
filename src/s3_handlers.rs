@@ -1,14 +1,16 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use http_body_util::{BodyExt, Full};
+use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, warn};
 
-use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action};
+use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
+use crate::body_buffer::BufferedBody;
+use crate::credentials::CredentialStore;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::xml_responses::{ListBucketResponse, ListBucketsResponse};
@@ -16,46 +18,139 @@ use crate::xml_responses::{ListBucketResponse, ListBucketsResponse};
 pub struct S3Handler {
     filesystem: Arc<FilesystemService>,
     policy_store: Arc<PolicyStore>,
+    credentials_store: Arc<CredentialStore>,
+    region: String,
+    require_signature: bool,
 }
 
 impl S3Handler {
-    pub fn new(filesystem: Arc<FilesystemService>, policy_store: Arc<PolicyStore>) -> Self {
+    pub fn new(
+        filesystem: Arc<FilesystemService>,
+        policy_store: Arc<PolicyStore>,
+        credentials_store: Arc<CredentialStore>,
+        region: String,
+        require_signature: bool,
+    ) -> Self {
         Self {
             filesystem,
             policy_store,
+            credentials_store,
+            region,
+            require_signature,
         }
     }
 
-    fn extract_bucket_name(&self, req: &Request<hyper::body::Incoming>) -> String {
-        // Try to get bucket name from Host header (virtual-hosted style)
-        // or fall back to a default
-        req.headers()
-            .get("Host")
-            .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.split('.').next())
-            .unwrap_or("bucket")
-            .to_string()
+    /// Verify AWS Signature V4 and buffer the request body
+    /// Returns Ok with (authenticated_username, buffered_body, request_parts) or Err with error response
+    async fn verify_and_buffer_request(
+        &self,
+        req: Request<hyper::body::Incoming>,
+    ) -> Result<(Option<String>, BufferedBody, http::request::Parts), Response<Full<Bytes>>> {
+        // Extract the parts we need before consuming the request
+        let (parts, body) = req.into_parts();
+
+        // Buffer the body (memory or disk depending on size)
+        let buffered_body = match BufferedBody::from_incoming(body).await {
+            Ok(body) => body,
+            Err(e) => {
+                error!(error = %e, "Failed to buffer request body");
+                return Err(self.internal_error_response());
+            }
+        };
+
+        // Get the body as Vec<u8> for signature verification
+        let body_vec = match buffered_body.to_vec().await {
+            Ok(vec) => vec,
+            Err(e) => {
+                error!(error = %e, "Failed to read buffered body");
+                return Err(self.internal_error_response());
+            }
+        };
+
+        // If signature verification is not required, allow the request
+        if !self.require_signature {
+            debug!("Signature verification not required, allowing request");
+            // Recreate BufferedBody from vec for later use
+            return Ok((None, BufferedBody::Memory(body_vec), parts));
+        }
+
+        // Reconstruct the request with the buffered body for verification
+        let http_request = http::Request::from_parts(parts.clone(), body_vec.clone());
+
+        // Verify the signature
+        match verify_sigv4(
+            http_request,
+            self.credentials_store.clone(),
+            &self.region,
+            self.require_signature,
+        )
+        .await
+        {
+            Ok(verified) => {
+                info!(
+                    access_key = %verified.access_key_id,
+                    "Request signature verified successfully"
+                );
+                // Recreate BufferedBody from vec for later use
+                Ok((Some(verified.access_key_id), BufferedBody::Memory(body_vec), parts))
+            }
+            Err(e) => {
+                warn!(error = %e, "Signature verification failed");
+                Err(self.unauthorized_response(&format!(
+                    "Signature verification failed: {}",
+                    e
+                )))
+            }
+        }
     }
 
     pub async fn handle_request(
         &self,
         req: Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
-        let method = req.method().clone();
-        let path = req.uri().path().to_string();
-        let query = req.uri().query().unwrap_or("").to_string();
-        let bucket_name = self.extract_bucket_name(&req);
+        // Verify signature and buffer body (or return error response)
+        let (authenticated_username, buffered_body, parts) =
+            match self.verify_and_buffer_request(req).await {
+                Ok(result) => result,
+                Err(response) => return Ok(response),
+            };
+
+        // Extract request metadata from parts
+        let method = parts.method.clone();
+        let path = parts.uri.path().to_string();
+        let query = parts.uri.query().unwrap_or("").to_string();
+        let bucket_name = parts
+            .headers
+            .get("Host")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.split('.').next())
+            .unwrap_or("bucket")
+            .to_string();
 
         info!(
             method = %method,
             path = %path,
             query = %query,
             bucket = %bucket_name,
+            authenticated_user = ?authenticated_username,
             "Incoming S3 request"
         );
 
-        // Extract authentication context
-        let auth_context = AuthContext::from_request(&req);
+        // Build authentication context from verified request
+        let auth_context = if let Some(ref username) = authenticated_username {
+            // Use verified username to build principal
+            let arn = format!("arn:aws:iam:::user/{}", username);
+            AuthContext {
+                principal: iam_rs::Principal::Aws(iam_rs::PrincipalId::String(arn)),
+                username: Some(username.clone()),
+            }
+        } else {
+            // Fallback to anonymous if signature not required
+            AuthContext {
+                principal: iam_rs::Principal::Wildcard,
+                username: None,
+            }
+        };
 
         // Determine S3 action and resource for authorization
         let s3_action = http_method_to_s3_action(method.as_str(), &path, &query);
@@ -133,7 +228,7 @@ impl S3Handler {
             // PUT /key or PUT /bucket/key
             (&Method::PUT, false, _, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling PutObject request");
-                self.handle_put_object(req, key).await
+                self.handle_put_object(buffered_body, key).await
             }
             _ => {
                 warn!(method = %method, path = %path, "Unknown request pattern");
@@ -384,17 +479,19 @@ impl S3Handler {
 
     async fn handle_put_object(
         &self,
-        req: Request<hyper::body::Incoming>,
+        buffered_body: BufferedBody,
         key: &str,
     ) -> Response<Full<Bytes>> {
-        // Read the request body
-        let body = match req.into_body().collect().await {
-            Ok(collected) => collected.to_bytes(),
+        // Get the body data from buffered body
+        let body_vec = match buffered_body.to_vec().await {
+            Ok(vec) => vec,
             Err(e) => {
-                error!(key = %key, error = %e, "Failed to read request body");
+                error!(key = %key, error = %e, "Failed to read buffered body");
                 return self.internal_error_response();
             }
         };
+
+        let body = Bytes::from(body_vec);
 
         // Write the file
         match self.filesystem.write_file(key, &body).await {
@@ -430,6 +527,18 @@ impl S3Handler {
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
             )))
+            .unwrap()
+    }
+
+    fn unauthorized_response(&self, reason: &str) -> Response<Full<Bytes>> {
+        Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header("Content-Type", "application/xml")
+            .header("WWW-Authenticate", "AWS4-HMAC-SHA256")
+            .body(Full::new(Bytes::from(format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidAccessKeyId</Code><Message>{}</Message></Error>",
+                reason
+            ))))
             .unwrap()
     }
 

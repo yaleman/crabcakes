@@ -8,6 +8,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info};
 
+use crate::credentials::CredentialStore;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::s3_handlers::S3Handler;
@@ -17,15 +18,28 @@ pub struct Server {
     port: u16,
     root_dir: PathBuf,
     policy_dir: PathBuf,
+    credentials_dir: PathBuf,
+    require_signature: bool,
+    region: String,
 }
 
 impl Server {
-    pub fn new(host: String, port: u16, root_dir: PathBuf, policy_dir: PathBuf) -> Self {
+    pub fn new(
+        host: String,
+        port: u16,
+        root_dir: PathBuf,
+        policy_dir: PathBuf,
+        credentials_dir: PathBuf,
+        require_signature: bool,
+    ) -> Self {
         Self {
             host,
             port,
             root_dir,
             policy_dir,
+            credentials_dir,
+            require_signature,
+            region: "us-east-1".to_string(), // Default region
         }
     }
 
@@ -38,10 +52,18 @@ impl Server {
         for _ in 0..100 {
             // Try to bind to the port
             if let Ok(listener) = TcpListener::bind(&addr).await {
-                // Use test_policies directory for tests
+                // Use test_policies and credentials directories for tests
                 let policy_dir = PathBuf::from("test_policies");
+                let credentials_dir = PathBuf::from("credentials");
                 let port = listener.local_addr()?.port();
-                let server = Self::new("127.0.0.1".to_string(), port, root_dir, policy_dir);
+                let server = Self::new(
+                    "127.0.0.1".to_string(),
+                    port,
+                    root_dir,
+                    policy_dir,
+                    credentials_dir,
+                    false, // Don't require signatures in test mode
+                );
                 return Ok((server, port));
             }
         }
@@ -64,12 +86,30 @@ impl Server {
             }
         };
 
+        // Load credentials
+        let credentials_store = match CredentialStore::new(self.credentials_dir.clone()) {
+            Ok(store) => Arc::new(store),
+            Err(e) => {
+                error!(error = %e, "Failed to load credentials, signature verification may fail");
+                Arc::new(CredentialStore::new(PathBuf::from("/nonexistent")).unwrap())
+            }
+        };
+
         // Create S3 handler
-        let s3_handler = Arc::new(S3Handler::new(filesystem, policy_store));
+        let s3_handler = Arc::new(S3Handler::new(
+            filesystem,
+            policy_store,
+            credentials_store,
+            self.region.clone(),
+            self.require_signature,
+        ));
 
         info!(
             root_dir = ?self.root_dir,
             policy_dir = ?self.policy_dir,
+            credentials_dir = ?self.credentials_dir,
+            region = %self.region,
+            require_signature = %self.require_signature,
             address = %addr,
             "Starting S3 server"
         );
