@@ -1,7 +1,11 @@
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
+
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::config::{Credentials, Region};
+use aws_sdk_s3::Client;
 
 use crabcakes::server::Server;
 
@@ -21,6 +25,7 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
 
 fn setup_test_files() -> TempDir {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    // Copy testfiles directory directly (includes bucket1/ and bucket2/ subdirs)
     copy_dir_all("testfiles", temp_dir.path()).expect("Failed to copy test files");
     temp_dir
 }
@@ -42,21 +47,45 @@ async fn start_test_server(temp_dir: &Path) -> (tokio::task::JoinHandle<()>, u16
     (handle, port)
 }
 
+async fn create_s3_client(port: u16) -> Client {
+    let creds = Credentials::new("test", "test", None, None, "test");
+    let config = aws_config::defaults(BehaviorVersion::latest())
+        .credentials_provider(creds)
+        .region(Region::new("us-east-1"))
+        .load()
+        .await;
+
+    let s3_config = aws_sdk_s3::config::Builder::from(&config)
+        .endpoint_url(format!("http://127.0.0.1:{}", port))
+        .force_path_style(true)
+        .build();
+
+    Client::from_conf(s3_config)
+}
+
 #[tokio::test]
 async fn test_list_buckets() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test ListBuckets endpoint
-    let response = reqwest::get(format!("http://127.0.0.1:{}/", port))
-        .await
-        .expect("Failed to make request");
+    let result = client.list_buckets().send().await;
+    assert!(result.is_ok(), "ListBuckets failed: {:?}", result.err());
 
-    assert_eq!(response.status(), 200);
-    let body = response.text().await.expect("Failed to read response body");
-    assert!(body.contains("<ListAllMyBucketsResult>"));
-    assert!(body.contains("<Owner>"));
-    assert!(body.contains("<Buckets>"));
+    let output = result.unwrap();
+    let buckets = output.buckets();
+    assert!(!buckets.is_empty(), "No buckets found");
+
+    // Verify both bucket1 and bucket2 are listed
+    let bucket_names: Vec<_> = buckets.iter().filter_map(|b| b.name()).collect();
+    assert!(
+        bucket_names.contains(&"bucket1"),
+        "Expected bucket1 in listing"
+    );
+    assert!(
+        bucket_names.contains(&"bucket2"),
+        "Expected bucket2 in listing"
+    );
 
     handle.abort();
 }
@@ -65,17 +94,18 @@ async fn test_list_buckets() {
 async fn test_list_objects() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test ListObjectsV2 endpoint
-    let response = reqwest::get(format!("http://127.0.0.1:{}/?list-type=2", port))
-        .await
-        .expect("Failed to make request");
+    let result = client.list_objects_v2().bucket("bucket1").send().await;
+    assert!(result.is_ok(), "ListObjectsV2 failed: {:?}", result.err());
 
-    assert_eq!(response.status(), 200);
-    let body = response.text().await.expect("Failed to read response body");
-    assert!(body.contains("<ListBucketResult>"));
-    assert!(body.contains("<Contents>"));
-    assert!(body.contains("<Key>test.txt</Key>"));
+    let output = result.unwrap();
+    let contents = output.contents();
+    assert!(!contents.is_empty());
+    assert!(
+        contents.iter().any(|obj| obj.key() == Some("bucket1/test.txt")),
+        "Expected to find bucket1/test.txt in listing"
+    );
 
     handle.abort();
 }
@@ -84,28 +114,21 @@ async fn test_list_objects() {
 async fn test_head_object() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test HeadObject endpoint
-    let client = reqwest::Client::new();
-    let response = client
-        .head(format!("http://127.0.0.1:{}/test.txt", port))
+    let result = client
+        .head_object()
+        .bucket("bucket1")
+        .key("test.txt")
         .send()
-        .await
-        .expect("Failed to make request");
+        .await;
+    assert!(result.is_ok(), "HeadObject failed: {:?}", result.err());
 
-    assert_eq!(response.status(), 200);
-    assert!(response.headers().contains_key("content-length"));
-    assert!(response.headers().contains_key("content-type"));
-    assert!(response.headers().contains_key("etag"));
-    assert!(response.headers().contains_key("last-modified"));
-
-    let content_length = response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .expect("Failed to parse content-length");
-    assert_eq!(content_length, 29);
+    let output = result.unwrap();
+    assert_eq!(output.content_length(), Some(29));
+    assert!(output.content_type().is_some());
+    assert!(output.e_tag().is_some());
+    assert!(output.last_modified().is_some());
 
     handle.abort();
 }
@@ -114,20 +137,25 @@ async fn test_head_object() {
 async fn test_get_object() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test GetObject endpoint
-    let response = reqwest::get(format!("http://127.0.0.1:{}/test.txt", port))
-        .await
-        .expect("Failed to make request");
+    let result = client
+        .get_object()
+        .bucket("bucket1")
+        .key("test.txt")
+        .send()
+        .await;
+    assert!(result.is_ok(), "GetObject failed: {:?}", result.err());
 
-    assert_eq!(response.status(), 200);
-    assert!(response.headers().contains_key("content-length"));
-    assert!(response.headers().contains_key("content-type"));
-    assert!(response.headers().contains_key("etag"));
-    assert!(response.headers().contains_key("last-modified"));
+    let output = result.unwrap();
+    assert_eq!(output.content_length(), Some(29));
+    assert!(output.content_type().is_some());
+    assert!(output.e_tag().is_some());
+    assert!(output.last_modified().is_some());
 
-    let body = response.text().await.expect("Failed to read response body");
-    assert_eq!(body.trim(), "hello world this is test.txt");
+    let body = output.body.collect().await.unwrap().into_bytes();
+    let body_str = String::from_utf8(body.to_vec()).unwrap();
+    assert_eq!(body_str.trim(), "hello world this is test.txt");
 
     handle.abort();
 }
@@ -136,16 +164,15 @@ async fn test_get_object() {
 async fn test_get_nonexistent_object() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test GetObject with nonexistent file
-    let response = reqwest::get(format!("http://127.0.0.1:{}/nonexistent.txt", port))
-        .await
-        .expect("Failed to make request");
-
-    assert_eq!(response.status(), 404);
-    let body = response.text().await.expect("Failed to read response body");
-    assert!(body.contains("<Error>"));
-    assert!(body.contains("<Code>NoSuchKey</Code>"));
+    let result = client
+        .get_object()
+        .bucket("bucket1")
+        .key("nonexistent.txt")
+        .send()
+        .await;
+    assert!(result.is_err(), "Expected error for nonexistent object");
 
     handle.abort();
 }
@@ -154,20 +181,27 @@ async fn test_get_nonexistent_object() {
 async fn test_list_objects_with_prefix() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test ListObjectsV2 with prefix filter
-    let response = reqwest::get(format!(
-        "http://127.0.0.1:{}/?list-type=2&prefix=test",
-        port
-    ))
-    .await
-    .expect("Failed to make request");
+    let result = client
+        .list_objects_v2()
+        .bucket("bucket1")
+        .prefix("test")
+        .send()
+        .await;
+    assert!(
+        result.is_ok(),
+        "ListObjectsV2 with prefix failed: {:?}",
+        result.err()
+    );
 
-    assert_eq!(response.status(), 200);
-    let body = response.text().await.expect("Failed to read response body");
-    assert!(body.contains("<ListBucketResult>"));
-    assert!(body.contains("<Prefix>test</Prefix>"));
-    assert!(body.contains("<Key>test.txt</Key>"));
+    let output = result.unwrap();
+    let contents = output.contents();
+    assert!(!contents.is_empty());
+    assert!(
+        contents.iter().any(|obj| obj.key() == Some("bucket1/test.txt")),
+        "Expected to find bucket1/test.txt in listing"
+    );
 
     handle.abort();
 }
@@ -176,16 +210,13 @@ async fn test_list_objects_with_prefix() {
 async fn test_path_style_bucket_listing() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test root listing (no bucket in path): GET /?list-type=2
-    let response = reqwest::get(format!("http://127.0.0.1:{}/?list-type=2", port))
-        .await
-        .expect("Failed to make request");
+    let result = client.list_objects_v2().bucket("bucket1").send().await;
+    assert!(result.is_ok(), "ListObjectsV2 failed: {:?}", result.err());
 
-    assert_eq!(response.status(), 200);
-    let body = response.text().await.expect("Failed to read response body");
-    assert!(body.contains("<ListBucketResult>"));
-    assert!(body.contains("<Contents>"));
+    let output = result.unwrap();
+    assert!(!output.contents().is_empty());
 
     handle.abort();
 }
@@ -194,47 +225,72 @@ async fn test_path_style_bucket_listing() {
 async fn test_list_with_file_prefix() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test listing with a file prefix
-    // Since testfiles are at root of temp dir, use root path with prefix
-    let response = reqwest::get(format!(
-        "http://127.0.0.1:{}/?list-type=2&prefix=test.txt",
-        port
-    ))
-    .await
-    .expect("Failed to make request");
+    let result = client
+        .list_objects_v2()
+        .bucket("bucket1")
+        .prefix("test.txt")
+        .send()
+        .await;
+    assert!(
+        result.is_ok(),
+        "ListObjectsV2 with file prefix failed: {:?}",
+        result.err()
+    );
 
-    assert_eq!(response.status(), 200);
-    let body = response.text().await.expect("Failed to read response body");
-    assert!(body.contains("<ListBucketResult>"));
-    assert!(body.contains("<Prefix>test.txt</Prefix>"));
-    assert!(body.contains("<Key>test.txt</Key>"));
+    let output = result.unwrap();
+    assert_eq!(output.prefix(), Some("bucket1/test.txt"));
+    let contents = output.contents();
+    assert!(!contents.is_empty());
+    assert!(
+        contents.iter().any(|obj| obj.key() == Some("bucket1/test.txt")),
+        "Expected to find bucket1/test.txt in listing"
+    );
 
     handle.abort();
 }
 
 #[tokio::test]
-async fn test_list_with_path_style_file_prefix() {
+async fn test_bucket2_json_file() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
 
-    // Test path with file prefix: GET /test.txt?list-type=2
-    // This should list objects with prefix test.txt
-    let response = reqwest::get(format!("http://127.0.0.1:{}/test.txt?list-type=2", port))
-        .await
-        .expect("Failed to make request");
+    // Test HeadObject on bucket2/hello-world.json
+    let head_result = client
+        .head_object()
+        .bucket("bucket2")
+        .key("hello-world.json")
+        .send()
+        .await;
+    assert!(
+        head_result.is_ok(),
+        "HeadObject on bucket2/hello-world.json failed: {:?}",
+        head_result.err()
+    );
 
-    assert_eq!(response.status(), 200);
-    let body = response.text().await.expect("Failed to read response body");
+    let head_output = head_result.unwrap();
+    assert_eq!(head_output.content_length(), Some(37));
+    assert_eq!(head_output.content_type(), Some("application/json"));
+
+    // Test GetObject on bucket2/hello-world.json
+    let get_result = client
+        .get_object()
+        .bucket("bucket2")
+        .key("hello-world.json")
+        .send()
+        .await;
     assert!(
-        body.contains("<ListBucketResult>"),
-        "Expected ListBucketResult, got: {}",
-        body
+        get_result.is_ok(),
+        "GetObject on bucket2/hello-world.json failed: {:?}",
+        get_result.err()
     );
-    assert!(
-        body.contains("<Key>test.txt</Key>"),
-        "Expected to find test.txt in listing"
-    );
+
+    let get_output = get_result.unwrap();
+    let body = get_output.body.collect().await.unwrap().into_bytes();
+    let body_str = String::from_utf8(body.to_vec()).unwrap();
+    assert!(body_str.contains("hello world"), "Expected JSON content");
 
     handle.abort();
 }

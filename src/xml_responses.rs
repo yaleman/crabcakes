@@ -111,20 +111,24 @@ impl ListBucketResponse {
 }
 
 impl ListBucketsResponse {
-    pub fn new(bucket_name: String) -> Self {
+    pub fn from_buckets(bucket_names: Vec<String>) -> Self {
         let now = Utc::now();
+        let creation_date = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+        let buckets = bucket_names
+            .into_iter()
+            .map(|name| Bucket {
+                name,
+                creation_date: creation_date.clone(),
+            })
+            .collect();
 
         Self {
             owner: Owner {
                 id: "crabcakes-owner".to_string(),
                 display_name: "Crabcakes".to_string(),
             },
-            buckets: Buckets {
-                bucket: vec![Bucket {
-                    name: bucket_name,
-                    creation_date: now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
-                }],
-            },
+            buckets: Buckets { bucket: buckets },
         }
     }
 

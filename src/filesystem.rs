@@ -73,6 +73,22 @@ impl FilesystemService {
         file_path.exists() && file_path.is_file()
     }
 
+    pub fn list_buckets(&self) -> Result<Vec<String>, std::io::Error> {
+        debug!("Listing buckets (top-level directories)");
+        let mut buckets = Vec::new();
+
+        for entry in std::fs::read_dir(&self.root_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() && let Some(name) = entry.file_name().to_str() {
+                buckets.push(name.to_string());
+            }
+        }
+
+        buckets.sort();
+        debug!(count = buckets.len(), buckets = ?buckets, "Found buckets");
+        Ok(buckets)
+    }
+
     pub fn list_directory(
         &self,
         prefix: Option<&str>,

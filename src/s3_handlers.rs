@@ -235,17 +235,30 @@ impl S3Handler {
         }
     }
 
-    async fn handle_list_buckets(&self, bucket_name: &str) -> Response<Full<Bytes>> {
-        let response = ListBucketsResponse::new(bucket_name.to_string());
+    async fn handle_list_buckets(&self, _bucket_name: &str) -> Response<Full<Bytes>> {
+        // List all top-level directories as buckets
+        match self.filesystem.list_buckets() {
+            Ok(buckets) => {
+                debug!(count = buckets.len(), "Listed buckets");
+                let response = ListBucketsResponse::from_buckets(buckets);
 
-        match response.to_xml() {
-            Ok(xml) => Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/xml")
-                .header("Content-Length", xml.len())
-                .body(Full::new(Bytes::from(xml)))
-                .unwrap(),
-            Err(_) => self.internal_error_response(),
+                match response.to_xml() {
+                    Ok(xml) => Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/xml")
+                        .header("Content-Length", xml.len())
+                        .body(Full::new(Bytes::from(xml)))
+                        .unwrap(),
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize ListBuckets response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to list buckets");
+                self.internal_error_response()
+            }
         }
     }
 

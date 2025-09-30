@@ -36,7 +36,7 @@ mod tests {
         let temp_dir = setup_test_files();
         let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
 
-        assert!(fs_service.file_exists("test.txt"));
+        assert!(fs_service.file_exists("bucket1/test.txt"));
         assert!(!fs_service.file_exists("nonexistent.txt"));
     }
 
@@ -46,7 +46,7 @@ mod tests {
         let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
 
         let metadata = fs_service
-            .get_file_metadata("test.txt")
+            .get_file_metadata("bucket1/test.txt")
             .expect("File should exist");
         assert_eq!(metadata.size, 29); // "hello world this is test.txt\n" is 29 bytes
         assert!(metadata.etag.starts_with("\""));
@@ -62,7 +62,8 @@ mod tests {
             .list_directory(None, 1000, None)
             .expect("Should list directory");
         assert!(!entries.is_empty());
-        assert!(entries.iter().any(|e| e.key == "test.txt"));
+        assert!(entries.iter().any(|e| e.key == "bucket1/test.txt"));
+        assert!(entries.iter().any(|e| e.key == "bucket2/hello-world.json"));
     }
 
     #[tokio::test]
@@ -90,7 +91,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_buckets_xml() {
-        let response = xml_responses::ListBucketsResponse::new("test-bucket".to_string());
+        let response = xml_responses::ListBucketsResponse::from_buckets(vec!["test-bucket".to_string()]);
         let xml = response.to_xml().expect("Should serialize to XML");
 
         assert!(xml.contains("<ListAllMyBucketsResult>"));
