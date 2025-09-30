@@ -13,4 +13,12 @@ pub struct Cli {
 
     #[clap(short, long, default_value = "./data", env = "CRABCAKES_ROOT_DIR")]
     pub root_dir: PathBuf,
+
+    #[clap(
+        short,
+        long,
+        default_value = "./policies",
+        env = "CRABCAKES_POLICY_DIR"
+    )]
+    pub policy_dir: PathBuf,
 }

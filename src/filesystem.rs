@@ -81,7 +81,9 @@ impl FilesystemService {
 
         for entry in std::fs::read_dir(&self.root_dir)? {
             let entry = entry?;
-            if entry.file_type()?.is_dir() && let Some(name) = entry.file_name().to_str() {
+            if entry.file_type()?.is_dir()
+                && let Some(name) = entry.file_name().to_str()
+            {
                 buckets.push(name.to_string());
             }
         }

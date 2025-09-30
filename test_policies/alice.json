@@ -1,0 +1,18 @@
+{
+    "Version": "2012-10-17",
+    "Id": "S3BucketPolicy",
+    "Statement": [
+        {
+            "Sid": "AllowUserAccess",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::123456789012:user/alice"
+            },
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::bucket1/alice/*"
+        }
+    ]
+}

@@ -9,20 +9,23 @@ use tokio::net::TcpListener;
 use tracing::{debug, error, info};
 
 use crate::filesystem::FilesystemService;
+use crate::policy::PolicyStore;
 use crate::s3_handlers::S3Handler;
 
 pub struct Server {
     host: String,
     port: u16,
     root_dir: PathBuf,
+    policy_dir: PathBuf,
 }
 
 impl Server {
-    pub fn new(host: String, port: u16, root_dir: PathBuf) -> Self {
+    pub fn new(host: String, port: u16, root_dir: PathBuf, policy_dir: PathBuf) -> Self {
         Self {
             host,
             port,
             root_dir,
+            policy_dir,
         }
     }
 
@@ -37,7 +40,9 @@ impl Server {
 
             // Try to bind to the port
             if TcpListener::bind(&addr).await.is_ok() {
-                let server = Self::new("127.0.0.1".to_string(), port, root_dir);
+                // Use test_policies directory for tests
+                let policy_dir = PathBuf::from("test_policies");
+                let server = Self::new("127.0.0.1".to_string(), port, root_dir, policy_dir);
                 return Ok((server, port));
             }
         }
@@ -51,11 +56,21 @@ impl Server {
         // Create filesystem service
         let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone()));
 
+        // Load IAM policies
+        let policy_store = match PolicyStore::new(self.policy_dir.clone()) {
+            Ok(store) => Arc::new(store),
+            Err(e) => {
+                error!(error = %e, "Failed to load policies, starting without policy enforcement");
+                Arc::new(PolicyStore::new(PathBuf::from("/nonexistent")).unwrap())
+            }
+        };
+
         // Create S3 handler
-        let s3_handler = Arc::new(S3Handler::new(filesystem));
+        let s3_handler = Arc::new(S3Handler::new(filesystem, policy_store));
 
         info!(
             root_dir = ?self.root_dir,
+            policy_dir = ?self.policy_dir,
             address = %addr,
             "Starting S3 server"
         );

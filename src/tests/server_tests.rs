@@ -1,13 +1,13 @@
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::Client;
+use aws_sdk_s3::config::{Credentials, Region};
 
-use crabcakes::server::Server;
+use crate::server::Server;
 
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
     fs::create_dir_all(&dst)?;
@@ -103,7 +103,9 @@ async fn test_list_objects() {
     let contents = output.contents();
     assert!(!contents.is_empty());
     assert!(
-        contents.iter().any(|obj| obj.key() == Some("bucket1/test.txt")),
+        contents
+            .iter()
+            .any(|obj| obj.key() == Some("bucket1/test.txt")),
         "Expected to find bucket1/test.txt in listing"
     );
 
@@ -199,7 +201,9 @@ async fn test_list_objects_with_prefix() {
     let contents = output.contents();
     assert!(!contents.is_empty());
     assert!(
-        contents.iter().any(|obj| obj.key() == Some("bucket1/test.txt")),
+        contents
+            .iter()
+            .any(|obj| obj.key() == Some("bucket1/test.txt")),
         "Expected to find bucket1/test.txt in listing"
     );
 
@@ -244,7 +248,9 @@ async fn test_list_with_file_prefix() {
     let contents = output.contents();
     assert!(!contents.is_empty());
     assert!(
-        contents.iter().any(|obj| obj.key() == Some("bucket1/test.txt")),
+        contents
+            .iter()
+            .any(|obj| obj.key() == Some("bucket1/test.txt")),
         "Expected to find bucket1/test.txt in listing"
     );
 
@@ -355,7 +361,10 @@ async fn test_put_object() {
     );
 
     let head_output = head_result.unwrap();
-    assert_eq!(head_output.content_length(), Some(test_content.len() as i64));
+    assert_eq!(
+        head_output.content_length(),
+        Some(test_content.len() as i64)
+    );
     assert_eq!(head_output.content_type(), Some("text/plain"));
 
     handle.abort();

@@ -16,6 +16,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let cli = Cli::parse();
 
-    let server = Server::new(cli.host, cli.port.get(), cli.root_dir);
+    let server = Server::new(cli.host, cli.port.get(), cli.root_dir, cli.policy_dir);
     server.run().await
 }

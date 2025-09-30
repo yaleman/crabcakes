@@ -8,16 +8,22 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, warn};
 
+use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action};
 use crate::filesystem::FilesystemService;
+use crate::policy::PolicyStore;
 use crate::xml_responses::{ListBucketResponse, ListBucketsResponse};
 
 pub struct S3Handler {
     filesystem: Arc<FilesystemService>,
+    policy_store: Arc<PolicyStore>,
 }
 
 impl S3Handler {
-    pub fn new(filesystem: Arc<FilesystemService>) -> Self {
-        Self { filesystem }
+    pub fn new(filesystem: Arc<FilesystemService>, policy_store: Arc<PolicyStore>) -> Self {
+        Self {
+            filesystem,
+            policy_store,
+        }
     }
 
     fn extract_bucket_name(&self, req: &Request<hyper::body::Incoming>) -> String {
@@ -48,6 +54,41 @@ impl S3Handler {
             "Incoming S3 request"
         );
 
+        // Extract authentication context
+        let auth_context = AuthContext::from_request(&req);
+
+        // Determine S3 action and resource for authorization
+        let s3_action = http_method_to_s3_action(method.as_str(), &path, &query);
+        let (bucket, key) = extract_bucket_and_key(&path);
+
+        // Build IAM request and evaluate policy
+        let iam_request =
+            match auth_context.build_iam_request(s3_action, bucket.as_deref(), key.as_deref()) {
+                Ok(req) => req,
+                Err(e) => {
+                    error!(error = %e, "Failed to build IAM request");
+                    return Ok(self.internal_error_response());
+                }
+            };
+
+        match self.policy_store.evaluate_request(&iam_request) {
+            Ok(true) => {
+                debug!("Authorization granted");
+            }
+            Ok(false) => {
+                warn!(
+                    principal = ?iam_request.principal,
+                    action = %s3_action,
+                    "Authorization denied"
+                );
+                return Ok(self.access_denied_response());
+            }
+            Err(e) => {
+                error!(error = %e, "Error evaluating policy");
+                return Ok(self.internal_error_response());
+            }
+        }
+
         // If list-type=2 is in the query, it's ALWAYS a ListBucket operation
         let is_list_operation = query.contains("list-type=2");
 
@@ -55,7 +96,13 @@ impl S3Handler {
         let (is_bucket_operation, key) = self.parse_path(&path);
         let key = key.to_string();
 
-        let response = match (&method, is_list_operation, is_bucket_operation, key.as_str(), query.as_str()) {
+        let response = match (
+            &method,
+            is_list_operation,
+            is_bucket_operation,
+            key.as_str(),
+            query.as_str(),
+        ) {
             // Any GET with list-type=2 is a ListBucket request
             (&Method::GET, true, _, _, query) => {
                 debug!("Handling ListBucket request (list-type=2 query)");
@@ -372,6 +419,16 @@ impl S3Handler {
             .header("Content-Type", "application/xml")
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>",
+            )))
+            .unwrap()
+    }
+
+    fn access_denied_response(&self) -> Response<Full<Bytes>> {
+        Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header("Content-Type", "application/xml")
+            .body(Full::new(Bytes::from(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
             )))
             .unwrap()
     }
