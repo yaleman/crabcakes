@@ -50,8 +50,8 @@ impl FilesystemService {
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default();
-        let last_modified = DateTime::from_timestamp(last_modified.as_secs() as i64, 0)
-            .unwrap_or_else(Utc::now);
+        let last_modified =
+            DateTime::from_timestamp(last_modified.as_secs() as i64, 0).unwrap_or_else(Utc::now);
 
         let content_type = MimeGuess::from_path(&file_path)
             .first_or_octet_stream()
@@ -73,7 +73,12 @@ impl FilesystemService {
         file_path.exists() && file_path.is_file()
     }
 
-    pub fn list_directory(&self, prefix: Option<&str>, max_keys: usize, continuation_token: Option<&str>) -> Result<(Vec<DirectoryEntry>, Option<String>), std::io::Error> {
+    pub fn list_directory(
+        &self,
+        prefix: Option<&str>,
+        max_keys: usize,
+        continuation_token: Option<&str>,
+    ) -> Result<(Vec<DirectoryEntry>, Option<String>), std::io::Error> {
         debug!(
             prefix = ?prefix,
             max_keys = max_keys,
@@ -99,9 +104,10 @@ impl FilesystemService {
                     let key = relative_path.to_string_lossy().to_string();
 
                     if let Some(prefix) = prefix
-                        && !key.starts_with(prefix) {
-                            continue;
-                        }
+                        && !key.starts_with(prefix)
+                    {
+                        continue;
+                    }
 
                     if key.as_str() <= start_after {
                         continue;
@@ -130,7 +136,13 @@ impl FilesystemService {
             Ok(())
         }
 
-        collect_files(&self.root_dir, &self.root_dir, prefix, &mut entries, start_after)?;
+        collect_files(
+            &self.root_dir,
+            &self.root_dir,
+            prefix,
+            &mut entries,
+            start_after,
+        )?;
 
         entries.sort_by(|a, b| a.key.cmp(&b.key));
 
@@ -149,9 +161,11 @@ impl FilesystemService {
 }
 
 fn calculate_etag_from_metadata(metadata: &fs::Metadata) -> String {
-    format!("{:x}-{:x}",
+    format!(
+        "{:x}-{:x}",
         metadata.len(),
-        metadata.modified()
+        metadata
+            .modified()
             .unwrap_or(SystemTime::UNIX_EPOCH)
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()

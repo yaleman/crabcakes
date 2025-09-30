@@ -6,7 +6,7 @@ use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 use crate::filesystem::FilesystemService;
 use crate::xml_responses::{ListBucketResponse, ListBucketsResponse};
@@ -17,9 +17,7 @@ pub struct S3Handler {
 
 impl S3Handler {
     pub fn new(filesystem: Arc<FilesystemService>) -> Self {
-        Self {
-            filesystem,
-        }
+        Self { filesystem }
     }
 
     fn extract_bucket_name(&self, req: &Request<hyper::body::Incoming>) -> String {
@@ -71,7 +69,8 @@ impl S3Handler {
             (&Method::GET, false, true, _, _) => {
                 debug!("Handling ListBucket request (path-style, no query)");
                 // Treat as ListBucket with default parameters
-                self.handle_list_bucket("list-type=2", &bucket_name, path).await
+                self.handle_list_bucket("list-type=2", &bucket_name, path)
+                    .await
             }
             // HEAD /key or HEAD /bucket/key
             (&Method::HEAD, false, _, key, _) if !key.is_empty() => {
@@ -126,7 +125,12 @@ impl S3Handler {
         }
     }
 
-    async fn handle_list_bucket(&self, query: &str, bucket_name: &str, path: &str) -> Response<Full<Bytes>> {
+    async fn handle_list_bucket(
+        &self,
+        query: &str,
+        bucket_name: &str,
+        path: &str,
+    ) -> Response<Full<Bytes>> {
         let mut prefix: Option<String> = None;
         let mut max_keys = 1000;
         let mut continuation_token = None;
@@ -253,7 +257,13 @@ impl S3Handler {
                     .status(StatusCode::OK)
                     .header("Content-Type", metadata.content_type)
                     .header("Content-Length", metadata.size)
-                    .header("Last-Modified", metadata.last_modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string())
+                    .header(
+                        "Last-Modified",
+                        metadata
+                            .last_modified
+                            .format("%a, %d %b %Y %H:%M:%S GMT")
+                            .to_string(),
+                    )
                     .header("ETag", metadata.etag)
                     .body(Full::new(Bytes::new()))
                     .unwrap()
@@ -267,34 +277,38 @@ impl S3Handler {
 
     async fn handle_get_object(&self, key: &str) -> Response<Full<Bytes>> {
         match self.filesystem.get_file_metadata(key) {
-            Ok(metadata) => {
-                match File::open(&metadata.path).await {
-                    Ok(mut file) => {
-                        let mut contents = Vec::new();
-                        match file.read_to_end(&mut contents).await {
-                            Ok(bytes_read) => {
-                                debug!(key = %key, size = bytes_read, "GetObject success");
-                                Response::builder()
-                                    .status(StatusCode::OK)
-                                    .header("Content-Type", metadata.content_type)
-                                    .header("Content-Length", metadata.size)
-                                    .header("Last-Modified", metadata.last_modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string())
-                                    .header("ETag", metadata.etag)
-                                    .body(Full::new(Bytes::from(contents)))
-                                    .unwrap()
-                            }
-                            Err(e) => {
-                                error!(key = %key, error = %e, "Failed to read file contents");
-                                self.internal_error_response()
-                            }
+            Ok(metadata) => match File::open(&metadata.path).await {
+                Ok(mut file) => {
+                    let mut contents = Vec::new();
+                    match file.read_to_end(&mut contents).await {
+                        Ok(bytes_read) => {
+                            debug!(key = %key, size = bytes_read, "GetObject success");
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", metadata.content_type)
+                                .header("Content-Length", metadata.size)
+                                .header(
+                                    "Last-Modified",
+                                    metadata
+                                        .last_modified
+                                        .format("%a, %d %b %Y %H:%M:%S GMT")
+                                        .to_string(),
+                                )
+                                .header("ETag", metadata.etag)
+                                .body(Full::new(Bytes::from(contents)))
+                                .unwrap()
+                        }
+                        Err(e) => {
+                            error!(key = %key, error = %e, "Failed to read file contents");
+                            self.internal_error_response()
                         }
                     }
-                    Err(e) => {
-                        error!(key = %key, error = %e, "Failed to open file");
-                        self.not_found_response()
-                    }
                 }
-            }
+                Err(e) => {
+                    error!(key = %key, error = %e, "Failed to open file");
+                    self.not_found_response()
+                }
+            },
             Err(e) => {
                 warn!(key = %key, error = %e, "GetObject failed: file not found");
                 self.not_found_response()

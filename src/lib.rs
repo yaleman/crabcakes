@@ -45,7 +45,9 @@ mod tests {
         let temp_dir = setup_test_files();
         let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
 
-        let metadata = fs_service.get_file_metadata("test.txt").expect("File should exist");
+        let metadata = fs_service
+            .get_file_metadata("test.txt")
+            .expect("File should exist");
         assert_eq!(metadata.size, 29); // "hello world this is test.txt\n" is 29 bytes
         assert!(metadata.etag.starts_with("\""));
         assert!(metadata.etag.ends_with("\""));
@@ -56,21 +58,21 @@ mod tests {
         let temp_dir = setup_test_files();
         let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
 
-        let (entries, _) = fs_service.list_directory(None, 1000, None).expect("Should list directory");
+        let (entries, _) = fs_service
+            .list_directory(None, 1000, None)
+            .expect("Should list directory");
         assert!(!entries.is_empty());
         assert!(entries.iter().any(|e| e.key == "test.txt"));
     }
 
     #[tokio::test]
     async fn test_xml_responses() {
-        let entries = vec![
-            filesystem::DirectoryEntry {
-                key: "test.txt".to_string(),
-                size: 29,
-                last_modified: chrono::Utc::now(),
-                etag: "\"abc123\"".to_string(),
-            }
-        ];
+        let entries = vec![filesystem::DirectoryEntry {
+            key: "test.txt".to_string(),
+            size: 29,
+            last_modified: chrono::Utc::now(),
+            etag: "\"abc123\"".to_string(),
+        }];
 
         let response = xml_responses::ListBucketResponse::new(
             "test-bucket".to_string(),

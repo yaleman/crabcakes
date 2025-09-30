@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use crabcakes::server::Server;
 
@@ -220,17 +220,21 @@ async fn test_list_with_path_style_file_prefix() {
 
     // Test path with file prefix: GET /test.txt?list-type=2
     // This should list objects with prefix test.txt
-    let response = reqwest::get(format!(
-        "http://127.0.0.1:{}/test.txt?list-type=2",
-        port
-    ))
-    .await
-    .expect("Failed to make request");
+    let response = reqwest::get(format!("http://127.0.0.1:{}/test.txt?list-type=2", port))
+        .await
+        .expect("Failed to make request");
 
     assert_eq!(response.status(), 200);
     let body = response.text().await.expect("Failed to read response body");
-    assert!(body.contains("<ListBucketResult>"), "Expected ListBucketResult, got: {}", body);
-    assert!(body.contains("<Key>test.txt</Key>"), "Expected to find test.txt in listing");
+    assert!(
+        body.contains("<ListBucketResult>"),
+        "Expected ListBucketResult, got: {}",
+        body
+    );
+    assert!(
+        body.contains("<Key>test.txt</Key>"),
+        "Expected to find test.txt in listing"
+    );
 
     handle.abort();
 }

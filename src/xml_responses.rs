@@ -17,7 +17,10 @@ pub struct ListBucketResponse {
     pub is_truncated: bool,
     #[serde(rename = "Contents")]
     pub contents: Vec<S3Object>,
-    #[serde(rename = "NextContinuationToken", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "NextContinuationToken",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub next_continuation_token: Option<String>,
 }
 
@@ -78,7 +81,10 @@ impl ListBucketResponse {
             .into_iter()
             .map(|entry| S3Object {
                 key: entry.key,
-                last_modified: entry.last_modified.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+                last_modified: entry
+                    .last_modified
+                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                    .to_string(),
                 etag: entry.etag,
                 size: entry.size,
                 storage_class: "STANDARD".to_string(),

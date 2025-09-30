@@ -6,7 +6,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
-use tracing::{info, error, debug};
+use tracing::{debug, error, info};
 
 use crate::filesystem::FilesystemService;
 use crate::s3_handlers::S3Handler;
@@ -27,7 +27,9 @@ impl Server {
     }
 
     /// Create a server instance for testing that binds to a random available port
-    pub async fn test_mode(root_dir: PathBuf) -> Result<(Self, u16), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn test_mode(
+        root_dir: PathBuf,
+    ) -> Result<(Self, u16), Box<dyn std::error::Error + Send + Sync>> {
         // Try to find an available port in the high port range
         for _ in 0..10 {
             let port = rand::random::<u16>().saturating_add(10000);
