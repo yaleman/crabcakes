@@ -24,6 +24,7 @@ scratchstack-aws-signature = "0.11.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.145"
 sha2 = "0.10.9"
+tempfile = "3.23"
 tokio = { version = "1.47.1", features = ["full"] }
 tower = "0.5.2"
 tracing = "0.1"
