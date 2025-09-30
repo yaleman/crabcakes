@@ -1,4 +1,4 @@
-use hyper::Request;
+use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
 use tracing::debug;
 
@@ -20,7 +20,7 @@ impl AuthContext {
             && let Ok(username) = user_header.to_str()
         {
             debug!(username = %username, "Authenticated user from x-amz-user header");
-            let arn = format!("arn:aws:iam::123456789012:user/{}", username);
+            let arn = format!("arn:aws:iam:::user/{}", username);
             return Self {
                 principal: Principal::Aws(PrincipalId::String(arn)),
                 username: Some(username.to_string()),
@@ -28,14 +28,14 @@ impl AuthContext {
         }
 
         // Check Authorization header for AWS credentials
-        if let Some(auth_header) = req.headers().get("authorization")
+        if let Some(auth_header) = req.headers().get(AUTHORIZATION)
             && let Ok(auth_str) = auth_header.to_str()
         {
             // Basic parsing of AWS Signature V4 format
             // Format: AWS4-HMAC-SHA256 Credential=ACCESS_KEY/date/region/service/aws4_request
             if let Some(username) = Self::parse_access_key(auth_str) {
                 debug!(username = %username, "Authenticated user from Authorization header");
-                let arn = format!("arn:aws:iam::123456789012:user/{}", username);
+                let arn = format!("arn:aws:iam:::user/{}", username);
                 return Self {
                     principal: Principal::Aws(PrincipalId::String(arn)),
                     username: Some(username.clone()),

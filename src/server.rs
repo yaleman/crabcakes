@@ -34,14 +34,14 @@ impl Server {
         root_dir: PathBuf,
     ) -> Result<(Self, u16), Box<dyn std::error::Error + Send + Sync>> {
         // Try to find an available port in the high port range
-        for _ in 0..10 {
-            let port = rand::random::<u16>().saturating_add(10000);
-            let addr = format!("127.0.0.1:{}", port);
+        for _ in 0..100 {
+            let addr = format!("127.0.0.1:0");
 
             // Try to bind to the port
-            if TcpListener::bind(&addr).await.is_ok() {
+            if let Ok(listener) = TcpListener::bind(&addr).await {
                 // Use test_policies directory for tests
                 let policy_dir = PathBuf::from("test_policies");
+                let port = listener.local_addr()?.port();
                 let server = Self::new("127.0.0.1".to_string(), port, root_dir, policy_dir);
                 return Ok((server, port));
             }

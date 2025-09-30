@@ -6,7 +6,7 @@
             "Sid": "AllowUserAccess",
             "Effect": "Allow",
             "Principal": {
-                "AWS": "arn:aws:iam::123456789012:user/alice"
+                "AWS": "arn:aws:iam:::user/alice"
             },
             "Action": [
                 "s3:GetObject",

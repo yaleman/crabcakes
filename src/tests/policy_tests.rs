@@ -47,7 +47,7 @@ async fn test_alice_policy() {
     // Create a request from alice
     let iam_request = iam_rs::IAMRequest::new(
         iam_rs::Principal::Aws(iam_rs::PrincipalId::String(
-            "arn:aws:iam::123456789012:user/alice".to_string(),
+            "arn:aws:iam:::user/alice".to_string(),
         )),
         "s3:GetObject",
         iam_rs::Arn::parse("arn:aws:s3:::bucket1/alice/test.txt").unwrap(),
