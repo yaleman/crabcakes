@@ -4,6 +4,8 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 use mime_guess::MimeGuess;
+use tokio::fs as async_fs;
+use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 
 #[derive(Debug, Clone)]
@@ -173,6 +175,29 @@ impl FilesystemService {
 
     fn calculate_etag(&self, metadata: &fs::Metadata) -> String {
         calculate_etag_from_metadata(metadata)
+    }
+
+    pub async fn write_file(&self, key: &str, body: &[u8]) -> Result<FileMetadata, std::io::Error> {
+        let file_path = self.root_dir.join(key);
+        debug!(key = %key, path = ?file_path, size = body.len(), "Writing file");
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = file_path.parent() {
+            async_fs::create_dir_all(parent).await?;
+        }
+
+        // Write file atomically by writing to temp file and renaming
+        let temp_path = file_path.with_extension("tmp");
+        let mut file = async_fs::File::create(&temp_path).await?;
+        file.write_all(body).await?;
+        file.sync_all().await?;
+        drop(file);
+
+        // Atomic rename
+        async_fs::rename(&temp_path, &file_path).await?;
+
+        // Get metadata for the newly written file
+        self.get_file_metadata(key)
     }
 }
 

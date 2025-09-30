@@ -52,5 +52,31 @@ else
     echo "$HEADRES"
 fi
 
+# Test PutObject - upload a new file
+TEST_UPLOAD_FILE="uploaded-test.txt"
+echo "Testing file upload" > /tmp/$TEST_UPLOAD_FILE
+
+if AWS_ACCESS_KEY_ID="lol" AWS_SECRET_ACCESS_KEY="asdf" aws s3 cp /tmp/$TEST_UPLOAD_FILE \
+    s3://$TEST_BUCKET/$TEST_UPLOAD_FILE \
+    --endpoint-url http://$SERVER_ADDRESS; then
+    echo "File upload successful"
+else
+    echo "File upload failed"
+    exit 1
+fi
+
+# Verify the uploaded file can be retrieved
+GETRES="$(AWS_ACCESS_KEY_ID="lol" AWS_SECRET_ACCESS_KEY="asdf" aws s3 cp \
+    s3://$TEST_BUCKET/$TEST_UPLOAD_FILE - \
+    --endpoint-url http://$SERVER_ADDRESS)"
+
+if [[ "$GETRES" == "Testing file upload" ]]; then
+    echo "Retrieved uploaded file successfully"
+else
+    echo "Failed to retrieve uploaded file or content mismatch"
+    exit 1
+fi
+
+rm /tmp/$TEST_UPLOAD_FILE
 
 pkill -f crabcakes

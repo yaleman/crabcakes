@@ -294,3 +294,69 @@ async fn test_bucket2_json_file() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_put_object() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    let test_content = b"This is a test file uploaded via PutObject";
+    let test_key = "uploaded-file.txt";
+
+    // Test PutObject
+    let put_result = client
+        .put_object()
+        .bucket("bucket1")
+        .key(test_key)
+        .body(test_content.to_vec().into())
+        .send()
+        .await;
+    assert!(
+        put_result.is_ok(),
+        "PutObject failed: {:?}",
+        put_result.err()
+    );
+
+    let put_output = put_result.unwrap();
+    assert!(put_output.e_tag().is_some(), "Expected ETag in response");
+
+    // Verify we can retrieve the uploaded file
+    let get_result = client
+        .get_object()
+        .bucket("bucket1")
+        .key(test_key)
+        .send()
+        .await;
+    assert!(
+        get_result.is_ok(),
+        "GetObject after PutObject failed: {:?}",
+        get_result.err()
+    );
+
+    let get_output = get_result.unwrap();
+    assert_eq!(get_output.content_length(), Some(test_content.len() as i64));
+    assert_eq!(get_output.content_type(), Some("text/plain"));
+
+    let body = get_output.body.collect().await.unwrap().into_bytes();
+    assert_eq!(body.as_ref(), test_content);
+
+    // Verify HeadObject works
+    let head_result = client
+        .head_object()
+        .bucket("bucket1")
+        .key(test_key)
+        .send()
+        .await;
+    assert!(
+        head_result.is_ok(),
+        "HeadObject after PutObject failed: {:?}",
+        head_result.err()
+    );
+
+    let head_output = head_result.unwrap();
+    assert_eq!(head_output.content_length(), Some(test_content.len() as i64));
+    assert_eq!(head_output.content_type(), Some("text/plain"));
+
+    handle.abort();
+}

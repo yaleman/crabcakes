@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
 use tokio::fs::File;
@@ -35,9 +35,9 @@ impl S3Handler {
         &self,
         req: Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
-        let method = req.method();
-        let path = req.uri().path();
-        let query = req.uri().query().unwrap_or("");
+        let method = req.method().clone();
+        let path = req.uri().path().to_string();
+        let query = req.uri().query().unwrap_or("").to_string();
         let bucket_name = self.extract_bucket_name(&req);
 
         info!(
@@ -52,13 +52,14 @@ impl S3Handler {
         let is_list_operation = query.contains("list-type=2");
 
         // Parse path-style bucket requests: /bucket/ or /bucket/key
-        let (is_bucket_operation, key) = self.parse_path(path);
+        let (is_bucket_operation, key) = self.parse_path(&path);
+        let key = key.to_string();
 
-        let response = match (method, is_list_operation, is_bucket_operation, key, query) {
+        let response = match (&method, is_list_operation, is_bucket_operation, key.as_str(), query.as_str()) {
             // Any GET with list-type=2 is a ListBucket request
             (&Method::GET, true, _, _, query) => {
                 debug!("Handling ListBucket request (list-type=2 query)");
-                self.handle_list_bucket(query, &bucket_name, path).await
+                self.handle_list_bucket(query, &bucket_name, &path).await
             }
             // GET / - ListBuckets
             (&Method::GET, false, false, "", _) if path == "/" => {
@@ -69,7 +70,7 @@ impl S3Handler {
             (&Method::GET, false, true, _, _) => {
                 debug!("Handling ListBucket request (path-style, no query)");
                 // Treat as ListBucket with default parameters
-                self.handle_list_bucket("list-type=2", &bucket_name, path)
+                self.handle_list_bucket("list-type=2", &bucket_name, &path)
                     .await
             }
             // HEAD /key or HEAD /bucket/key
@@ -81,6 +82,11 @@ impl S3Handler {
             (&Method::GET, false, _, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling GetObject request");
                 self.handle_get_object(key).await
+            }
+            // PUT /key or PUT /bucket/key
+            (&Method::PUT, false, _, key, _) if !key.is_empty() => {
+                debug!(key = %key, "Handling PutObject request");
+                self.handle_put_object(req, key).await
             }
             _ => {
                 warn!(method = %method, path = %path, "Unknown request pattern");
@@ -325,6 +331,37 @@ impl S3Handler {
             Err(e) => {
                 warn!(key = %key, error = %e, "GetObject failed: file not found");
                 self.not_found_response()
+            }
+        }
+    }
+
+    async fn handle_put_object(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        key: &str,
+    ) -> Response<Full<Bytes>> {
+        // Read the request body
+        let body = match req.into_body().collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(e) => {
+                error!(key = %key, error = %e, "Failed to read request body");
+                return self.internal_error_response();
+            }
+        };
+
+        // Write the file
+        match self.filesystem.write_file(key, &body).await {
+            Ok(metadata) => {
+                debug!(key = %key, size = metadata.size, "PutObject success");
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("ETag", metadata.etag)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap()
+            }
+            Err(e) => {
+                error!(key = %key, error = %e, "Failed to write file");
+                self.internal_error_response()
             }
         }
     }
