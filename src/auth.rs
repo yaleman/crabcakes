@@ -24,6 +24,7 @@ pub struct AuthContext {
 }
 
 /// Verification result for AWS SigV4 signature
+#[derive(Debug)]
 pub struct VerifiedRequest {
     pub access_key_id: String,
     pub principal: scratchstack_aws_principal::Principal,
@@ -368,6 +369,77 @@ mod tests {
         assert_eq!(
             http_method_to_s3_action("DELETE", "/bucket1", "", true),
             "s3:DeleteBucket"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_verify_sigv4_missing_auth_header_required() {
+        let cred_store = Arc::new(CredentialStore::new_empty());
+
+        // Create request without Authorization header
+        let request = http::Request::builder()
+            .method("GET")
+            .uri("http://localhost:8090/bucket1/test.txt")
+            .body(vec![])
+            .unwrap();
+
+        // Verify with signature required - should fail
+        let result = verify_sigv4(request, cred_store, "crabcakes", true).await;
+
+        assert!(
+            result.is_err(),
+            "Missing auth header should fail when required"
+        );
+        if let Err(CrabCakesError::NoAuthenticationSupplied(_)) = result {
+            // Expected error type
+        } else {
+            panic!("Expected NoAuthenticationSupplied error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_verify_sigv4_missing_auth_header_not_required() {
+        let cred_store = Arc::new(CredentialStore::new_empty());
+
+        // Create request without Authorization header
+        let request = http::Request::builder()
+            .method("GET")
+            .uri("http://localhost:8090/bucket1/test.txt")
+            .body(vec![])
+            .unwrap();
+
+        // Verify with signature not required - should return error indicating no auth
+        let result = verify_sigv4(request, cred_store, "crabcakes", false).await;
+
+        assert!(
+            result.is_err(),
+            "Should return error for missing auth even when not required"
+        );
+        if let Err(CrabCakesError::NoAuthenticationSupplied(_)) = result {
+            // Expected error type
+        } else {
+            panic!("Expected NoAuthenticationSupplied error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_verify_sigv4_with_malformed_auth_header() {
+        let cred_store = Arc::new(CredentialStore::new_empty());
+
+        // Create request with malformed Authorization header
+        let request = http::Request::builder()
+            .method("GET")
+            .uri("http://localhost:8090/bucket1/test.txt")
+            .header(AUTHORIZATION, "Not a valid signature")
+            .body(vec![])
+            .unwrap();
+
+        // Verify - should fail
+        let result = verify_sigv4(request, cred_store, "crabcakes", true).await;
+
+        assert!(
+            result.is_err(),
+            "Malformed auth header should fail verification"
         );
     }
 }

@@ -85,4 +85,18 @@ impl CredentialStore {
     pub fn credential_count(&self) -> usize {
         self.credentials.len()
     }
+
+    /// Create an empty credential store (for testing)
+    #[cfg(test)]
+    pub fn new_empty() -> Self {
+        Self {
+            credentials: HashMap::new(),
+        }
+    }
+
+    /// Add a credential (for testing)
+    #[cfg(test)]
+    pub fn add_credential(&mut self, access_key_id: String, secret_access_key: String) {
+        self.credentials.insert(access_key_id, secret_access_key);
+    }
 }
