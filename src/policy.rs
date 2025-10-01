@@ -61,7 +61,7 @@ impl PolicyStore {
                             .and_then(|s| s.to_str())
                             .unwrap_or("unknown")
                             .to_string();
-                        info!(policy_name = %policy_name, path = ?path, "Loaded policy");
+                        debug!(policy_name = %policy_name, path = ?path, "Loaded policy");
                         policies.insert(policy_name, policy);
                     }
                     Err(e) => {

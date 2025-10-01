@@ -11,6 +11,7 @@ pub enum CrabCakesError {
     NoPolicies,
     NoAuthenticationSupplied(String),
     InvalidCredential,
+    Rustls(String),
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -25,7 +26,14 @@ impl std::fmt::Display for CrabCakesError {
                 write!(f, "No Authentication Supplied: {}", msg)
             }
             CrabCakesError::InvalidCredential => write!(f, "Invalid credential identifier"),
+            CrabCakesError::Rustls(msg) => write!(f, "Rustls Error: {}", msg),
         }
+    }
+}
+
+impl From<rustls::Error> for CrabCakesError {
+    fn from(err: rustls::Error) -> Self {
+        CrabCakesError::Rustls(err.to_string())
     }
 }
 

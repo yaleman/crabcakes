@@ -59,7 +59,7 @@ impl CredentialStore {
                     continue;
                 }
 
-                info!(access_key = %credential.access_key_id, path = ?path, "Loaded credential");
+                debug!(access_key = %credential.access_key_id, path = ?path, "Loaded credential");
                 credentials.insert(credential.access_key_id, credential.secret_access_key);
             }
         }

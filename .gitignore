@@ -3,3 +3,4 @@ config/
 data/
 .envrc
 
+tarpaulin-report.html

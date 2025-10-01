@@ -22,4 +22,10 @@ pub struct Cli {
 
     #[clap(long, default_value = "crabcakes", env = "CRABCAKES_REGION")]
     pub region: String,
+
+    #[clap(long, env = "CRABCAKES_TLS_CERT")]
+    pub tls_cert: Option<PathBuf>,
+
+    #[clap(long, env = "CRABCAKES_TLS_KEY")]
+    pub tls_key: Option<PathBuf>,
 }
