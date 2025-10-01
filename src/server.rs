@@ -136,8 +136,16 @@ impl Server {
             }
         );
 
-        match (self.tls_cert.is_some(), self.tls_key.is_some()) {
-            (true, true) => {
+        if self.tls_cert.is_some() && self.tls_key.is_none()
+            || self.tls_cert.is_none() && self.tls_key.is_some()
+        {
+            error!(
+                "Both TLS certificate and key must be provided to enable TLS. Starting server without TLS."
+            );
+        }
+
+        match self.tls_cert.is_some() && self.tls_key.is_some() {
+            true => {
                 let certs = self.load_cert()?;
                 let key = self.load_private_key()?;
 
@@ -176,13 +184,7 @@ impl Server {
                     });
                 }
             }
-            (true, false) | (false, true) => {
-                error!("Both TLS certificate and key must be provided to enable TLS");
-                Err(CrabCakesError::other(
-                    "Both TLS certificate and key must be provided to enable TLS",
-                ))
-            }
-            (false, false) => loop {
+            false => loop {
                 let (stream, remote_addr) = listener.accept().await?;
                 debug!(remote_addr = %remote_addr, "Accepted new connection");
 
