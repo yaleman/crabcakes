@@ -12,6 +12,8 @@ pub enum CrabCakesError {
     NoAuthenticationSupplied(String),
     InvalidCredential,
     Rustls(String),
+    Sigv4Verification(String),
+    NoUserIdInPrincipal,
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -27,6 +29,12 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::InvalidCredential => write!(f, "Invalid credential identifier"),
             CrabCakesError::Rustls(msg) => write!(f, "Rustls Error: {}", msg),
+            CrabCakesError::Sigv4Verification(msg) => {
+                write!(f, "SigV4 Verification Error: {}", msg)
+            }
+            CrabCakesError::NoUserIdInPrincipal => {
+                write!(f, "No User ID found in principal")
+            }
         }
     }
 }

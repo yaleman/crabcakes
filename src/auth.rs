@@ -102,7 +102,9 @@ pub async fn verify_sigv4(
     let mut service = service_for_signing_key_fn(get_signing_key);
 
     // S3-specific signature options
-    let signature_options = SignatureOptions::url_encode_form();
+    let signature_options = SignatureOptions::S3;
+
+    debug!("Signature options: {:?}", signature_options);
 
     // Validate the request
     let (_parts, _body, auth) = sigv4_validate_request(
@@ -115,7 +117,7 @@ pub async fn verify_sigv4(
         signature_options,
     )
     .await
-    .map_err(|e| CrabCakesError::other(format!("Signature verification failed: {}", e)))?;
+    .map_err(|e| CrabCakesError::Sigv4Verification(e.to_string()))?;
 
     // Extract username from principal identities
     let access_key_id = auth
@@ -128,7 +130,7 @@ pub async fn verify_sigv4(
             }
             _ => None,
         })
-        .ok_or_else(|| CrabCakesError::other("No user identity found in principal"))?;
+        .ok_or(CrabCakesError::NoUserIdInPrincipal)?;
 
     Ok(VerifiedRequest {
         access_key_id,

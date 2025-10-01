@@ -81,8 +81,25 @@ impl S3Handler {
             return Ok((None, buffered_body, parts));
         }
 
-        // Reconstruct the request with the buffered body for verification
-        let http_request = http::Request::from_parts(parts.clone(), body_vec.clone());
+        // Check if this is a streaming/chunked request that was signed with STREAMING-UNSIGNED-PAYLOAD-TRAILER
+        // In this case, we need to pass an empty body for signature verification
+        let sig_body_vec = if let Some(content_sha256) = parts.headers.get("x-amz-content-sha256") {
+            if let Ok(sha_str) = content_sha256.to_str() {
+                if sha_str.starts_with("STREAMING-") || sha_str == "UNSIGNED-PAYLOAD" {
+                    debug!(content_sha256 = %sha_str, "Detected streaming/unsigned payload, using empty body for signature verification");
+                    Vec::new()
+                } else {
+                    body_vec.clone()
+                }
+            } else {
+                body_vec.clone()
+            }
+        } else {
+            body_vec.clone()
+        };
+
+        // Reconstruct the request with the appropriate body for verification
+        let http_request = http::Request::from_parts(parts.clone(), sig_body_vec);
 
         // Verify the signature
         match verify_sigv4(
