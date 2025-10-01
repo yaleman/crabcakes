@@ -120,7 +120,7 @@ impl FilesystemService {
                 let path = entry.path();
 
                 if path.is_file() {
-                    let relative_path = path.strip_prefix(root).unwrap();
+                    let relative_path = path.strip_prefix(root).map_err(std::io::Error::other)?;
                     let key = relative_path.to_string_lossy().to_string();
 
                     if let Some(prefix) = prefix

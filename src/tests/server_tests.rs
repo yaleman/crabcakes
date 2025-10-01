@@ -1,5 +1,7 @@
+use chrono::NaiveDate;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use tempfile::TempDir;
 use tokio::time::{Duration, sleep};
 
@@ -47,12 +49,35 @@ async fn start_test_server(temp_dir: &Path) -> (tokio::task::JoinHandle<()>, u16
     (handle, port)
 }
 
+#[test]
+fn test_sigv4_key() {
+    use scratchstack_aws_signature::{KSecretKey, KeyLengthError};
+    let test_sak = "alicesecret123dddddddddddddddddddddddddd";
+    let secret_key = KSecretKey::from_str(test_sak).expect("Failed to create KSecretKey");
+
+    let date = NaiveDate::default();
+
+    let _signing_key = secret_key.to_ksigning(date, "crabcakes", "s3");
+
+    assert_eq!(
+        KSecretKey::from_str("tooshort"),
+        Err(KeyLengthError::TooShort)
+    );
+
+    assert_eq!(
+        KSecretKey::from_str(
+            "toolongtoolongtoolongtoolongtoolongtoolongtoolongtoolongtoolongtoolong"
+        ),
+        Err(KeyLengthError::TooLong)
+    );
+}
+
 async fn create_s3_client(port: u16) -> Client {
     // Use alice's test credentials that match credentials/alice.json
     let creds = Credentials::new("alice", "alicesecret123", None, None, "test");
     let config = aws_config::defaults(BehaviorVersion::latest())
         .credentials_provider(creds)
-        .region(Region::new("us-east-1"))
+        .region(Region::new("crabcakes"))
         .load()
         .await;
 

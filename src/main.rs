@@ -20,10 +20,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         cli.host,
         cli.port.get(),
         cli.root_dir,
-        cli.policy_dir,
-        cli.credentials_dir,
+        cli.config_dir,
         cli.require_signature,
         cli.region,
     );
-    server.run().await
+    server.run().await.map_err(|err| {
+        eprintln!("Server error: {}", err);
+        err.into()
+    })
 }

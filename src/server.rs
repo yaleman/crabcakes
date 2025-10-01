@@ -9,6 +9,7 @@ use tokio::net::TcpListener;
 use tracing::{debug, error, info};
 
 use crate::credentials::CredentialStore;
+use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::s3_handlers::S3Handler;
@@ -17,8 +18,7 @@ pub struct Server {
     host: String,
     port: u16,
     root_dir: PathBuf,
-    policy_dir: PathBuf,
-    credentials_dir: PathBuf,
+    config_dir: PathBuf,
     require_signature: bool,
     region: String,
 }
@@ -28,8 +28,7 @@ impl Server {
         host: String,
         port: u16,
         root_dir: PathBuf,
-        policy_dir: PathBuf,
-        credentials_dir: PathBuf,
+        config_dir: PathBuf,
         require_signature: bool,
         region: String,
     ) -> Self {
@@ -37,8 +36,7 @@ impl Server {
             host,
             port,
             root_dir,
-            policy_dir,
-            credentials_dir,
+            config_dir,
             require_signature,
             region,
         }
@@ -53,16 +51,14 @@ impl Server {
         for _ in 0..100 {
             // Try to bind to the port
             if let Ok(listener) = TcpListener::bind(&addr).await {
-                // Use test_policies and credentials directories for tests
-                let policy_dir = PathBuf::from("test_policies");
-                let credentials_dir = PathBuf::from("credentials");
+                // Use test_config directory for tests
+                let config_dir = PathBuf::from("test_config");
                 let port = listener.local_addr()?.port();
                 let server = Self::new(
                     "127.0.0.1".to_string(),
                     port,
                     root_dir,
-                    policy_dir,
-                    credentials_dir,
+                    config_dir,
                     false,                   // Don't require signatures in test mode
                     "crabcakes".to_string(), // Use default region for tests
                 );
@@ -73,27 +69,31 @@ impl Server {
         Err("Could not find an available port after 10 attempts".into())
     }
 
-    pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(self) -> Result<(), CrabCakesError> {
         let addr: SocketAddr = format!("{}:{}", self.host, self.port).parse()?;
 
         // Create filesystem service
         let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone()));
 
+        // Derive policy and credential paths from config_dir
+        let policy_dir = self.config_dir.join("policies");
+        let credentials_dir = self.config_dir.join("credentials");
+
         // Load IAM policies
-        let policy_store = match PolicyStore::new(self.policy_dir.clone()) {
+        let policy_store = match PolicyStore::new(policy_dir.clone()) {
             Ok(store) => Arc::new(store),
             Err(e) => {
                 error!(error = %e, "Failed to load policies, starting without policy enforcement");
-                Arc::new(PolicyStore::new(PathBuf::from("/nonexistent")).unwrap())
+                Arc::new(PolicyStore::new(PathBuf::from("/nonexistent"))?)
             }
         };
 
         // Load credentials
-        let credentials_store = match CredentialStore::new(self.credentials_dir.clone()) {
+        let credentials_store = match CredentialStore::new(credentials_dir.clone()) {
             Ok(store) => Arc::new(store),
             Err(e) => {
                 error!(error = %e, "Failed to load credentials, signature verification may fail");
-                Arc::new(CredentialStore::new(PathBuf::from("/nonexistent")).unwrap())
+                Arc::new(CredentialStore::new(PathBuf::from("/nonexistent"))?)
             }
         };
 
@@ -104,12 +104,14 @@ impl Server {
             credentials_store,
             self.region.clone(),
             self.require_signature,
+            addr.to_string(),
         ));
 
         info!(
             root_dir = ?self.root_dir,
-            policy_dir = ?self.policy_dir,
-            credentials_dir = ?self.credentials_dir,
+            config_dir = ?self.config_dir,
+            policy_dir = ?policy_dir,
+            credentials_dir = ?credentials_dir,
             region = %self.region,
             require_signature = %self.require_signature,
             address = %addr,

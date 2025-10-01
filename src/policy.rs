@@ -31,14 +31,11 @@ impl PolicyStore {
     pub fn new(policy_dir: PathBuf) -> Result<Self, CrabCakesError> {
         let mut policies = HashMap::new();
 
-        info!(policy_dir = ?policy_dir, "Loading IAM policies");
-
         if !policy_dir.exists() {
-            warn!(policy_dir = ?policy_dir, "Policy directory does not exist, starting with no policies");
-            return Ok(Self {
-                policies,
-                result_cache: Arc::new(RwLock::new(Default::default())),
-            });
+            warn!(policy_dir = ?policy_dir, "Policy directory does not exist, can't start without policies");
+            return Err(CrabCakesError::NoPolicies);
+        } else {
+            info!(policy_dir = ?policy_dir, "Loading IAM policies");
         }
 
         if !policy_dir.is_dir() {
@@ -48,7 +45,12 @@ impl PolicyStore {
 
         // Read all JSON files from the policy directory
         for entry in fs::read_dir(&policy_dir)? {
-            let entry = entry.inspect_err(|err| debug!("Failed to read {:?}", err))?;
+            let entry = entry.inspect_err(|err| {
+                debug!(
+                    "Failed to read an entry from the policy directory:  {:?}",
+                    err
+                )
+            })?;
             let path = entry.path();
 
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {

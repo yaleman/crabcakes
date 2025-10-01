@@ -2561,8 +2561,7 @@ dependencies = [
 [[package]]
 name = "scratchstack-aws-signature"
 version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "994f0ff7a53af37861624d34e5b323ccdc05fd3c5afb68b4cd7f030ef2d7969a"
+source = "git+https://github.com/yaleman/scratchstack-aws-signature?rev=7e849c52fc61ff20973fed9be738111cbdd48b3e#7e849c52fc61ff20973fed9be738111cbdd48b3e"
 dependencies = [
  "bytes",
  "chrono",

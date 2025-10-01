@@ -26,14 +26,15 @@ The server:
 
 - Binds to a configurable host/port (defaults: 127.0.0.1:8090)
 - Serves files from a configurable root directory (defaults: ./data)
-- Loads IAM policies from a configurable policy directory (defaults: ./policies)
-- Loads credentials from a configurable credentials directory (defaults: ./credentials)
+- Loads IAM policies and credentials from a configurable config directory (defaults: ./config)
+  - Policies loaded from `config_dir/policies/`
+  - Credentials loaded from `config_dir/credentials/`
 - Verifies AWS Signature V4 signatures on all requests (configurable via --require-signature)
 - Uses Tokio for async operations and connection handling
 - Implements AWS S3-compatible API with XML responses
 - Enforces IAM policy-based authorization on all S3 operations
 - Smart body buffering: memory for <50MB, disk spillover for ≥50MB
-- CLI accepts `--host`, `--port`, `--root-dir`, `--policy-dir`, `--credentials-dir`, and `--require-signature` flags or environment variables
+- CLI accepts `--host`, `--port`, `--root-dir`, `--config-dir`, and `--require-signature` flags or environment variables
 - Uses tracing for structured logging (configure with RUST_LOG environment variable)
 
 ## S3 API Operations
@@ -56,21 +57,26 @@ Creates a new bucket (top-level directory). Validates bucket name according to S
 Returns 409 Conflict if bucket already exists.
 
 #### DeleteBucket (DELETE /bucket)
+
 Deletes an empty bucket. Returns 409 Conflict with BucketNotEmpty error if the bucket contains objects.
 
 #### GetBucketLocation (GET /bucket?location)
+
 Returns the configured region for the bucket. Region is set via `--region` flag or `CRABCAKES_REGION` env var (default: "crabcakes").
 
 ### Object Listing Operations
 
 #### ListObjectsV2 (GET /?list-type=2)
+
 Lists objects with optional prefix filtering and pagination. Supports both:
+
 - Virtual-hosted style: `GET /?list-type=2&prefix=test`
 - Path-style: `GET /bucket1/?list-type=2` or `GET /bucket1?prefix=test.txt`
 
 Pagination uses `continuation-token` and `max-keys` parameters.
 
 #### ListObjectsV1 (GET /?prefix= or /?marker=)
+
 Legacy listing API for backward compatibility. Detected when query contains `prefix=`, `marker=`, or `max-keys=` without `list-type=2`.
 
 Pagination uses `marker` parameter instead of `continuation-token`.
@@ -78,29 +84,38 @@ Pagination uses `marker` parameter instead of `continuation-token`.
 ### Object Operations
 
 #### HeadObject (HEAD /key)
+
 Returns metadata for an object without the body. Includes:
+
 - Content-Type (detected via mime_guess)
 - Content-Length
 - ETag (generated from file size and modification time)
 - Last-Modified
 
 #### GetObject (GET /key)
+
 Returns the full object content with metadata headers
 
 #### PutObject (PUT /key)
+
 Uploads an object to the specified key
 
 #### CopyObject (PUT /dest-key with x-amz-copy-source header)
+
 Server-side copy of an object. No data transferred through client. Source specified in `x-amz-copy-source` header as `/bucket/key` or `bucket/key`.
 
 #### DeleteObject (DELETE /key)
+
 Deletes an object at the specified key. Returns 204 No Content even if the object doesn't exist (S3 idempotent behavior).
 
 #### DeleteObjects (POST /?delete)
+
 Batch delete multiple objects in a single request. Accepts XML request body with list of keys to delete. Returns XML response with successfully deleted objects and any errors. Supports `quiet` mode to reduce response size.
 
 ### Path-Style Request Handling
+
 The server supports AWS CLI path-style requests where the bucket name appears in the URL path:
+
 - `GET /bucket1/test.txt` → retrieves file at `./data/bucket1/test.txt`
 - `GET /bucket1?list-type=2&prefix=test.txt` → lists files with prefix `bucket1/test.txt`
 
@@ -109,7 +124,8 @@ The server supports AWS CLI path-style requests where the bucket name appears in
 The server implements full AWS Signature V4 (SigV4) authentication for production-ready request signing:
 
 ### Credential Management
-- Credentials stored in JSON files in `--credentials-dir` (default: `./credentials`)
+
+- Credentials stored in JSON files in `config_dir/credentials/` (default: `./config/credentials/`)
 - Each credential file contains:
   ```json
   {
@@ -121,6 +137,7 @@ The server implements full AWS Signature V4 (SigV4) authentication for productio
 - Credentials mapped by access_key_id for fast lookup during signature verification
 
 ### Signature Verification Flow
+
 1. **Request Buffering**: Body is buffered before verification
    - Small requests (<50MB) buffered in memory
    - Large requests (≥50MB) automatically spill to disk (uses `tempfile` crate)
@@ -135,16 +152,21 @@ The server implements full AWS Signature V4 (SigV4) authentication for productio
 4. **Policy Evaluation**: Uses authenticated principal for IAM authorization
 
 ### Configuration
-- `--credentials-dir <path>` or `CRABCAKES_CREDENTIALS_DIR`: Directory containing credential JSON files (default: `./credentials`)
+
+- `--config-dir <path>` or `CRABCAKES_CONFIG_DIR`: Base configuration directory (default: `./config`)
+  - Policies loaded from `config_dir/policies/`
+  - Credentials loaded from `config_dir/credentials/`
 - `--require-signature <bool>` or `CRABCAKES_REQUIRE_SIGNATURE`: Whether to require signature verification (default: `true`)
-- Region: Currently hardcoded to `us-east-1` (can be made configurable)
+- `--region <name>` or `CRABCAKES_REGION`: AWS region name (default: `crabcakes`)
 
 ### Test Mode
+
 - `Server::test_mode()` disables signature verification (`require_signature=false`)
 - Allows integration tests to run without signing requests
 - Uses wildcard principal with allow-all policy for authorization
 
 ### Request Body Buffering
+
 The `BufferedBody` enum handles smart body buffering:
 - **Memory variant**: Holds `Vec<u8>` for small requests
 - **Disk variant**: Holds `NamedTempFile` and size for large requests
@@ -153,8 +175,8 @@ The `BufferedBody` enum handles smart body buffering:
 - **Async I/O**: Uses tokio for async file operations
 
 ### Security Considerations
-- Test credentials in `credentials/` directory are for testing only
-- Production credentials should never be committed to git
+- Test credentials in `test_config/credentials/` directory are for testing only
+- Production credentials should never be committed to git (add `config/` to `.gitignore`)
 - Signature verification ensures request integrity and authenticity
 - Time-based signature expiration handled by scratchstack-aws-signature
 
@@ -180,7 +202,7 @@ After signature verification (or if signatures not required), authentication con
   - Default deny
   - Explicit deny wins over allow
   - At least one allow is needed
-- Loads all JSON policy files from `--policy-dir` at startup
+- Loads all JSON policy files from `config_dir/policies/` at startup
 - Caches policy evaluation results using SHA256 hashing for performance
 - Supports standard IAM policy syntax with:
   - Principal matching (AWS ARNs, wildcards)
@@ -189,7 +211,7 @@ After signature verification (or if signatures not required), authentication con
   - Context-based conditions (e.g., `${aws:username}` variable interpolation)
 
 ### Policy Examples
-See `test_policies/` directory for examples:
+See `test_config/policies/` directory for examples:
 - `allow-all.json` - Allows all S3 operations for all principals
 - `alice.json` - Allows Alice to access only her own prefix (`/bucket/alice/*`)
 
@@ -199,14 +221,13 @@ See `test_policies/` directory for examples:
 
 ```bash
 cargo build --quiet                                     # Build the project
-cargo run --quiet                                       # Run with defaults (127.0.0.1:8090, ./data, ./policies, ./credentials, require_signature=true)
+cargo run --quiet                                       # Run with defaults (127.0.0.1:8090, ./data, ./config, require_signature=true)
 cargo run --quiet -- --port 3000                        # Run on custom port
 cargo run --quiet -- --host 0.0.0.0 --port 8080         # Run on all interfaces
 cargo run --quiet -- --root-dir /path/to/data           # Serve from custom directory
-cargo run --quiet -- --policy-dir /path/to/policies     # Load policies from custom directory
-cargo run --quiet -- --credentials-dir /path/to/creds   # Load credentials from custom directory
+cargo run --quiet -- --config-dir /path/to/config       # Load policies and credentials from custom directory
 cargo run --quiet -- --require-signature false          # Disable signature verification (testing only)
-cargo run --quiet -- --region us-east-1                 # Set region (default: crabcakes)
+cargo run --quiet -- --region foobar                 # Set region (default: crabcakes)
 RUST_LOG=debug cargo run --quiet                        # Run with debug logging
 ```
 
@@ -221,7 +242,7 @@ bash manual_test.sh                     # Run manual AWS CLI tests
 The project includes:
 - 5 unit tests in `src/filesystem.rs`
 - Unit tests in `src/auth.rs` for authentication parsing and resource extraction
-- 22 integration tests in `src/tests/server_tests.rs`
+- 33 integration tests in `src/tests/server_tests.rs`
 - Policy evaluation tests in `src/tests/policy_tests.rs`
 - Manual test script using AWS CLI
 
@@ -260,12 +281,13 @@ Dev dependencies:
 ## Configuration
 
 The server accepts configuration via:
-- CLI flags: `--host`, `--port`, `--root-dir`, `--policy-dir`, `--credentials-dir`, `--require-signature`, `--region`
-- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_POLICY_DIR`, `CRABCAKES_CREDENTIALS_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`, `CRABCAKES_REGION`
+- CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`
+- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`, `CRABCAKES_REGION`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
-- Policy directory defaults to `./policies` (if it doesn't exist, server starts with no policies)
-- Credentials directory defaults to `./credentials` (if it doesn't exist, signature verification will fail)
+- Config directory defaults to `./config` (if it doesn't exist, server starts with no policies/credentials)
+  - Policies loaded from `config_dir/policies/`
+  - Credentials loaded from `config_dir/credentials/`
 - Signature verification defaults to `true` (set to `false` to disable)
 - Region defaults to `"crabcakes"` and is returned by GetBucketLocation
 
@@ -273,7 +295,9 @@ The server accepts configuration via:
 
 - Tests copy files from `testfiles/` directory as a base to work from
 - Integration tests use `Server::test_mode()` to find random available ports
-- Test mode uses `test_policies/` directory for policy files
+- Test mode uses `test_config/` as the base config directory
+  - Policies loaded from `test_config/policies/`
+  - Credentials loaded from `test_config/credentials/`
 - The command `cargo clippy --quiet --all-targets` must pass with no warnings
 - Tests use `aws-sdk-s3` and `aws-config` crates to ensure AWS CLI compatibility
 - Manual test script validates real-world AWS CLI usage

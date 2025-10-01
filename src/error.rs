@@ -1,3 +1,5 @@
+use std::net::AddrParseError;
+
 use iam_rs::EvaluationError;
 
 #[derive(Debug)]
@@ -6,6 +8,9 @@ pub enum CrabCakesError {
     Other(String),
     SerdeJson(serde_json::Error),
     Io(std::io::Error),
+    NoPolicies,
+    NoAuthenticationSupplied(String),
+    InvalidCredential,
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -15,6 +20,11 @@ impl std::fmt::Display for CrabCakesError {
             CrabCakesError::Other(msg) => write!(f, "Error: {}", msg),
             CrabCakesError::SerdeJson(e) => write!(f, "Serde-JSON Error: {}", e),
             CrabCakesError::Io(e) => write!(f, "IO Error: {:?}", e),
+            CrabCakesError::NoPolicies => write!(f, "No IAM policies found"),
+            CrabCakesError::NoAuthenticationSupplied(msg) => {
+                write!(f, "No Authentication Supplied: {}", msg)
+            }
+            CrabCakesError::InvalidCredential => write!(f, "Invalid credential identifier"),
         }
     }
 }
@@ -34,6 +44,18 @@ impl From<std::io::Error> for CrabCakesError {
 impl From<EvaluationError> for CrabCakesError {
     fn from(err: EvaluationError) -> Self {
         CrabCakesError::IamEvaluation(err)
+    }
+}
+
+impl From<AddrParseError> for CrabCakesError {
+    fn from(err: AddrParseError) -> Self {
+        CrabCakesError::Other(err.to_string())
+    }
+}
+
+impl From<CrabCakesError> for Box<dyn std::error::Error + Send + Sync> {
+    fn from(val: CrabCakesError) -> Self {
+        Box::new(std::io::Error::other(val.to_string()))
     }
 }
 

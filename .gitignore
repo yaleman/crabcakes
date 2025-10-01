@@ -1,6 +1,5 @@
 /target
+config/
 data/
-policies/
-credentials/
 .envrc
 

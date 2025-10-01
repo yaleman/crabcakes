@@ -14,20 +14,8 @@ pub struct Cli {
     #[clap(short, long, default_value = "./data", env = "CRABCAKES_ROOT_DIR")]
     pub root_dir: PathBuf,
 
-    #[clap(
-        short = 'P',
-        long,
-        default_value = "./policies",
-        env = "CRABCAKES_POLICY_DIR"
-    )]
-    pub policy_dir: PathBuf,
-
-    #[clap(
-        long,
-        default_value = "./credentials",
-        env = "CRABCAKES_CREDENTIALS_DIR"
-    )]
-    pub credentials_dir: PathBuf,
+    #[clap(short, long, default_value = "./config", env = "CRABCAKES_CONFIG_DIR")]
+    pub config_dir: PathBuf,
 
     #[clap(long, default_value = "true", env = "CRABCAKES_REQUIRE_SIGNATURE")]
     pub require_signature: bool,

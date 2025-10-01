@@ -14,6 +14,9 @@ use tracing::{debug, warn};
 use crate::credentials::CredentialStore;
 use crate::error::CrabCakesError;
 
+/// Mock AWS Account ID for generated principals
+const MOCK_ACCOUNT_ID: &str = "000000000000";
+
 /// Extract authentication context from HTTP request
 pub struct AuthContext {
     pub principal: Principal,
@@ -39,9 +42,14 @@ pub async fn verify_sigv4(
     if !has_auth && !require_signature {
         // Allow anonymous requests if signature not required
         warn!("No authorization header found, but signature not required - allowing anonymous");
-        return Err(CrabCakesError::other("No authorization header"));
+        // TODO: be more explicit about this
+        return Err(CrabCakesError::NoAuthenticationSupplied(
+            "No authorization header".to_string(),
+        ));
     } else if !has_auth {
-        return Err(CrabCakesError::other("Missing authorization header"));
+        return Err(CrabCakesError::NoAuthenticationSupplied(
+            "Missing authorization header".to_string(),
+        ));
     }
 
     // Create a closure that will fetch signing keys
@@ -54,13 +62,18 @@ pub async fn verify_sigv4(
                 debug!(access_key = %access_key, "Looking up signing key");
 
                 // Get the credential from the store
-                let credential = cred_store
+                let secret_access_key = cred_store
                     .get_credential(&access_key)
-                    .ok_or_else(|| BoxError::from(format!("Unknown access key: {}", access_key)))?;
+                    .ok_or(CrabCakesError::InvalidCredential)?;
 
                 // Convert secret key to KSecretKey
-                let secret_key = KSecretKey::from_str(&credential.secret_access_key)
-                    .map_err(|e| BoxError::from(format!("Invalid secret key: {}", e)))?;
+                let secret_key = KSecretKey::from_str(secret_access_key).map_err(|err| {
+                    debug!(
+                        access_key_id = access_key,
+                        "Failed to parse secret key: {}", err
+                    );
+                    CrabCakesError::InvalidCredential
+                })?;
 
                 // Generate signing key
                 let signing_key = secret_key.to_ksigning(
@@ -70,13 +83,11 @@ pub async fn verify_sigv4(
                 );
 
                 // Create a mock principal (we'll use the access key as username)
-                let principal = scratchstack_aws_principal::User::new(
-                    "aws",
-                    "000000000000", // Mock account ID
-                    "/",
-                    &access_key,
-                )
-                .map_err(|e| BoxError::from(format!("Failed to create principal: {}", e)))?;
+                let principal =
+                    scratchstack_aws_principal::User::new("aws", MOCK_ACCOUNT_ID, "/", &access_key)
+                        .map_err(|e| {
+                            BoxError::from(format!("Failed to create principal: {}", e))
+                        })?;
 
                 Ok(GetSigningKeyResponse::builder()
                     .principal(principal)
@@ -151,9 +162,11 @@ impl AuthContext {
             // Format: AWS4-HMAC-SHA256 Credential=ACCESS_KEY/date/region/service/aws4_request
             if let Some(username) = Self::parse_access_key(auth_str) {
                 debug!(username = %username, "Authenticated user from Authorization header");
-                let arn = format!("arn:aws:iam:::user/{}", username);
                 return Self {
-                    principal: Principal::Aws(PrincipalId::String(arn)),
+                    principal: Principal::Aws(PrincipalId::String(format!(
+                        "arn:aws:iam:::user/{}",
+                        username
+                    ))),
                     username: Some(username.clone()),
                 };
             }
@@ -288,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_parse_access_key() {
-        let auth = "AWS4-HMAC-SHA256 Credential=alice/20231201/us-east-1/s3/aws4_request";
+        let auth = "AWS4-HMAC-SHA256 Credential=alice/20231201/crabcakes/s3/aws4_request";
         assert_eq!(
             AuthContext::parse_access_key(auth),
             Some("alice".to_string())

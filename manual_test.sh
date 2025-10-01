@@ -8,13 +8,38 @@ SERVER_ADDRESS="127.0.0.1:$SERVER_PORT"
 TEST_BUCKET="bucket1"
 TEST_FILE="test.txt"
 
-# Use test credentials from test_credentials/testuser.json
-AWS_ACCESS_KEY_ID="testuser"
-AWS_SECRET_ACCESS_KEY="test123456789012345678901234567890123456"
+if [[ -z "$(which -a jq)" ]]; then
+    echo "jq is required for this script"
+    exit 1
+fi
 
-cargo run --quiet --bin crabcakes -- --port $SERVER_PORT --policy-dir ./test_policies --credentials-dir ./test_credentials &
+pkill -f target/debug/crabcakes
 
-sleep 2
+# Use test credentials from test_config/credentials/testuser.json
+AWS_ACCESS_KEY_ID="$(jq -r .access_key_id test_config/credentials/testuser.json)"
+AWS_SECRET_ACCESS_KEY="$(jq -r .secret_access_key test_config/credentials/testuser.json)"
+export AWS_REGION="crabcakes"
+
+TEMPDIR="$(mktemp -d)"
+
+cargo run --quiet --bin crabcakes -- --port $SERVER_PORT --config-dir ./test_config --root-dir "$TEMPDIR" &
+CRABCAKES_PID=$!
+echo "Started crabcakes with PID $CRABCAKES_PID"
+
+
+cp -R testfiles/* "$TEMPDIR/"
+
+
+while true; do
+    if curl -s "http://$SERVER_ADDRESS" > /dev/null; then
+        echo "Server is up"
+        break
+    else
+        echo "Waiting for server to start..."
+        sleep 1
+    fi
+done
+
 
 LSTEXT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 ls s3://$TEST_BUCKET/$TEST_FILE --endpoint-url http://$SERVER_ADDRESS)"
 
@@ -185,4 +210,7 @@ else
     echo "CreateBucket correctly rejected duplicate bucket"
 fi
 
-pkill -f crabcakes
+echo "All tests passed, killing crabcakes (PID $CRABCAKES_PID) and cleaning up $TEMPDIR"
+rm -rf "$TEMPDIR"
+kill "$CRABCAKES_PID"
+pkill -f target/debug/crabcakes
