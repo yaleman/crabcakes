@@ -1,6 +1,7 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use http::header::HOST;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
@@ -56,7 +57,7 @@ impl S3Handler {
         let (parts, body) = req.into_parts();
 
         // Buffer the body (memory or disk depending on size)
-        let buffered_body = match BufferedBody::from_incoming(body).await {
+        let mut buffered_body = match BufferedBody::from_incoming(body).await {
             Ok(body) => body,
             Err(e) => {
                 error!(error = %e, "Failed to buffer request body");
@@ -77,7 +78,7 @@ impl S3Handler {
         if !self.require_signature {
             debug!("Signature verification not required, allowing request");
             // Recreate BufferedBody from vec for later use
-            return Ok((None, BufferedBody::Memory(body_vec), parts));
+            return Ok((None, buffered_body, parts));
         }
 
         // Reconstruct the request with the buffered body for verification
@@ -98,11 +99,7 @@ impl S3Handler {
                     "Request signature verified successfully"
                 );
                 // Recreate BufferedBody from vec for later use
-                Ok((
-                    Some(verified.access_key_id),
-                    BufferedBody::Memory(body_vec),
-                    parts,
-                ))
+                Ok((Some(verified.access_key_id), buffered_body, parts))
             }
             Err(e) => {
                 warn!(error = %e, "Signature verification failed");
@@ -116,7 +113,7 @@ impl S3Handler {
         req: Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         // Verify signature and buffer body (or return error response)
-        let (authenticated_username, buffered_body, parts) =
+        let (authenticated_username, mut buffered_body, parts) =
             match self.verify_and_buffer_request(req).await {
                 Ok(result) => result,
                 Err(response) => return Ok(response),
@@ -128,7 +125,7 @@ impl S3Handler {
         let query = parts.uri.query().unwrap_or("").to_string();
         let mut bucket_name: String = String::new();
 
-        if let Some(host_header) = parts.headers.get("Host") {
+        if let Some(host_header) = parts.headers.get(HOST) {
             let host_header = match host_header.to_str() {
                 Ok(header) => header.to_string(),
                 Err(_) => return Ok(self.internal_error_response()),
@@ -145,8 +142,7 @@ impl S3Handler {
         let copy_source = parts
             .headers
             .get("x-amz-copy-source")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+            .and_then(|v| v.to_str().ok());
 
         info!(
             method = %method,
@@ -289,14 +285,19 @@ impl S3Handler {
             // PUT /key with x-amz-copy-source header - CopyObject
             (&Method::PUT, false, false, key, _) if !key.is_empty() && copy_source.is_some() => {
                 debug!(key = %key, copy_source = ?copy_source, "Handling CopyObject request");
-
-                self.handle_copy_object(&copy_source.unwrap_or_default(), key)
-                    .await
+                match copy_source {
+                    None => {
+                        Response::builder().status(StatusCode::BAD_REQUEST).body( Full::new(Bytes::from_static(
+                            b"<Error><Code>InvalidArgument</Code><Message>Missing x-amz-copy-source header</Message></Error>",
+                        ))).unwrap_or(self.internal_error_response())
+                    }
+                    Some(copy_source) => self.handle_copy_object(copy_source, key).await,
+                }
             }
             // PUT /key or PUT /bucket/key - PutObject
             (&Method::PUT, false, false, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling PutObject request");
-                self.handle_put_object(buffered_body, key).await
+                self.handle_put_object(&mut buffered_body, key).await
             }
             // DELETE /bucket - DeleteBucket
             (&Method::DELETE, false, true, "", _) => {
@@ -311,7 +312,7 @@ impl S3Handler {
             // POST /?delete - DeleteObjects (batch delete)
             (&Method::POST, false, _, _, query) if query.contains("delete") => {
                 debug!("Handling DeleteObjects request (batch delete)");
-                self.handle_delete_objects(buffered_body, bucket_for_operation)
+                self.handle_delete_objects(&mut buffered_body, bucket_for_operation)
                     .await
             }
             _ => {
@@ -672,7 +673,7 @@ impl S3Handler {
 
     async fn handle_put_object(
         &self,
-        buffered_body: BufferedBody,
+        buffered_body: &mut BufferedBody,
         key: &str,
     ) -> Response<Full<Bytes>> {
         // Get the body data from buffered body
@@ -713,7 +714,7 @@ impl S3Handler {
                     .status(StatusCode::OK)
                     .header("Location", format!("/{}", bucket))
                     .body(Full::new(Bytes::new()))
-                    .unwrap()
+                    .expect("Failed to build CreateBucket response")
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -778,7 +779,7 @@ impl S3Handler {
 
     async fn handle_delete_objects(
         &self,
-        body: BufferedBody,
+        body: &mut BufferedBody,
         bucket: &str,
     ) -> Response<Full<Bytes>> {
         debug!(bucket = %bucket, "Handling DeleteObjects request (batch delete)");
@@ -973,7 +974,7 @@ impl S3Handler {
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>",
             )))
-            .unwrap()
+            .expect("Failed to generate an internal error response")
     }
 
     fn bucket_already_exists_response(&self, bucket: &str) -> Response<Full<Bytes>> {

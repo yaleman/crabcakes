@@ -3,8 +3,20 @@ use crabcakes::cli::Cli;
 use crabcakes::server::Server;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Calculate worker threads: num_cpus - 2, minimum of 4
+    let worker_threads = std::cmp::max(num_cpus::get().saturating_sub(2), 4);
+
+    // Build Tokio runtime with calculated worker threads
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .enable_all()
+        .build()?;
+
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing subscriber
     tracing_subscriber::registry()
         .with(

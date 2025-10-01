@@ -1,3 +1,4 @@
+pub mod async_spooled_tempfile;
 pub mod auth;
 pub mod body_buffer;
 pub mod cli;
