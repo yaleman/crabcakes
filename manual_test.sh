@@ -3,7 +3,7 @@
 # set -e
 
 SERVER_PORT=18090
-SERVER_ADDRESS="${CRABCAKES_HOST:-127.0.0.1}:$SERVER_PORT"
+SERVER_ADDRESS="${CRABCAKES_HOSTNAME:-127.0.0.1}:$SERVER_PORT"
 
 if [ -n "${CRABCAKES_TLS_CERT}" ]; then
     echo "Running tests with TLS enabled"
@@ -31,7 +31,10 @@ export AWS_REGION="crabcakes"
 TEMPDIR="$(mktemp -d)"
 TEMPDIR2="$(mktemp -d)"
 
-cargo run --quiet --bin crabcakes -- --port $SERVER_PORT --config-dir ./test_config --root-dir "$TEMPDIR" &
+RUST_LOG=debug cargo run --quiet --bin crabcakes -- \
+    --port $SERVER_PORT \
+    --config-dir ./test_config \
+    --root-dir "$TEMPDIR" &
 CRABCAKES_PID=$!
 echo "Started crabcakes with PID $CRABCAKES_PID"
 

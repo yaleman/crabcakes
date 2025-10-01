@@ -43,6 +43,8 @@ impl BufferedBody {
     }
 
     /// Get the body as a byte vector (reading from disk if necessary)
+    /// Note: This method rewinds the file to the start before AND after reading
+    /// to allow multiple reads from the same buffer.
     pub async fn to_vec(&mut self) -> Result<Vec<u8>, CrabCakesError> {
         let mut buffer = Vec::with_capacity(self.size);
         self.file
@@ -53,6 +55,10 @@ impl BufferedBody {
             .read_to_end(&mut buffer)
             .await
             .map_err(|e| CrabCakesError::other(format!("Failed to read spooled file: {}", e)))?;
+        // Rewind again so the buffer can be read multiple times
+        self.file.seek(SeekFrom::Start(0)).await.map_err(|e| {
+            CrabCakesError::other(format!("Failed to rewind spooled file after read: {}", e))
+        })?;
         Ok(buffer)
     }
 }
