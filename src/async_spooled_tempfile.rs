@@ -324,3 +324,233 @@ impl AsyncSeek for SpooledTempFile {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn test_small_file_stays_in_memory() {
+        // Write 1KB of data (well under 50MB threshold)
+        let mut file = SpooledTempFile::new(50 * 1024 * 1024);
+        let data = vec![42u8; 1024];
+
+        file.write_all(&data).await.unwrap();
+        assert!(!file.is_rolled(), "Small file should stay in memory");
+        assert!(!file.is_poisoned(), "File should not be poisoned");
+
+        // Read it back
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await.unwrap();
+
+        assert_eq!(buf, data, "Data read should match data written");
+    }
+
+    #[tokio::test]
+    async fn test_large_file_spills_to_disk() {
+        // Write 150MB of data (exceeds 50MB threshold)
+        let mut file = SpooledTempFile::new(50 * 1024 * 1024);
+        let chunk_size = 10 * 1024 * 1024; // 10MB chunks
+        let num_chunks = 15; // 150MB total
+        let chunk = vec![123u8; chunk_size];
+
+        for _ in 0..num_chunks {
+            file.write_all(&chunk).await.unwrap();
+        }
+
+        // Flush to ensure spillover completes
+        file.flush().await.unwrap();
+
+        assert!(file.is_rolled(), "Large file should spill to disk");
+        assert!(!file.is_poisoned(), "File should not be poisoned");
+
+        // Read back first chunk to verify
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut buf = vec![0u8; chunk_size];
+        file.read_exact(&mut buf).await.unwrap();
+
+        assert_eq!(buf, chunk, "Data read should match data written");
+    }
+
+    #[tokio::test]
+    async fn test_exactly_at_threshold() {
+        // Write exactly 50MB
+        let threshold = 50 * 1024 * 1024;
+        let mut file = SpooledTempFile::new(threshold);
+        let data = vec![77u8; threshold];
+
+        file.write_all(&data).await.unwrap();
+        file.flush().await.unwrap();
+
+        // At exactly the threshold, should still be in memory
+        assert!(!file.is_rolled(), "Data at threshold should stay in memory");
+
+        // Read it back
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await.unwrap();
+
+        assert_eq!(buf.len(), threshold, "Should read back full data");
+    }
+
+    #[tokio::test]
+    async fn test_one_byte_over_threshold() {
+        // Write 50MB + 1 byte to trigger spillover
+        let threshold = 50 * 1024 * 1024;
+        let mut file = SpooledTempFile::new(threshold);
+        let data = vec![88u8; threshold + 1];
+
+        file.write_all(&data).await.unwrap();
+        file.flush().await.unwrap();
+
+        assert!(file.is_rolled(), "Data over threshold should spill to disk");
+
+        // Read it back
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await.unwrap();
+
+        assert_eq!(buf, data, "Data read should match data written");
+    }
+
+    #[tokio::test]
+    async fn test_seek_operations() {
+        let mut file = SpooledTempFile::new(1024 * 1024);
+
+        // Write some data
+        file.write_all(b"Hello, World!").await.unwrap();
+
+        // Seek to start
+        let pos = file.seek(SeekFrom::Start(0)).await.unwrap();
+        assert_eq!(pos, 0);
+
+        // Read "Hello"
+        let mut buf = vec![0u8; 5];
+        file.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"Hello");
+
+        // Seek to position 7
+        let pos = file.seek(SeekFrom::Start(7)).await.unwrap();
+        assert_eq!(pos, 7);
+
+        // Read "World"
+        let mut buf = vec![0u8; 5];
+        file.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"World");
+
+        // Seek from end
+        let pos = file.seek(SeekFrom::End(-1)).await.unwrap();
+        assert_eq!(pos, 12);
+
+        let mut buf = vec![0u8; 1];
+        file.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"!");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_writes_and_reads() {
+        let mut file = SpooledTempFile::new(1024 * 1024);
+
+        // Write multiple chunks
+        file.write_all(b"First ").await.unwrap();
+        file.write_all(b"Second ").await.unwrap();
+        file.write_all(b"Third").await.unwrap();
+
+        // Seek to start and read all
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut buf = String::new();
+        file.read_to_string(&mut buf).await.unwrap();
+
+        assert_eq!(buf, "First Second Third");
+    }
+
+    #[tokio::test]
+    async fn test_set_len_under_threshold() {
+        let mut file = SpooledTempFile::new(1024 * 1024);
+
+        // Set length to 100 bytes (under threshold)
+        file.set_len(100).await.unwrap();
+
+        assert!(!file.is_rolled(), "Should stay in memory");
+
+        // Write and read
+        file.write_all(b"test").await.unwrap();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+
+        let mut buf = vec![0u8; 4];
+        file.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"test");
+    }
+
+    #[tokio::test]
+    async fn test_set_len_over_threshold() {
+        let threshold = 1024;
+        let mut file = SpooledTempFile::new(threshold);
+
+        // Set length larger than threshold
+        file.set_len((threshold + 100) as u64).await.unwrap();
+
+        assert!(
+            file.is_rolled(),
+            "Should spill to disk when set_len exceeds threshold"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_into_inner_in_memory() {
+        let mut file = SpooledTempFile::new(1024 * 1024);
+        file.write_all(b"test data").await.unwrap();
+
+        let data = file.into_inner().await.unwrap();
+        match data {
+            SpooledData::InMemory(mut cursor) => {
+                std::io::Seek::seek(&mut cursor, SeekFrom::Start(0)).unwrap();
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut cursor, &mut buf).unwrap();
+                assert_eq!(&buf, b"test data");
+            }
+            SpooledData::OnDisk(_) => panic!("Expected in-memory data"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_into_inner_on_disk() {
+        let mut file = SpooledTempFile::new(100);
+        let data = vec![1u8; 200]; // Exceeds threshold
+        file.write_all(&data).await.unwrap();
+        file.flush().await.unwrap();
+
+        let spooled_data = file.into_inner().await.unwrap();
+        match spooled_data {
+            SpooledData::OnDisk(mut f) => {
+                use tokio::io::AsyncSeekExt;
+                f.seek(SeekFrom::Start(0)).await.unwrap();
+                let mut buf = Vec::new();
+                f.read_to_end(&mut buf).await.unwrap();
+                assert_eq!(buf.len(), 200);
+            }
+            SpooledData::InMemory(_) => panic!("Expected on-disk data"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_with_max_size_and_capacity() {
+        let file = SpooledTempFile::with_max_size_and_capacity(1024 * 1024, 512);
+        assert!(!file.is_rolled());
+        assert!(!file.is_poisoned());
+    }
+
+    #[tokio::test]
+    async fn test_empty_file() {
+        let mut file = SpooledTempFile::new(1024);
+
+        // Don't write anything, just read
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await.unwrap();
+
+        assert_eq!(buf.len(), 0, "Empty file should return empty buffer");
+        assert!(!file.is_rolled(), "Empty file should stay in memory");
+    }
+}
