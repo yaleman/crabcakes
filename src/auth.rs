@@ -249,6 +249,7 @@ pub fn http_method_to_s3_action(
         ("POST", _, q, _) if q.contains("delete") => "s3:DeleteObject", // DeleteObjects batch
 
         // Bucket operations
+        ("GET", _, _, true) => "s3:ListBucket", // GET on bucket (list operation)
         ("HEAD", _, _, true) => "s3:ListBucket", // HeadBucket uses ListBucket permission
         ("PUT", _, _, true) => "s3:CreateBucket",
         ("DELETE", _, _, true) => "s3:DeleteBucket",

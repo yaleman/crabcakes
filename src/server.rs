@@ -98,7 +98,7 @@ impl Server {
         };
 
         // Create S3 handler
-        let s3_handler = Arc::new(S3Handler::new(
+        let s3_handler: Arc<S3Handler> = Arc::new(S3Handler::new(
             filesystem,
             policy_store,
             credentials_store,
@@ -126,7 +126,7 @@ impl Server {
             debug!(remote_addr = %remote_addr, "Accepted new connection");
 
             let io = TokioIo::new(stream);
-            let handler = Arc::clone(&s3_handler);
+            let handler = s3_handler.clone();
 
             tokio::task::spawn(async move {
                 if let Err(err) = http1::Builder::new()

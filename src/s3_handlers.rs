@@ -19,6 +19,7 @@ use crate::xml_responses::{
 };
 
 pub struct S3Handler {
+    server_addr: String,
     filesystem: Arc<FilesystemService>,
     policy_store: Arc<PolicyStore>,
     credentials_store: Arc<CredentialStore>,
@@ -33,6 +34,7 @@ impl S3Handler {
         credentials_store: Arc<CredentialStore>,
         region: String,
         require_signature: bool,
+        server_addr: String,
     ) -> Self {
         Self {
             filesystem,
@@ -40,6 +42,7 @@ impl S3Handler {
             credentials_store,
             region,
             require_signature,
+            server_addr,
         }
     }
 
@@ -123,13 +126,20 @@ impl S3Handler {
         let method = parts.method.clone();
         let path = parts.uri.path().to_string();
         let query = parts.uri.query().unwrap_or("").to_string();
-        let bucket_name = parts
-            .headers
-            .get("Host")
-            .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.split('.').next())
-            .unwrap_or("bucket")
-            .to_string();
+        let mut bucket_name: String = String::new();
+
+        if let Some(host_header) = parts.headers.get("Host") {
+            let host_header = match host_header.to_str() {
+                Ok(header) => header.to_string(),
+                Err(_) => return Ok(self.internal_error_response()),
+            };
+            if host_header.ends_with(&format!(".{}", self.server_addr)) {
+                bucket_name = host_header
+                    .strip_suffix(&format!(".{}", self.server_addr))
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+            }
+        }
 
         // Check for x-amz-copy-source header to detect CopyObject operation
         let copy_source = parts
@@ -174,7 +184,13 @@ impl S3Handler {
         let (bucket, extracted_key) = extract_bucket_and_key(&path);
 
         // Use extracted bucket from path for path-style requests, fall back to host header
-        let bucket_for_operation = bucket.as_ref().unwrap_or(&bucket_name);
+        let bucket_for_operation = match bucket.as_ref() {
+            Some(val) => val.as_str(),
+            None => {
+                debug!(path=%path, "No bucket in path, using bucket from Host header if available");
+                bucket_name.as_str()
+            }
+        };
 
         // Build IAM request and evaluate policy
         let iam_request = match auth_context.build_iam_request(
@@ -273,8 +289,9 @@ impl S3Handler {
             // PUT /key with x-amz-copy-source header - CopyObject
             (&Method::PUT, false, false, key, _) if !key.is_empty() && copy_source.is_some() => {
                 debug!(key = %key, copy_source = ?copy_source, "Handling CopyObject request");
-                let source = copy_source.as_ref().unwrap();
-                self.handle_copy_object(source, key).await
+
+                self.handle_copy_object(&copy_source.unwrap_or_default(), key)
+                    .await
             }
             // PUT /key or PUT /bucket/key - PutObject
             (&Method::PUT, false, false, key, _) if !key.is_empty() => {
