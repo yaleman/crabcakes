@@ -23,6 +23,7 @@ use crate::policy::PolicyStore;
 use crate::s3_handlers::S3Handler;
 
 pub struct Server {
+    hostname: String,
     host: String,
     port: NonZeroU16,
     root_dir: PathBuf,
@@ -36,6 +37,7 @@ pub struct Server {
 impl Server {
     pub fn new(cli: Cli) -> Self {
         Self {
+            hostname: cli.hostname.unwrap_or(cli.host.clone()),
             host: cli.host,
             port: cli.port,
             root_dir: cli.root_dir,
@@ -58,6 +60,7 @@ impl Server {
             let config_dir = PathBuf::from("test_config");
             let port = listener.local_addr()?.port();
             let server = Server::new(Cli {
+                hostname: None,
                 host,
                 port: NonZeroU16::try_from(port).expect("Port 0 is non-zero"),
                 root_dir,
@@ -119,13 +122,18 @@ impl Server {
         let listener = TcpListener::bind(addr).await?;
 
         info!(
-            "Server listening on http{}://{}",
+            "Server listening on http{}://{}{}",
             if self.tls_cert.is_some() && self.tls_key.is_some() {
                 "s"
             } else {
                 ""
             },
-            addr
+            self.hostname,
+            if [80, 443].contains(&self.port.get()) {
+                String::new()
+            } else {
+                format!(":{}", self.port.get())
+            }
         );
 
         match (self.tls_cert.is_some(), self.tls_key.is_some()) {

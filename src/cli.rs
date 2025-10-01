@@ -10,6 +10,13 @@ pub struct Cli {
 
     #[clap(long, default_value = "127.0.0.1", env = "CRABCAKES_HOST")]
     pub host: String,
+    #[clap(
+        long,
+        default_value = "127.0.0.1",
+        env = "CRABCAKES_HOSTNAME",
+        help = "Hostname for TLS certificate verification"
+    )]
+    pub hostname: Option<String>,
 
     #[clap(short, long, default_value = "./data", env = "CRABCAKES_ROOT_DIR")]
     pub root_dir: PathBuf,
