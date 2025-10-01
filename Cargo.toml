@@ -15,8 +15,7 @@ hyper-util = { version = "0.1.17", features = [
     "http2",
     "server",
 ] }
-# here until https://github.com/dacut/scratchstack-aws-signature/pull/9 is merged/released
-scratchstack-aws-signature = { rev = "7e849c52fc61ff20973fed9be738111cbdd48b3e", git = "https://github.com/yaleman/scratchstack-aws-signature" }
+scratchstack-aws-signature = "0.11.3"
 scratchstack-aws-principal = "0.4.9"
 # iam-rs = "0.0.23"
 iam-rs = { path = "../iam-rs" }
