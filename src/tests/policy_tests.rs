@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[tokio::test]
 async fn test_policy_loading() {
     let policy_store =
-        PolicyStore::new(PathBuf::from("test_config/policies")).expect("Failed to load policies");
+        PolicyStore::new(&PathBuf::from("test_config/policies")).expect("Failed to load policies");
 
     // Should have loaded both alice.json and allow-all.json
     assert!(
@@ -21,7 +21,7 @@ async fn test_wildcard_principal() {
     crate::setup_test_logging();
 
     let policy_store =
-        PolicyStore::new(PathBuf::from("test_config/policies")).expect("Failed to load policies");
+        PolicyStore::new(&PathBuf::from("test_config/policies")).expect("Failed to load policies");
 
     // Create a simple request with anonymous principal
     let iam_request = iam_rs::IAMRequest::new(
@@ -47,7 +47,7 @@ async fn test_wildcard_principal() {
 async fn test_alice_policy() {
     setup_test_logging();
     let policy_store =
-        PolicyStore::new(PathBuf::from("test_config/policies")).expect("Failed to load policies");
+        PolicyStore::new(&PathBuf::from("test_config/policies")).expect("Failed to load policies");
 
     // Create a request from alice
     let iam_request = iam_rs::IAMRequest::new(

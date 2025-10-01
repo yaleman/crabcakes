@@ -9,7 +9,10 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, warn};
 
-use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
+use crate::auth::{
+    AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4,
+    verify_streaming_sigv4,
+};
 use crate::body_buffer::BufferedBody;
 use crate::credentials::CredentialStore;
 use crate::filesystem::FilesystemService;
@@ -56,14 +59,28 @@ impl S3Handler {
         // Extract the parts we need before consuming the request
         let (parts, body) = req.into_parts();
 
+        // Check if this is a streaming/chunked request that needs decoding
+        let needs_aws_chunk_decode =
+            if let Some(content_sha256) = parts.headers.get("x-amz-content-sha256") {
+                if let Ok(sha_str) = content_sha256.to_str() {
+                    sha_str == "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
         // Buffer the body (memory or disk depending on size)
-        let mut buffered_body = match BufferedBody::from_incoming(body).await {
-            Ok(body) => body,
-            Err(e) => {
-                error!(error = %e, "Failed to buffer request body");
-                return Err(self.internal_error_response());
-            }
-        };
+        // Decode AWS chunks if this is a streaming upload
+        let mut buffered_body =
+            match BufferedBody::from_incoming(body, needs_aws_chunk_decode).await {
+                Ok(body) => body,
+                Err(e) => {
+                    error!(error = %e, "Failed to buffer request body");
+                    return Err(self.internal_error_response());
+                }
+            };
 
         // Get the body as Vec<u8> for signature verification
         let body_vec = match buffered_body.to_vec().await {
@@ -81,48 +98,62 @@ impl S3Handler {
             return Ok((None, buffered_body, parts));
         }
 
-        // Check if this is a streaming/chunked request that was signed with STREAMING-UNSIGNED-PAYLOAD-TRAILER
-        // In this case, we need to pass an empty body for signature verification
-        let sig_body_vec = if let Some(content_sha256) = parts.headers.get("x-amz-content-sha256") {
+        // Check if this is a streaming/chunked request
+        let is_streaming = if let Some(content_sha256) = parts.headers.get("x-amz-content-sha256") {
             if let Ok(sha_str) = content_sha256.to_str() {
-                if sha_str.starts_with("STREAMING-") || sha_str == "UNSIGNED-PAYLOAD" {
-                    debug!(content_sha256 = %sha_str, "Detected streaming/unsigned payload, using empty body for signature verification");
-                    Vec::new()
-                } else {
-                    body_vec.clone()
-                }
+                sha_str.starts_with("STREAMING-") || sha_str == "UNSIGNED-PAYLOAD"
             } else {
-                body_vec.clone()
+                false
             }
         } else {
-            body_vec.clone()
+            false
         };
 
-        // Reconstruct the request with the appropriate body for verification
-        let http_request = http::Request::from_parts(parts.clone(), sig_body_vec);
+        // Verify signature using appropriate method
+        let verified = if is_streaming {
+            debug!("Using streaming signature verification");
+            match verify_streaming_sigv4(
+                parts.clone(),
+                self.credentials_store.clone(),
+                &self.region,
+            )
+            .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(error = %e, "Streaming signature verification failed");
+                    return Err(self
+                        .unauthorized_response(&format!("Signature verification failed: {}", e)));
+                }
+            }
+        } else {
+            debug!("Using standard signature verification");
+            // Reconstruct the request with the buffered body for verification
+            let http_request = http::Request::from_parts(parts.clone(), body_vec.clone());
 
-        // Verify the signature
-        match verify_sigv4(
-            http_request,
-            self.credentials_store.clone(),
-            &self.region,
-            self.require_signature,
-        )
-        .await
-        {
-            Ok(verified) => {
-                info!(
-                    access_key = %verified.access_key_id,
-                    "Request signature verified successfully"
-                );
-                // Recreate BufferedBody from vec for later use
-                Ok((Some(verified.access_key_id), buffered_body, parts))
+            match verify_sigv4(
+                http_request,
+                self.credentials_store.clone(),
+                &self.region,
+                self.require_signature,
+            )
+            .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(error = %e, "Signature verification failed");
+                    return Err(self
+                        .unauthorized_response(&format!("Signature verification failed: {}", e)));
+                }
             }
-            Err(e) => {
-                warn!(error = %e, "Signature verification failed");
-                Err(self.unauthorized_response(&format!("Signature verification failed: {}", e)))
-            }
-        }
+        };
+
+        info!(
+            access_key = %verified.access_key_id,
+            "Request signature verified successfully"
+        );
+
+        Ok((Some(verified.access_key_id), buffered_body, parts))
     }
 
     pub async fn handle_request(
@@ -466,12 +497,16 @@ impl S3Handler {
                 );
 
                 match response.to_xml() {
-                    Ok(xml) => Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/xml")
-                        .header("Content-Length", xml.len())
-                        .body(Full::new(Bytes::from(xml)))
-                        .unwrap(),
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .header("Content-Length", xml.len())
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate a ListBucketV1 response")
+                    }
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBucket response");
                         self.internal_error_response()
@@ -575,12 +610,16 @@ impl S3Handler {
                 );
 
                 match response.to_xml() {
-                    Ok(xml) => Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/xml")
-                        .header("Content-Length", xml.len())
-                        .body(Full::new(Bytes::from(xml)))
-                        .unwrap(),
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .header("Content-Length", xml.len())
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate a ListBucketV1 response")
+                    }
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBucketV1 response");
                         self.internal_error_response()
@@ -602,12 +641,16 @@ impl S3Handler {
                 let response = ListBucketsResponse::from_buckets(buckets);
 
                 match response.to_xml() {
-                    Ok(xml) => Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/xml")
-                        .header("Content-Length", xml.len())
-                        .body(Full::new(Bytes::from(xml)))
-                        .unwrap(),
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .header("Content-Length", xml.len())
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate a ListBuckets response")
+                    }
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBuckets response");
                         self.internal_error_response()
@@ -625,6 +668,8 @@ impl S3Handler {
         match self.filesystem.get_file_metadata(key) {
             Ok(metadata) => {
                 debug!(key = %key, size = metadata.size, "HeadObject success");
+
+                #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("Content-Type", metadata.content_type)
@@ -638,7 +683,7 @@ impl S3Handler {
                     )
                     .header("ETag", metadata.etag)
                     .body(Full::new(Bytes::new()))
-                    .unwrap()
+                    .expect("Failed to generate a HeadObject response")
             }
             Err(e) => {
                 warn!(key = %key, error = %e, "HeadObject failed: file not found");
@@ -655,6 +700,8 @@ impl S3Handler {
                     match file.read_to_end(&mut contents).await {
                         Ok(bytes_read) => {
                             debug!(key = %key, size = bytes_read, "GetObject success");
+
+                            #[allow(clippy::expect_used)]
                             Response::builder()
                                 .status(StatusCode::OK)
                                 .header("Content-Type", metadata.content_type)
@@ -668,7 +715,7 @@ impl S3Handler {
                                 )
                                 .header("ETag", metadata.etag)
                                 .body(Full::new(Bytes::from(contents)))
-                                .unwrap()
+                                .expect("Failed to generate a GetObject response")
                         }
                         Err(e) => {
                             error!(key = %key, error = %e, "Failed to read file contents");
@@ -708,11 +755,12 @@ impl S3Handler {
         match self.filesystem.write_file(key, &body).await {
             Ok(metadata) => {
                 debug!(key = %key, size = metadata.size, "PutObject success");
+                #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("ETag", metadata.etag)
                     .body(Full::new(Bytes::new()))
-                    .unwrap()
+                    .expect("Failed to generate a PutObject response")
             }
             Err(e) => {
                 error!(key = %key, error = %e, "Failed to write file");
@@ -727,6 +775,7 @@ impl S3Handler {
         match self.filesystem.create_bucket(bucket).await {
             Ok(()) => {
                 debug!(bucket = %bucket, "CreateBucket success");
+                #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("Location", format!("/{}", bucket))
@@ -754,10 +803,11 @@ impl S3Handler {
         match self.filesystem.delete_bucket(bucket).await {
             Ok(()) => {
                 debug!(bucket = %bucket, "DeleteBucket success");
+                #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::NO_CONTENT)
                     .body(Full::new(Bytes::new()))
-                    .unwrap()
+                    .expect("Failed to generate a DeleteBucket response")
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -782,10 +832,11 @@ impl S3Handler {
         match self.filesystem.delete_file(key).await {
             Ok(()) => {
                 debug!(key = %key, "DeleteObject success");
+                #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::NO_CONTENT)
                     .body(Full::new(Bytes::new()))
-                    .unwrap()
+                    .expect("Failed to generate a DeleteObject response")
             }
             Err(e) => {
                 error!(key = %key, error = %e, "Failed to delete file");
@@ -814,10 +865,11 @@ impl S3Handler {
             Ok(req) => req,
             Err(e) => {
                 error!(error = %e, "Failed to parse DeleteObjects XML request");
+                #[allow(clippy::expect_used)]
                 return Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .body(Full::new(Bytes::from("Invalid XML request")))
-                    .unwrap();
+                    .expect("Failed to generate a DeleteObjects response");
             }
         };
 
@@ -851,11 +903,13 @@ impl S3Handler {
         match response.to_xml() {
             Ok(xml) => {
                 debug!("DeleteObjects completed successfully");
+
+                #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("Content-Type", "application/xml")
                     .body(Full::new(Bytes::from(xml)))
-                    .unwrap()
+                    .expect("Failed to generate a DeleteObjects response")
             }
             Err(e) => {
                 error!(error = %e, "Failed to serialize DeleteObjects response");
@@ -884,11 +938,15 @@ impl S3Handler {
                 };
 
                 match response.to_xml() {
-                    Ok(xml) => Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/xml")
-                        .body(Full::new(Bytes::from(xml)))
-                        .unwrap(),
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate a CopyObject response")
+                    }
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CopyObject response");
                         self.internal_error_response()
@@ -924,11 +982,12 @@ impl S3Handler {
         match response.to_xml() {
             Ok(xml) => {
                 debug!(bucket = %bucket, region = %self.region, "GetBucketLocation success");
+                #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("Content-Type", "application/xml")
                     .body(Full::new(Bytes::from(xml)))
-                    .unwrap()
+                    .expect("Failed to generate a GetBucketLocation response")
             }
             Err(e) => {
                 error!(error = %e, "Failed to serialize GetBucketLocation response");
@@ -942,10 +1001,11 @@ impl S3Handler {
 
         if self.filesystem.bucket_exists(bucket) {
             debug!(bucket = %bucket, "HeadBucket success - bucket exists");
+            #[allow(clippy::expect_used)]
             Response::builder()
                 .status(StatusCode::OK)
                 .body(Full::new(Bytes::new()))
-                .unwrap()
+                .expect("Failed to generate a head bucket response")
         } else {
             warn!(bucket = %bucket, "Bucket does not exist");
             self.no_such_bucket_response(bucket)
@@ -953,26 +1013,29 @@ impl S3Handler {
     }
 
     fn not_found_response(&self) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("Content-Type", "application/xml")
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>",
             )))
-            .unwrap()
+            .expect("Failed to generate a not found response")
     }
 
     fn access_denied_response(&self) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::FORBIDDEN)
             .header("Content-Type", "application/xml")
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
             )))
-            .unwrap()
+            .expect("Failed to generate an access denied response")
     }
 
     fn unauthorized_response(&self, reason: &str) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header("Content-Type", "application/xml")
@@ -981,10 +1044,11 @@ impl S3Handler {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidAccessKeyId</Code><Message>{}</Message></Error>",
                 reason
             ))))
-            .unwrap()
+            .expect("Failed to generate an unauthorized response")
     }
 
     fn internal_error_response(&self) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .header("Content-Type", "application/xml")
@@ -995,6 +1059,7 @@ impl S3Handler {
     }
 
     fn bucket_already_exists_response(&self, bucket: &str) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::CONFLICT)
             .header("Content-Type", "application/xml")
@@ -1002,10 +1067,11 @@ impl S3Handler {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketAlreadyExists</Code><Message>The requested bucket name '{}' is not available.</Message></Error>",
                 bucket
             ))))
-            .unwrap()
+            .expect("Failed to generate a bucket already exists response")
     }
 
     fn bucket_not_empty_response(&self, bucket: &str) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::CONFLICT)
             .header("Content-Type", "application/xml")
@@ -1013,10 +1079,11 @@ impl S3Handler {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketNotEmpty</Code><Message>The bucket '{}' you tried to delete is not empty.</Message></Error>",
                 bucket
             ))))
-            .unwrap()
+            .expect("Failed to generate a bucket not empty response")
     }
 
     fn no_such_bucket_response(&self, bucket: &str) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("Content-Type", "application/xml")
@@ -1024,10 +1091,11 @@ impl S3Handler {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchBucket</Code><Message>The specified bucket '{}' does not exist.</Message></Error>",
                 bucket
             ))))
-            .unwrap()
+            .expect("Failed to generate a no such bucket response")
     }
 
     fn invalid_bucket_name_response(&self, reason: &str) -> Response<Full<Bytes>> {
+        #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header("Content-Type", "application/xml")
@@ -1035,6 +1103,6 @@ impl S3Handler {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidBucketName</Code><Message>{}</Message></Error>",
                 reason
             ))))
-            .unwrap()
+            .expect("Failed to generate an invalid bucket name response")
     }
 }

@@ -85,7 +85,7 @@ impl SpooledTempFile {
     pub async fn into_inner(self) -> Result<SpooledData, io::Error> {
         match self.inner.data_location {
             DataLocation::InMemory(opt_mem_buffer) => {
-                Ok(SpooledData::InMemory(opt_mem_buffer.unwrap()))
+                Ok(SpooledData::InMemory(opt_mem_buffer.unwrap_or_default()))
             }
             DataLocation::WritingToDisk(handle) => match handle.await {
                 Ok(Ok(file)) => Ok(SpooledData::OnDisk(file)),
@@ -103,7 +103,9 @@ impl SpooledTempFile {
         loop {
             match self.inner.data_location {
                 DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                    let mut mem_buffer = opt_mem_buffer.take().unwrap();
+                    #[allow(clippy::expect_used)]
+                    let mut mem_buffer =
+                        opt_mem_buffer.take().expect("Failed to get memory buffer");
 
                     let handle = tokio::task::spawn_blocking(move || {
                         let mut file = tempfile::tempfile()?;
@@ -163,9 +165,10 @@ impl SpooledTempFile {
         loop {
             match self.inner.data_location {
                 DataLocation::InMemory(ref mut opt_mem_buffer) => {
+                    #[allow(clippy::expect_used)]
                     opt_mem_buffer
                         .as_mut()
-                        .unwrap()
+                        .expect("Failed to get memory buffer")
                         .get_mut()
                         .resize(size as usize, 0);
                     return Ok(());
@@ -199,7 +202,8 @@ impl AsyncWrite for SpooledTempFile {
         loop {
             match me.inner.data_location {
                 DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                    let mut mem_buffer = opt_mem_buffer.take().unwrap();
+                    // opt_mem_buffer should never be None here, but handle it gracefully just in case
+                    let mut mem_buffer = opt_mem_buffer.take().unwrap_or_default();
 
                     if mem_buffer.position().saturating_add(buf.len() as u64) > me.max_size as u64 {
                         *opt_mem_buffer = Some(mem_buffer);
@@ -234,8 +238,15 @@ impl AsyncWrite for SpooledTempFile {
         let me = self.get_mut();
 
         match me.inner.data_location {
-            DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                Pin::new(opt_mem_buffer.as_mut().unwrap()).poll_flush(cx)
+            DataLocation::InMemory(ref mut opt_mem_buffer) =>
+            {
+                #[allow(clippy::expect_used)]
+                Pin::new(
+                    opt_mem_buffer
+                        .as_mut()
+                        .expect("Failed to get memory buffer"),
+                )
+                .poll_flush(cx)
             }
             DataLocation::WritingToDisk(_) => me.poll_roll(cx),
             DataLocation::OnDisk(ref mut file) => Pin::new(file).poll_flush(cx),
@@ -261,7 +272,13 @@ impl AsyncRead for SpooledTempFile {
         loop {
             match me.inner.data_location {
                 DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                    return Pin::new(opt_mem_buffer.as_mut().unwrap()).poll_read(cx, buf);
+                    #[allow(clippy::expect_used)]
+                    return Pin::new(
+                        opt_mem_buffer
+                            .as_mut()
+                            .expect("Failed to get memory buffer"),
+                    )
+                    .poll_read(cx, buf);
                 }
                 DataLocation::WritingToDisk(_) => {
                     if let Err(write_err) = ready!(me.poll_roll(cx)) {
@@ -286,8 +303,15 @@ impl AsyncSeek for SpooledTempFile {
         let me = self.get_mut();
 
         match me.inner.data_location {
-            DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                Pin::new(opt_mem_buffer.as_mut().unwrap()).start_seek(position)
+            DataLocation::InMemory(ref mut opt_mem_buffer) =>
+            {
+                #[allow(clippy::expect_used)]
+                Pin::new(
+                    opt_mem_buffer
+                        .as_mut()
+                        .expect("Failed to get memory buffer"),
+                )
+                .start_seek(position)
             }
             DataLocation::WritingToDisk(_) => Err(io::Error::other(
                 "other operation is pending, call poll_complete before start_seek",
@@ -305,7 +329,13 @@ impl AsyncSeek for SpooledTempFile {
         loop {
             match me.inner.data_location {
                 DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                    return Pin::new(opt_mem_buffer.as_mut().unwrap()).poll_complete(cx);
+                    #[allow(clippy::expect_used)]
+                    return Pin::new(
+                        opt_mem_buffer
+                            .as_mut()
+                            .expect("Failed to get memory buffer"),
+                    )
+                    .poll_complete(cx);
                 }
                 DataLocation::WritingToDisk(_) => {
                     if let Err(write_err) = ready!(me.poll_roll(cx)) {

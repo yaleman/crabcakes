@@ -29,7 +29,7 @@ pub struct CredentialStore {
 
 impl CredentialStore {
     /// Create a new CredentialStore by loading credentials from the given directory
-    pub fn new(credentials_dir: PathBuf) -> Result<Self, CrabCakesError> {
+    pub fn new(credentials_dir: &PathBuf) -> Result<Self, CrabCakesError> {
         let mut credentials = HashMap::new();
 
         info!(credentials_dir = ?credentials_dir, "Loading credentials");
@@ -41,11 +41,13 @@ impl CredentialStore {
 
         if !credentials_dir.is_dir() {
             error!(credentials_dir = ?credentials_dir, "Credentials path is not a directory");
-            return Err(CrabCakesError::other("Credentials path is not a directory"));
+            return Err(CrabCakesError::other(
+                &"Credentials path is not a directory",
+            ));
         }
 
         // Read all JSON files from the credentials directory
-        for entry in fs::read_dir(&credentials_dir)? {
+        for entry in fs::read_dir(credentials_dir)? {
             let entry = entry.inspect_err(|err| debug!("Failed to read {:?}", err))?;
             let path = entry.path();
 

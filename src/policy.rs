@@ -28,7 +28,7 @@ pub struct PolicyStore {
 
 impl PolicyStore {
     /// Create a new PolicyStore by loading policies from the given directory
-    pub fn new(policy_dir: PathBuf) -> Result<Self, CrabCakesError> {
+    pub fn new(policy_dir: &PathBuf) -> Result<Self, CrabCakesError> {
         let mut policies = HashMap::new();
 
         if !policy_dir.exists() {
@@ -40,11 +40,11 @@ impl PolicyStore {
 
         if !policy_dir.is_dir() {
             error!(policy_dir = ?policy_dir, "Policy path is not a directory");
-            return Err(CrabCakesError::other("Policy path is not a directory"));
+            return Err(CrabCakesError::other(&"Policy path is not a directory"));
         }
 
         // Read all JSON files from the policy directory
-        for entry in fs::read_dir(&policy_dir)? {
+        for entry in fs::read_dir(policy_dir)? {
             let entry = entry.inspect_err(|err| {
                 debug!(
                     "Failed to read an entry from the policy directory:  {:?}",

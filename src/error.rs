@@ -76,7 +76,7 @@ impl From<CrabCakesError> for Box<dyn std::error::Error + Send + Sync> {
 }
 
 impl CrabCakesError {
-    pub fn other(error: impl ToString) -> Self {
+    pub fn other(error: &impl ToString) -> Self {
         CrabCakesError::Other(error.to_string())
     }
 }

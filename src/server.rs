@@ -62,7 +62,12 @@ impl Server {
             let server = Server::new(Cli {
                 hostname: None,
                 host,
-                port: NonZeroU16::try_from(port).expect("Port 0 is non-zero"),
+                port: NonZeroU16::try_from(port).map_err(|_| {
+                    CrabCakesError::Other(format!(
+                        "Failed to convert port '{}' to NonZeroU16",
+                        port
+                    ))
+                })?,
                 root_dir,
                 config_dir,
                 require_signature: false, // Don't require signatures in test mode
@@ -89,10 +94,10 @@ impl Server {
         let credentials_dir = self.config_dir.join("credentials");
 
         // Load IAM policies
-        let policy_store = Arc::new(PolicyStore::new(policy_dir.clone())?);
+        let policy_store = Arc::new(PolicyStore::new(&policy_dir)?);
 
         // Load credentials
-        let credentials_store = Arc::new(CredentialStore::new(credentials_dir.clone())?);
+        let credentials_store = Arc::new(CredentialStore::new(&credentials_dir)?);
 
         if self.tls_cert.is_some() {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();

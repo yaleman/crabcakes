@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
 use scratchstack_aws_principal;
@@ -297,6 +298,229 @@ pub fn extract_bucket_and_key(path: &str) -> (Option<String>, Option<String>) {
             (Some(path.to_string()), None)
         }
     }
+}
+
+/// Parse AWS Authorization header to extract components
+/// Format: AWS4-HMAC-SHA256 Credential=ACCESS_KEY/DATE/REGION/SERVICE/aws4_request, SignedHeaders=..., Signature=...
+fn parse_authorization_header(
+    auth_header: &str,
+) -> Result<(String, String, Vec<String>, String), CrabCakesError> {
+    // Extract credential
+    let credential = auth_header
+        .split("Credential=")
+        .nth(1)
+        .and_then(|s| s.split(',').next())
+        .ok_or_else(|| {
+            CrabCakesError::Sigv4Verification(
+                "Missing Credential in Authorization header".to_string(),
+            )
+        })?;
+
+    let parts: Vec<&str> = credential.split('/').collect();
+    if parts.len() != 5 {
+        return Err(CrabCakesError::Sigv4Verification(
+            "Invalid Credential format".to_string(),
+        ));
+    }
+    let access_key = parts[0].to_string();
+    let date = parts[1].to_string();
+    let _region = parts[2].to_string();
+
+    // Extract signed headers
+    let signed_headers_str = auth_header
+        .split("SignedHeaders=")
+        .nth(1)
+        .and_then(|s| s.split(',').next())
+        .ok_or_else(|| {
+            CrabCakesError::Sigv4Verification(
+                "Missing SignedHeaders in Authorization header".to_string(),
+            )
+        })?;
+    let signed_headers: Vec<String> = signed_headers_str
+        .split(';')
+        .map(|s| s.to_string())
+        .collect();
+
+    // Extract signature
+    let signature = auth_header
+        .split("Signature=")
+        .nth(1)
+        .ok_or_else(|| {
+            CrabCakesError::Sigv4Verification(
+                "Missing Signature in Authorization header".to_string(),
+            )
+        })?
+        .trim()
+        .to_string();
+
+    Ok((access_key, date, signed_headers, signature))
+}
+
+/// Build canonical request for streaming uploads
+/// Uses the literal x-amz-content-sha256 header value instead of computing SHA256
+fn build_canonical_request(
+    parts: &http::request::Parts,
+    signed_headers: &[String],
+    body_hash: &str,
+) -> String {
+    let mut canonical = String::new();
+
+    // Method
+    canonical.push_str(parts.method.as_str());
+    canonical.push('\n');
+
+    // Canonical URI (S3-specific: don't double-encode)
+    canonical.push_str(parts.uri.path());
+    canonical.push('\n');
+
+    // Canonical query string (already normalized by AWS SDK)
+    canonical.push_str(parts.uri.query().unwrap_or(""));
+    canonical.push('\n');
+
+    // Canonical headers (only signed headers, sorted)
+    for header_name in signed_headers {
+        if let Some(header_value) = parts.headers.get(header_name) {
+            canonical.push_str(header_name);
+            canonical.push(':');
+            if let Ok(value_str) = header_value.to_str() {
+                canonical.push_str(value_str.trim());
+            }
+            canonical.push('\n');
+        }
+    }
+    canonical.push('\n');
+
+    // Signed headers list
+    canonical.push_str(&signed_headers.join(";"));
+    canonical.push('\n');
+
+    // Body hash (literal value from x-amz-content-sha256)
+    canonical.push_str(body_hash);
+
+    debug!("Canonical request for streaming:\n{}", canonical);
+    canonical
+}
+
+/// Compute string to sign
+fn compute_string_to_sign(
+    timestamp: &DateTime<Utc>,
+    region: &str,
+    canonical_request_hash: &str,
+) -> String {
+    let credential_scope = format!("{}/{}/s3/aws4_request", timestamp.format("%Y%m%d"), region);
+
+    format!(
+        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        timestamp.format("%Y%m%dT%H%M%SZ"),
+        credential_scope,
+        canonical_request_hash
+    )
+}
+
+/// Verify streaming signature for AWS SigV4
+pub async fn verify_streaming_sigv4(
+    parts: http::request::Parts,
+    credentials_store: Arc<CredentialStore>,
+    region: &str,
+) -> Result<VerifiedRequest, CrabCakesError> {
+    // Get Authorization header
+    let auth_header = parts
+        .headers
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| {
+            CrabCakesError::NoAuthenticationSupplied("Missing Authorization header".to_string())
+        })?;
+
+    // Parse Authorization header
+    let (access_key_id, _date_str, signed_headers, provided_signature) =
+        parse_authorization_header(auth_header)?;
+
+    debug!(access_key = %access_key_id, "Verifying streaming signature");
+
+    // Get x-amz-content-sha256 header value (literal string to use in canonical request)
+    let body_hash = parts
+        .headers
+        .get("x-amz-content-sha256")
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| {
+            CrabCakesError::Sigv4Verification("Missing x-amz-content-sha256 header".to_string())
+        })?;
+
+    // Get timestamp from x-amz-date header
+    let timestamp_str = parts
+        .headers
+        .get("x-amz-date")
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| {
+            CrabCakesError::Sigv4Verification("Missing x-amz-date header".to_string())
+        })?;
+
+    let timestamp = chrono::NaiveDateTime::parse_from_str(timestamp_str, "%Y%m%dT%H%M%SZ")
+        .map_err(|e| {
+            CrabCakesError::Sigv4Verification(format!("Invalid x-amz-date format: {}", e))
+        })?
+        .and_utc();
+
+    // Build canonical request using literal body hash
+    let canonical_request = build_canonical_request(&parts, &signed_headers, body_hash);
+
+    // Compute SHA256 of canonical request
+    let canonical_request_hash = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(canonical_request.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    // Compute string to sign
+    let string_to_sign = compute_string_to_sign(&timestamp, region, &canonical_request_hash);
+    debug!("String to sign:\n{}", string_to_sign);
+
+    // Get secret key from credential store
+    let secret_access_key = credentials_store
+        .get_credential(&access_key_id)
+        .ok_or(CrabCakesError::InvalidCredential)?;
+
+    // Derive signing key
+    let secret_key = KSecretKey::from_str(secret_access_key)
+        .map_err(|e| CrabCakesError::Sigv4Verification(format!("Invalid secret key: {}", e)))?;
+
+    let signing_key = secret_key.to_ksigning(timestamp.date_naive(), region, "s3");
+
+    // Compute expected signature
+    let expected_signature = {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+
+        let mut mac = HmacSha256::new_from_slice(signing_key.as_ref())
+            .map_err(|e| CrabCakesError::Sigv4Verification(format!("HMAC error: {}", e)))?;
+        mac.update(string_to_sign.as_bytes());
+        format!("{:x}", mac.finalize().into_bytes())
+    };
+
+    debug!(expected = %expected_signature, provided = %provided_signature, "Comparing signatures");
+
+    // Compare signatures
+    if expected_signature != provided_signature {
+        return Err(CrabCakesError::Sigv4Verification(format!(
+            "Signature mismatch: expected '{}', got '{}'",
+            expected_signature, provided_signature
+        )));
+    }
+
+    // Create principal
+    let principal =
+        scratchstack_aws_principal::User::new("aws", MOCK_ACCOUNT_ID, "/", &access_key_id)
+            .map_err(|e| {
+                CrabCakesError::Sigv4Verification(format!("Failed to create principal: {}", e))
+            })?;
+
+    Ok(VerifiedRequest {
+        access_key_id,
+        principal: principal.into(),
+    })
 }
 
 #[cfg(test)]
