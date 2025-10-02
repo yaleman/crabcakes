@@ -302,3 +302,4 @@ The server accepts configuration via:
 - Tests use `aws-sdk-s3` and `aws-config` crates to ensure AWS CLI compatibility
 - Manual test script validates real-world AWS CLI usage
 - Policy evaluation tests verify IAM policy logic with different principals and resources
+- always add tests that cover both signed and unsigned requests, and "this exists" and "this is missing" test cases. ensure that integration tests are also added to manual_test.sh

@@ -203,6 +203,110 @@ else
     exit 1
 fi
 
+# Test DeleteObjects (batch delete) - upload multiple test files first
+TEST_BATCH_FILE1="batch-delete-1.txt"
+TEST_BATCH_FILE2="batch-delete-2.txt"
+TEST_BATCH_FILE3="batch-delete-3.txt"
+
+echo "Test batch 1" > "$TEMPDIR2/$TEST_BATCH_FILE1"
+echo "Test batch 2" > "$TEMPDIR2/$TEST_BATCH_FILE2"
+echo "Test batch 3" > "$TEMPDIR2/$TEST_BATCH_FILE3"
+
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp "$TEMPDIR2/$TEST_BATCH_FILE1" \
+    s3://$TEST_BUCKET/$TEST_BATCH_FILE1 \
+    --endpoint-url "$SERVER_ADDRESS"; then
+    echo "Batch file 1 upload successful"
+else
+    echo "Batch file 1 upload failed"
+    exit 1
+fi
+
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp "$TEMPDIR2/$TEST_BATCH_FILE2" \
+    s3://$TEST_BUCKET/$TEST_BATCH_FILE2 \
+    --endpoint-url "$SERVER_ADDRESS"; then
+    echo "Batch file 2 upload successful"
+else
+    echo "Batch file 2 upload failed"
+    exit 1
+fi
+
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp "$TEMPDIR2/$TEST_BATCH_FILE3" \
+    s3://$TEST_BUCKET/$TEST_BATCH_FILE3 \
+    --endpoint-url "$SERVER_ADDRESS"; then
+    echo "Batch file 3 upload successful"
+else
+    echo "Batch file 3 upload failed"
+    exit 1
+fi
+
+# Create delete request JSON for batch delete
+cat > "$TEMPDIR2/delete.json" <<EOF
+{
+  "Objects": [
+    {"Key": "$TEST_BATCH_FILE1"},
+    {"Key": "$TEST_BATCH_FILE2"},
+    {"Key": "$TEST_BATCH_FILE3"}
+  ],
+  "Quiet": false
+}
+EOF
+
+# Test DeleteObjects batch operation
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api delete-objects \
+    --bucket $TEST_BUCKET \
+    --delete "file://$TEMPDIR2/delete.json" \
+    --endpoint-url "$SERVER_ADDRESS" > "$TEMPDIR2/delete-result.json" 2>&1; then
+    echo "DeleteObjects batch operation successful"
+
+    # Verify all 3 objects were deleted
+    DELETED_COUNT=$(jq -r '.Deleted | length' "$TEMPDIR2/delete-result.json")
+    if [ "$DELETED_COUNT" = "3" ]; then
+        echo "DeleteObjects correctly deleted 3 objects"
+    else
+        echo "DeleteObjects failed - expected 3 deleted objects, got $DELETED_COUNT"
+        cat "$TEMPDIR2/delete-result.json"
+        exit 1
+    fi
+else
+    echo "DeleteObjects batch operation failed"
+    cat "$TEMPDIR2/delete-result.json"
+    exit 1
+fi
+
+# Test DeleteObjects idempotency - deleting non-existent objects should succeed
+cat > "$TEMPDIR2/delete-nonexistent.json" <<EOF
+{
+  "Objects": [
+    {"Key": "nonexistent-batch-1.txt"},
+    {"Key": "nonexistent-batch-2.txt"}
+  ],
+  "Quiet": false
+}
+EOF
+
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api delete-objects \
+    --bucket $TEST_BUCKET \
+    --delete "file://$TEMPDIR2/delete-nonexistent.json" \
+    --endpoint-url "$SERVER_ADDRESS" > "$TEMPDIR2/delete-nonexistent-result.json" 2>&1; then
+    echo "DeleteObjects idempotent - deleting non-existent objects succeeded"
+
+    # Verify we got success responses
+    DELETED_COUNT=$(jq -r '.Deleted | length' "$TEMPDIR2/delete-nonexistent-result.json")
+    if [ "$DELETED_COUNT" = "2" ]; then
+        echo "DeleteObjects correctly returned success for 2 non-existent objects"
+    else
+        echo "DeleteObjects idempotency check failed - expected 2 deleted objects, got $DELETED_COUNT"
+        cat "$TEMPDIR2/delete-nonexistent-result.json"
+        exit 1
+    fi
+else
+    echo "DeleteObjects idempotency test failed"
+    cat "$TEMPDIR2/delete-nonexistent-result.json"
+    exit 1
+fi
+
+rm "$TEMPDIR2/$TEST_BATCH_FILE1" "$TEMPDIR2/$TEST_BATCH_FILE2" "$TEMPDIR2/$TEST_BATCH_FILE3" 2>/dev/null
+
 # Test DeleteBucket on empty bucket (should succeed)
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 rb \
     s3://$TEST_NEW_BUCKET \

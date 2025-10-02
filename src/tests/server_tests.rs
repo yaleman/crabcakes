@@ -755,6 +755,53 @@ async fn test_delete_objects_batch() {
 }
 
 #[tokio::test]
+async fn test_delete_objects_nonexistent() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Delete non-existent objects (should succeed per S3 idempotency)
+    let delete_result = client
+        .delete_objects()
+        .bucket("bucket1")
+        .delete(
+            aws_sdk_s3::types::Delete::builder()
+                .objects(
+                    aws_sdk_s3::types::ObjectIdentifier::builder()
+                        .key("nonexistent-1.txt")
+                        .build()
+                        .unwrap(),
+                )
+                .objects(
+                    aws_sdk_s3::types::ObjectIdentifier::builder()
+                        .key("nonexistent-2.txt")
+                        .build()
+                        .unwrap(),
+                )
+                .build()
+                .unwrap(),
+        )
+        .send()
+        .await;
+
+    assert!(
+        delete_result.is_ok(),
+        "DeleteObjects should succeed for non-existent objects: {:?}",
+        delete_result.err()
+    );
+
+    let response = delete_result.unwrap();
+    let deleted = response.deleted();
+    let errors = response.errors();
+
+    // Expect 2 deleted objects (S3 returns success even for non-existent objects)
+    assert_eq!(deleted.len(), 2, "Expected 2 deleted objects (idempotent)");
+    assert_eq!(errors.len(), 0, "Expected no errors");
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn test_copy_object() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;

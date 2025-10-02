@@ -29,11 +29,13 @@
 **Status:** Not Started
 
 #### 1. DeleteObjects (Batch Delete)
-- [ ] Parse POST /?delete XML request body
-- [ ] Delete multiple objects in single request
-- [ ] Return XML response with deleted objects and errors
-- [ ] Add `s3:DeleteObject` IAM action check
-- [ ] Write integration test
+- [x] Parse POST /?delete XML request body
+- [x] Delete multiple objects in single request
+- [x] Return XML response with deleted objects and errors
+- [x] Add `s3:DeleteObject` IAM action check
+- [x] Write integration test
+
+**Status:** ✅ Complete
 
 **Key Details:**
 - Request: `POST /?delete` with XML body listing keys
