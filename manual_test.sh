@@ -425,6 +425,7 @@ UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$A
     --key $MULTIPART_KEY \
     --endpoint-url "$SERVER_ADDRESS" 2>&1)
 
+# shellcheck disable=SC2181
 if [ $? -ne 0 ]; then
     echo "Failed to initiate multipart upload: $UPLOAD_OUTPUT"
     exit 1
@@ -447,6 +448,7 @@ PART1_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AW
     --body "$PART1" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1)
 
+# shellcheck disable=SC2181
 if [ $? -ne 0 ]; then
     echo "Failed to upload part 1: $PART1_OUTPUT"
     exit 1
@@ -465,6 +467,7 @@ PART2_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AW
     --body "$PART2" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1)
 
+# shellcheck disable=SC2181
 if [ $? -ne 0 ]; then
     echo "Failed to upload part 2: $PART2_OUTPUT"
     exit 1
@@ -514,6 +517,7 @@ COMPLETE_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="
     --multipart-upload "file://$TEMPDIR2/complete-multipart.json" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1)
 
+# shellcheck disable=SC2181
 if [ $? -ne 0 ]; then
     echo "Failed to complete multipart upload: $COMPLETE_OUTPUT"
     exit 1
