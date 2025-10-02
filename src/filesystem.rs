@@ -39,6 +39,11 @@ impl FilesystemService {
         Self { root_dir }
     }
 
+    /// Resolve a key to an absolute filesystem path
+    pub fn resolve_path(&self, key: &str) -> PathBuf {
+        self.root_dir.join(key)
+    }
+
     pub fn get_file_metadata(&self, key: &str) -> Result<FileMetadata, std::io::Error> {
         let file_path = self.root_dir.join(key);
         debug!(key = %key, path = ?file_path, "Getting file metadata");

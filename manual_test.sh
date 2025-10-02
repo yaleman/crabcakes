@@ -394,6 +394,182 @@ else
     echo "CreateBucket correctly rejected duplicate bucket"
 fi
 
+# Test Multipart Upload
+echo "Testing multipart upload..."
+MULTIPART_KEY="multipart-test-file.bin"
+MULTIPART_FILE="$TEMPDIR2/multipart-source.bin"
+
+# Create a 10MB test file using dd
+dd if=/dev/urandom of="$MULTIPART_FILE" bs=1M count=10 2>/dev/null
+if [ ! -f "$MULTIPART_FILE" ]; then
+    echo "Failed to create test file with dd"
+    exit 1
+fi
+echo "Created 10MB test file"
+
+# Split into 2 parts (5MB each)
+split -b 5M "$MULTIPART_FILE" "$TEMPDIR2/part-"
+PART1="$TEMPDIR2/part-aa"
+PART2="$TEMPDIR2/part-ab"
+
+if [ ! -f "$PART1" ] || [ ! -f "$PART2" ]; then
+    echo "Failed to split file into parts"
+    exit 1
+fi
+echo "Split file into 2 parts"
+
+# Initiate multipart upload
+UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api create-multipart-upload \
+    --bucket $TEST_BUCKET \
+    --key $MULTIPART_KEY \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+if [ $? -ne 0 ]; then
+    echo "Failed to initiate multipart upload: $UPLOAD_OUTPUT"
+    exit 1
+fi
+
+UPLOAD_ID=$(echo "$UPLOAD_OUTPUT" | jq -r '.UploadId')
+if [ -z "$UPLOAD_ID" ] || [ "$UPLOAD_ID" = "null" ]; then
+    echo "Failed to get upload ID from response: $UPLOAD_OUTPUT"
+    exit 1
+fi
+echo "Initiated multipart upload with ID: $UPLOAD_ID"
+
+# Upload part 1
+PART1_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api upload-part \
+    --bucket $TEST_BUCKET \
+    --key $MULTIPART_KEY \
+    --part-number 1 \
+    --upload-id "$UPLOAD_ID" \
+    --body "$PART1" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+if [ $? -ne 0 ]; then
+    echo "Failed to upload part 1: $PART1_OUTPUT"
+    exit 1
+fi
+
+ETAG1=$(echo "$PART1_OUTPUT" | jq -r '.ETag')
+echo "Uploaded part 1 with ETag: $ETAG1"
+
+# Upload part 2
+PART2_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api upload-part \
+    --bucket $TEST_BUCKET \
+    --key $MULTIPART_KEY \
+    --part-number 2 \
+    --upload-id "$UPLOAD_ID" \
+    --body "$PART2" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+if [ $? -ne 0 ]; then
+    echo "Failed to upload part 2: $PART2_OUTPUT"
+    exit 1
+fi
+
+ETAG2=$(echo "$PART2_OUTPUT" | jq -r '.ETag')
+echo "Uploaded part 2 with ETag: $ETAG2"
+
+# List parts to verify
+LIST_PARTS_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api list-parts \
+    --bucket $TEST_BUCKET \
+    --key $MULTIPART_KEY \
+    --upload-id "$UPLOAD_ID" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+PARTS_COUNT=$(echo "$LIST_PARTS_OUTPUT" | jq '.Parts | length')
+if [ "$PARTS_COUNT" != "2" ]; then
+    echo "ListParts failed - expected 2 parts, got $PARTS_COUNT"
+    echo "$LIST_PARTS_OUTPUT"
+    exit 1
+fi
+echo "ListParts successful - found 2 parts"
+
+# Create completion JSON
+cat > "$TEMPDIR2/complete-multipart.json" <<EOF
+{
+  "Parts": [
+    {
+      "PartNumber": 1,
+      "ETag": $ETAG1
+    },
+    {
+      "PartNumber": 2,
+      "ETag": $ETAG2
+    }
+  ]
+}
+EOF
+
+# Complete multipart upload
+COMPLETE_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api complete-multipart-upload \
+    --bucket $TEST_BUCKET \
+    --key $MULTIPART_KEY \
+    --upload-id "$UPLOAD_ID" \
+    --multipart-upload "file://$TEMPDIR2/complete-multipart.json" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+if [ $? -ne 0 ]; then
+    echo "Failed to complete multipart upload: $COMPLETE_OUTPUT"
+    exit 1
+fi
+echo "Completed multipart upload"
+
+# Download the file and verify it matches the original
+DOWNLOADED_FILE="$TEMPDIR2/downloaded-multipart.bin"
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3 cp "s3://$TEST_BUCKET/$MULTIPART_KEY" "$DOWNLOADED_FILE" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "Downloaded multipart file"
+else
+    echo "Failed to download multipart file"
+    exit 1
+fi
+
+# Compare checksums
+ORIGINAL_MD5=$(md5 -q "$MULTIPART_FILE" 2>/dev/null || md5sum "$MULTIPART_FILE" | awk '{print $1}')
+DOWNLOADED_MD5=$(md5 -q "$DOWNLOADED_FILE" 2>/dev/null || md5sum "$DOWNLOADED_FILE" | awk '{print $1}')
+
+if [ "$ORIGINAL_MD5" = "$DOWNLOADED_MD5" ]; then
+    echo "Multipart upload successful - checksums match"
+else
+    echo "Multipart upload failed - checksum mismatch"
+    echo "Original: $ORIGINAL_MD5"
+    echo "Downloaded: $DOWNLOADED_MD5"
+    exit 1
+fi
+
+# Clean up multipart test files
+rm -f "$MULTIPART_FILE" "$PART1" "$PART2" "$DOWNLOADED_FILE" "$TEMPDIR2/complete-multipart.json"
+
+# Test abort multipart upload (create a new upload and abort it)
+echo "Testing abort multipart upload..."
+ABORT_UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api create-multipart-upload \
+    --bucket $TEST_BUCKET \
+    --key "abort-test.bin" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+ABORT_UPLOAD_ID=$(echo "$ABORT_UPLOAD_OUTPUT" | jq -r '.UploadId')
+echo "Created upload to abort with ID: $ABORT_UPLOAD_ID"
+
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api abort-multipart-upload \
+    --bucket $TEST_BUCKET \
+    --key "abort-test.bin" \
+    --upload-id "$ABORT_UPLOAD_ID" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "AbortMultipartUpload successful"
+else
+    echo "AbortMultipartUpload failed"
+    exit 1
+fi
+
 echo "All tests passed, killing crabcakes (PID $CRABCAKES_PID) and cleaning up $TEMPDIR"
 rm -rf "$TEMPDIR"
 kill "$CRABCAKES_PID"

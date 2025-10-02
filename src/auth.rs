@@ -252,6 +252,18 @@ pub fn http_method_to_s3_action(
     is_bucket_operation: bool,
 ) -> &'static str {
     match (method, path, query, is_bucket_operation) {
+        // Multipart upload operations (must come before general POST cases)
+        ("POST", _, q, false) if q.contains("uploads") && !q.contains("uploadId") => {
+            "s3:PutObject" // InitiateMultipartUpload
+        }
+        ("PUT", _, q, false) if q.contains("uploadId") && q.contains("partNumber") => {
+            "s3:PutObject" // UploadPart
+        }
+        ("DELETE", _, q, false) if q.contains("uploadId") => "s3:AbortMultipartUpload",
+        ("GET", _, q, true) if q.contains("uploads") => "s3:ListBucketMultipartUploads",
+        ("GET", _, q, false) if q.contains("uploadId") => "s3:ListMultipartUploadParts",
+        ("POST", _, q, false) if q.contains("uploadId") => "s3:PutObject", // CompleteMultipartUpload
+
         // Special cases
         ("GET", _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
         ("GET", _, q, _) if q.contains("location") => "s3:GetBucketLocation",

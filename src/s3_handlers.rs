@@ -21,10 +21,13 @@ use crate::auth::{
 use crate::body_buffer::BufferedBody;
 use crate::credentials::CredentialStore;
 use crate::filesystem::FilesystemService;
+use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::xml_responses::{
-    CopyObjectResponse, DeleteError, DeleteRequest, DeleteResponse, DeletedObject,
-    GetBucketLocationResponse, ListBucketResponse, ListBucketV1Response, ListBucketsResponse,
+    CompleteMultipartUploadRequest, CompleteMultipartUploadResponse, CopyObjectResponse,
+    DeleteError, DeleteRequest, DeleteResponse, DeletedObject, GetBucketLocationResponse,
+    InitiateMultipartUploadResponse, ListBucketResponse, ListBucketV1Response, ListBucketsResponse,
+    ListMultipartUploadsResponse, ListPartsResponse, MultipartUploadItem, PartItem,
 };
 
 pub struct S3Handler {
@@ -32,6 +35,7 @@ pub struct S3Handler {
     filesystem: Arc<FilesystemService>,
     policy_store: Arc<PolicyStore>,
     credentials_store: Arc<CredentialStore>,
+    multipart_manager: Arc<MultipartManager>,
     region: String,
     require_signature: bool,
 }
@@ -41,6 +45,7 @@ impl S3Handler {
         filesystem: Arc<FilesystemService>,
         policy_store: Arc<PolicyStore>,
         credentials_store: Arc<CredentialStore>,
+        multipart_manager: Arc<MultipartManager>,
         region: String,
         require_signature: bool,
         server_addr: String,
@@ -49,6 +54,7 @@ impl S3Handler {
             filesystem,
             policy_store,
             credentials_store,
+            multipart_manager,
             region,
             require_signature,
             server_addr,
@@ -272,6 +278,27 @@ impl S3Handler {
             }
         }
 
+        // Parse multipart upload query parameters
+        let is_multipart_create = query.contains("uploads") && !query.contains("uploadId");
+        let upload_id_opt = if query.contains("uploadId=") {
+            query
+                .split('&')
+                .find(|p| p.starts_with("uploadId="))
+                .and_then(|p| p.strip_prefix("uploadId="))
+                .map(|s| s.to_string())
+        } else {
+            None
+        };
+        let part_number_opt = if query.contains("partNumber=") {
+            query
+                .split('&')
+                .find(|p| p.starts_with("partNumber="))
+                .and_then(|p| p.strip_prefix("partNumber="))
+                .and_then(|s| s.parse::<u32>().ok())
+        } else {
+            None
+        };
+
         // Determine if this is a V2 list operation (has list-type=2)
         let is_list_v2_operation = query.contains("list-type=2");
 
@@ -286,6 +313,66 @@ impl S3Handler {
             key.as_str(),
             query.as_str(),
         ) {
+            // Multipart upload operations
+            // POST /key?uploads - CreateMultipartUpload
+            (&Method::POST, false, false, key, _) if is_multipart_create && !key.is_empty() => {
+                debug!(key = %key, "Handling CreateMultipartUpload request");
+                self.handle_create_multipart_upload(bucket_for_operation, key)
+                    .await
+            }
+            // PUT /key?uploadId=X&partNumber=Y - UploadPart
+            (&Method::PUT, false, false, key, _)
+                if !key.is_empty() && upload_id_opt.is_some() && part_number_opt.is_some() =>
+            {
+                let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                let part_number = part_number_opt.unwrap_or(0);
+                debug!(
+                    key = %key,
+                    upload_id = %upload_id,
+                    part_number = %part_number,
+                    "Handling UploadPart request"
+                );
+                self.handle_upload_part(
+                    bucket_for_operation,
+                    key,
+                    upload_id,
+                    part_number,
+                    &mut buffered_body,
+                )
+                .await
+            }
+            // DELETE /key?uploadId=X - AbortMultipartUpload
+            (&Method::DELETE, false, false, _, _) if upload_id_opt.is_some() => {
+                let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                debug!(upload_id = %upload_id, "Handling AbortMultipartUpload request");
+                self.handle_abort_multipart_upload(bucket_for_operation, upload_id)
+                    .await
+            }
+            // GET /bucket?uploads - ListMultipartUploads
+            (&Method::GET, false, true, _, query) if query.contains("uploads") => {
+                debug!(bucket = %bucket_for_operation, "Handling ListMultipartUploads request");
+                self.handle_list_multipart_uploads(bucket_for_operation)
+                    .await
+            }
+            // GET /key?uploadId=X - ListParts
+            (&Method::GET, false, false, key, _) if !key.is_empty() && upload_id_opt.is_some() => {
+                let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                debug!(key = %key, upload_id = %upload_id, "Handling ListParts request");
+                self.handle_list_parts(bucket_for_operation, key, upload_id)
+                    .await
+            }
+            // POST /key?uploadId=X - CompleteMultipartUpload
+            (&Method::POST, false, false, key, _) if !key.is_empty() && upload_id_opt.is_some() => {
+                let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                debug!(key = %key, upload_id = %upload_id, "Handling CompleteMultipartUpload request");
+                self.handle_complete_multipart_upload(
+                    bucket_for_operation,
+                    key,
+                    upload_id,
+                    &mut buffered_body,
+                )
+                .await
+            }
             // Any GET with list-type=2 is a ListBucketV2 request
             (&Method::GET, true, _, _, query) => {
                 debug!("Handling ListBucketV2 request (list-type=2 query)");
@@ -935,7 +1022,8 @@ impl S3Handler {
         let source_key = copy_source.trim_start_matches('/');
 
         // Extract bucket and key from source for IAM check
-        let (source_bucket, source_object_key) = extract_bucket_and_key(&format!("/{}", source_key));
+        let (source_bucket, source_object_key) =
+            extract_bucket_and_key(&format!("/{}", source_key));
 
         // Check s3:GetObject permission on source
         let source_iam_request = match auth_context.build_iam_request(
@@ -950,7 +1038,11 @@ impl S3Handler {
             }
         };
 
-        match self.policy_store.evaluate_request(&source_iam_request).await {
+        match self
+            .policy_store
+            .evaluate_request(&source_iam_request)
+            .await
+        {
             Ok(true) => {
                 debug!("Authorization granted for source object");
             }
@@ -1054,6 +1146,357 @@ impl S3Handler {
         } else {
             warn!(bucket = %bucket, "Bucket does not exist");
             self.no_such_bucket_response(bucket)
+        }
+    }
+
+    // Multipart upload handlers
+
+    async fn handle_create_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, key = %key, "Handling CreateMultipartUpload request");
+
+        // Verify bucket exists
+        if !self.filesystem.bucket_exists(bucket) {
+            warn!(bucket = %bucket, "Bucket does not exist");
+            return self.no_such_bucket_response(bucket);
+        }
+
+        // Create multipart upload
+        match self.multipart_manager.create_upload(bucket, key).await {
+            Ok(metadata) => {
+                debug!(
+                    upload_id = %metadata.upload_id,
+                    bucket = %bucket,
+                    key = %key,
+                    "CreateMultipartUpload success"
+                );
+
+                let response = InitiateMultipartUploadResponse {
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    upload_id: metadata.upload_id,
+                };
+
+                match response.to_xml() {
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate CreateMultipartUpload response")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize CreateMultipartUpload response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    bucket = %bucket,
+                    key = %key,
+                    error = %e,
+                    "Failed to create multipart upload"
+                );
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_upload_part(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: u32,
+        body: &mut BufferedBody,
+    ) -> Response<Full<Bytes>> {
+        debug!(
+            bucket = %bucket,
+            key = %key,
+            upload_id = %upload_id,
+            part_number = %part_number,
+            "Handling UploadPart request"
+        );
+
+        // Get body data
+        let body_vec = match body.to_vec().await {
+            Ok(vec) => vec,
+            Err(e) => {
+                error!(error = %e, "Failed to read request body");
+                return self.internal_error_response();
+            }
+        };
+
+        // Upload part
+        match self
+            .multipart_manager
+            .upload_part(bucket, upload_id, part_number, &body_vec)
+            .await
+        {
+            Ok(part_info) => {
+                debug!(
+                    upload_id = %upload_id,
+                    part_number = %part_number,
+                    etag = %part_info.etag,
+                    "UploadPart success"
+                );
+
+                #[allow(clippy::expect_used)]
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("ETag", part_info.etag)
+                    .body(Full::new(Bytes::new()))
+                    .expect("Failed to generate UploadPart response")
+            }
+            Err(e) => {
+                error!(
+                    upload_id = %upload_id,
+                    part_number = %part_number,
+                    error = %e,
+                    "Failed to upload part"
+                );
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_abort_multipart_upload(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+    ) -> Response<Full<Bytes>> {
+        debug!(
+            bucket = %bucket,
+            upload_id = %upload_id,
+            "Handling AbortMultipartUpload request"
+        );
+
+        match self.multipart_manager.abort_upload(bucket, upload_id).await {
+            Ok(()) => {
+                debug!(upload_id = %upload_id, "AbortMultipartUpload success");
+                #[allow(clippy::expect_used)]
+                Response::builder()
+                    .status(StatusCode::NO_CONTENT)
+                    .body(Full::new(Bytes::new()))
+                    .expect("Failed to generate AbortMultipartUpload response")
+            }
+            Err(e) => {
+                error!(upload_id = %upload_id, error = %e, "Failed to abort multipart upload");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_list_multipart_uploads(&self, bucket: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling ListMultipartUploads request");
+
+        // Verify bucket exists
+        if !self.filesystem.bucket_exists(bucket) {
+            warn!(bucket = %bucket, "Bucket does not exist");
+            return self.no_such_bucket_response(bucket);
+        }
+
+        match self.multipart_manager.list_uploads(bucket).await {
+            Ok(uploads) => {
+                debug!(count = uploads.len(), "ListMultipartUploads success");
+
+                let upload_items: Vec<MultipartUploadItem> = uploads
+                    .into_iter()
+                    .map(|metadata| MultipartUploadItem {
+                        key: metadata.key,
+                        upload_id: metadata.upload_id,
+                        initiated: metadata
+                            .initiated
+                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                            .to_string(),
+                    })
+                    .collect();
+
+                let response = ListMultipartUploadsResponse {
+                    bucket: bucket.to_string(),
+                    uploads: upload_items,
+                };
+
+                match response.to_xml() {
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate ListMultipartUploads response")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize ListMultipartUploads response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                error!(bucket = %bucket, error = %e, "Failed to list multipart uploads");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_list_parts(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+    ) -> Response<Full<Bytes>> {
+        debug!(
+            bucket = %bucket,
+            key = %key,
+            upload_id = %upload_id,
+            "Handling ListParts request"
+        );
+
+        match self.multipart_manager.list_parts(bucket, upload_id).await {
+            Ok(parts) => {
+                debug!(count = parts.len(), "ListParts success");
+
+                let part_items: Vec<PartItem> = parts
+                    .into_iter()
+                    .map(|part| PartItem {
+                        part_number: part.part_number,
+                        etag: part.etag,
+                        size: part.size,
+                        last_modified: part
+                            .last_modified
+                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                            .to_string(),
+                    })
+                    .collect();
+
+                let response = ListPartsResponse {
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    upload_id: upload_id.to_string(),
+                    parts: part_items,
+                };
+
+                match response.to_xml() {
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate ListParts response")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize ListParts response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                error!(upload_id = %upload_id, error = %e, "Failed to list parts");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_complete_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        body: &mut BufferedBody,
+    ) -> Response<Full<Bytes>> {
+        debug!(
+            bucket = %bucket,
+            key = %key,
+            upload_id = %upload_id,
+            "Handling CompleteMultipartUpload request"
+        );
+
+        // Parse XML request body
+        let body_bytes = match body.to_vec().await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!(error = %e, "Failed to read request body");
+                return self.internal_error_response();
+            }
+        };
+
+        let complete_request: CompleteMultipartUploadRequest =
+            match quick_xml::de::from_reader(body_bytes.as_ref()) {
+                Ok(req) => req,
+                Err(e) => {
+                    error!(error = %e, "Failed to parse CompleteMultipartUpload XML request");
+                    #[allow(clippy::expect_used)]
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Full::new(Bytes::from("Invalid XML request")))
+                        .expect("Failed to generate error response");
+                }
+            };
+
+        // Extract parts as tuples (part_number, etag)
+        let parts: Vec<(u32, String)> = complete_request
+            .parts
+            .into_iter()
+            .map(|p| (p.part_number, p.etag))
+            .collect();
+
+        // Build full key path
+        let full_key = format!("{}/{}", bucket, key);
+        let dest_path = self.filesystem.resolve_path(&full_key);
+
+        // Complete multipart upload
+        match self
+            .multipart_manager
+            .complete_upload(bucket, upload_id, &parts, &dest_path)
+            .await
+        {
+            Ok(etag) => {
+                debug!(
+                    upload_id = %upload_id,
+                    key = %full_key,
+                    "CompleteMultipartUpload success"
+                );
+
+                let response = CompleteMultipartUploadResponse {
+                    location: format!("/{}/{}", bucket, key),
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    etag,
+                };
+
+                match response.to_xml() {
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate CompleteMultipartUpload response")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize CompleteMultipartUpload response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    upload_id = %upload_id,
+                    error = %e,
+                    "Failed to complete multipart upload"
+                );
+                self.internal_error_response()
+            }
         }
     }
 

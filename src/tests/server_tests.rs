@@ -950,7 +950,10 @@ async fn test_list_objects_v1() {
     }
 
     // Should find test.txt
-    assert!(!contents.is_empty(), "Should find objects with prefix 'test'");
+    assert!(
+        !contents.is_empty(),
+        "Should find objects with prefix 'test'"
+    );
 
     // Check for any key containing "test"
     let has_test_file = contents.iter().any(|obj| {
@@ -995,13 +998,20 @@ async fn test_list_objects_v1_pagination() {
     eprintln!("next_marker: {:?}", list.next_marker());
 
     // Should only get 1 object due to max_keys
-    assert_eq!(contents.len(), 1, "Should only return 1 object with max_keys=1");
+    assert_eq!(
+        contents.len(),
+        1,
+        "Should only return 1 object with max_keys=1"
+    );
 
     // Check if truncated - allow false if there's only one object total
     if contents.len() == 1 {
         eprintln!("Test passes - returned exactly 1 object as requested");
     } else {
-        assert!(list.is_truncated().unwrap_or(false), "Result should be truncated");
+        assert!(
+            list.is_truncated().unwrap_or(false),
+            "Result should be truncated"
+        );
         // Next marker should be present for pagination
         assert!(list.next_marker().is_some(), "NextMarker should be present");
     }

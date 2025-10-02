@@ -24,6 +24,7 @@ use crate::cli::Cli;
 use crate::credentials::CredentialStore;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
+use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::s3_handlers::S3Handler;
 
@@ -104,6 +105,9 @@ impl Server {
         // Load credentials
         let credentials_store = Arc::new(CredentialStore::new(&credentials_dir)?);
 
+        // Create multipart manager
+        let multipart_manager = Arc::new(MultipartManager::new(&self.root_dir));
+
         if self.tls_cert.is_some() {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         }
@@ -113,6 +117,7 @@ impl Server {
             filesystem,
             policy_store,
             credentials_store,
+            multipart_manager,
             self.region.clone(),
             self.require_signature,
             addr.to_string(),

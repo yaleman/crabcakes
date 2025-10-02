@@ -288,3 +288,120 @@ impl ListBucketV1Response {
         Ok(xml)
     }
 }
+
+// Multipart upload response structures
+
+#[derive(Serialize)]
+#[serde(rename = "InitiateMultipartUploadResult")]
+pub struct InitiateMultipartUploadResponse {
+    #[serde(rename = "Bucket")]
+    pub bucket: String,
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "UploadId")]
+    pub upload_id: String,
+}
+
+impl InitiateMultipartUploadResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename = "ListPartsResult")]
+pub struct ListPartsResponse {
+    #[serde(rename = "Bucket")]
+    pub bucket: String,
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "UploadId")]
+    pub upload_id: String,
+    #[serde(rename = "Part")]
+    pub parts: Vec<PartItem>,
+}
+
+#[derive(Serialize)]
+pub struct PartItem {
+    #[serde(rename = "PartNumber")]
+    pub part_number: u32,
+    #[serde(rename = "LastModified")]
+    pub last_modified: String,
+    #[serde(rename = "ETag")]
+    pub etag: String,
+    #[serde(rename = "Size")]
+    pub size: u64,
+}
+
+impl ListPartsResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename = "ListMultipartUploadsResult")]
+pub struct ListMultipartUploadsResponse {
+    #[serde(rename = "Bucket")]
+    pub bucket: String,
+    #[serde(rename = "Upload")]
+    pub uploads: Vec<MultipartUploadItem>,
+}
+
+#[derive(Serialize)]
+pub struct MultipartUploadItem {
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "UploadId")]
+    pub upload_id: String,
+    #[serde(rename = "Initiated")]
+    pub initiated: String,
+}
+
+impl ListMultipartUploadsResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename = "CompleteMultipartUpload")]
+pub struct CompleteMultipartUploadRequest {
+    #[serde(rename = "Part")]
+    pub parts: Vec<CompletePart>,
+}
+
+#[derive(Deserialize)]
+pub struct CompletePart {
+    #[serde(rename = "PartNumber")]
+    pub part_number: u32,
+    #[serde(rename = "ETag")]
+    pub etag: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename = "CompleteMultipartUploadResult")]
+pub struct CompleteMultipartUploadResponse {
+    #[serde(rename = "Location")]
+    pub location: String,
+    #[serde(rename = "Bucket")]
+    pub bucket: String,
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "ETag")]
+    pub etag: String,
+}
+
+impl CompleteMultipartUploadResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}

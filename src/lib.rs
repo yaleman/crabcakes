@@ -22,6 +22,7 @@ pub mod cli;
 pub mod credentials;
 pub mod error;
 pub mod filesystem;
+pub mod multipart;
 pub mod policy;
 pub mod s3_handlers;
 pub mod server;
