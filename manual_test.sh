@@ -151,6 +151,28 @@ else
     echo "HeadBucket correctly returned error for non-existent bucket"
 fi
 
+# Test GetBucketLocation on existing bucket
+LOCATION_RESULT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api get-bucket-location \
+    --bucket $TEST_BUCKET \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)"
+
+if echo "$LOCATION_RESULT" | jq -e '.LocationConstraint == "crabcakes"' > /dev/null 2>&1; then
+    echo "GetBucketLocation successful - region is crabcakes"
+else
+    echo "GetBucketLocation failed or returned wrong region: $LOCATION_RESULT"
+    exit 1
+fi
+
+# Test GetBucketLocation on non-existent bucket (should fail)
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api get-bucket-location \
+    --bucket "nonexistent-bucket" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "GetBucketLocation on non-existent bucket should fail"
+    exit 1
+else
+    echo "GetBucketLocation correctly returned error for non-existent bucket"
+fi
+
 # Test DeleteObject - delete the uploaded file
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 rm \
     s3://$TEST_BUCKET/$TEST_UPLOAD_FILE \

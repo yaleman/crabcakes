@@ -254,6 +254,7 @@ pub fn http_method_to_s3_action(
     match (method, path, query, is_bucket_operation) {
         // Special cases
         ("GET", _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
+        ("GET", _, q, _) if q.contains("location") => "s3:GetBucketLocation",
         ("GET", "/", _, _) => "s3:ListAllMyBuckets",
         ("POST", _, q, _) if q.contains("delete") => "s3:DeleteObject", // DeleteObjects batch
 
@@ -600,6 +601,11 @@ mod tests {
         assert_eq!(
             http_method_to_s3_action("DELETE", "/bucket1", "", true),
             "s3:DeleteBucket"
+        );
+        // GetBucketLocation
+        assert_eq!(
+            http_method_to_s3_action("GET", "/bucket1", "location", true),
+            "s3:GetBucketLocation"
         );
     }
 

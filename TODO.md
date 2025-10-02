@@ -53,10 +53,12 @@
 - Server-side operation (no body transfer)
 
 #### 3. GetBucketLocation
-- [ ] Add query parameter detection for `?location`
-- [ ] Return configured region in XML response
-- [ ] Add `s3:GetBucketLocation` IAM action
-- [ ] Write integration test
+- [x] Add query parameter detection for `?location`
+- [x] Return configured region in XML response
+- [x] Add `s3:GetBucketLocation` IAM action
+- [x] Write integration test
+
+**Status:** ✅ Complete
 
 **Key Details:**
 - Request: `GET /bucket?location`
