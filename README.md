@@ -4,9 +4,11 @@ A lightweight S3-compatible server that serves files from your filesystem.
 
 ## Features
 
-- S3 API compatibility (ListBuckets, ListObjectsV2, HeadObject, GetObject)
+- S3-compatible API with 10+ operations (buckets, objects, batch delete)
+- AWS Signature V4 authentication with IAM policy-based authorization
 - Path-style and virtual-hosted style requests
-- Structured logging with tracing
+- Streaming uploads with AWS chunked encoding support
+- Smart body buffering (memory/disk spillover)
 - Works with AWS CLI and SDKs
 
 ## Quick Start
@@ -28,14 +30,20 @@ RUST_LOG=debug cargo run --quiet
 # List buckets
 aws s3 ls --endpoint-url http://127.0.0.1:8090
 
-# List objects in a bucket
-aws s3 ls s3://bucket1/ --endpoint-url http://127.0.0.1:8090
+# Create bucket
+aws s3 mb s3://mybucket --endpoint-url http://127.0.0.1:8090
 
-# Get object metadata
-aws s3api head-object --bucket bucket1 --key test.txt --endpoint-url http://127.0.0.1:8090
+# Upload object
+aws s3 cp file.txt s3://mybucket/ --endpoint-url http://127.0.0.1:8090
 
 # Download object
-aws s3 cp s3://bucket1/test.txt . --endpoint-url http://127.0.0.1:8090
+aws s3 cp s3://mybucket/file.txt . --endpoint-url http://127.0.0.1:8090
+
+# Delete multiple objects
+aws s3api delete-objects --bucket mybucket --delete '{"Objects":[{"Key":"file1.txt"},{"Key":"file2.txt"}]}' --endpoint-url http://127.0.0.1:8090
+
+# Copy object (server-side)
+aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/source.txt --endpoint-url http://127.0.0.1:8090
 ```
 
 ## Testing
