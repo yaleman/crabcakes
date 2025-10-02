@@ -1,3 +1,7 @@
+//! Command-line interface configuration.
+//!
+//! Defines CLI arguments and configuration loading from environment variables.
+
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 

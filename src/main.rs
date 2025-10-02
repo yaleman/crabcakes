@@ -1,3 +1,7 @@
+//! Crabcakes - An S3-compatible server written in Rust.
+//!
+//! Main entry point that initializes tracing and starts the server.
+
 use clap::Parser;
 use crabcakes::cli::Cli;
 use crabcakes::server::Server;

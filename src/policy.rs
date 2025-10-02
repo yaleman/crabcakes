@@ -1,3 +1,7 @@
+//! IAM policy storage and evaluation.
+//!
+//! Loads JSON IAM policies and evaluates requests against them with caching support.
+
 use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, sync::Arc};

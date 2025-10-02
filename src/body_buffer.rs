@@ -1,3 +1,8 @@
+//! Smart request body buffering with AWS chunked encoding support.
+//!
+//! Buffers HTTP request bodies in memory (up to 50MB) with automatic spillover to disk,
+//! and optionally decodes AWS chunked encoding for streaming uploads.
+
 use std::io::SeekFrom;
 
 use http_body_util::BodyExt;
@@ -11,7 +16,7 @@ use tracing::debug;
 const MEMORY_THRESHOLD: usize = 50 * 1024 * 1024; // 50MB
 
 /// Decode AWS chunked encoding format
-/// Format: <hex-chunk-size>\r\n<chunk-data>\r\n...\r\n0\r\n<optional-trailers>\r\n\r\n
+/// Format: `<hex-chunk-size>\r\n<chunk-data>\r\n...\r\n0\r\n<optional-trailers>\r\n\r\n`
 fn decode_aws_chunks(data: &[u8]) -> Result<Vec<u8>, CrabCakesError> {
     let mut result = Vec::new();
     let mut pos = 0;

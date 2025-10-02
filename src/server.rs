@@ -1,3 +1,8 @@
+//! HTTP/HTTPS server setup and lifecycle management.
+//!
+//! Configures and runs the S3-compatible server with optional TLS support
+//! and dynamic worker thread allocation.
+
 use std::io::BufReader;
 use std::net::SocketAddr;
 use std::num::NonZeroU16;

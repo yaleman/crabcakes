@@ -1,3 +1,7 @@
+//! AWS S3-compatible XML response serialization.
+//!
+//! Defines response structures and XML serialization for S3 API operations.
+
 use chrono::Utc;
 use quick_xml::se::to_string;
 use serde::{Deserialize, Serialize};

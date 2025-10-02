@@ -1,3 +1,5 @@
+//! Centralized error types for the crabcakes S3 server.
+
 use std::net::AddrParseError;
 
 use iam_rs::EvaluationError;

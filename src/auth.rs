@@ -1,3 +1,8 @@
+//! AWS Signature Version 4 authentication and authorization.
+//!
+//! Provides signature verification for both standard and streaming S3 requests,
+//! along with IAM request context building for policy evaluation.
+
 use std::str::FromStr;
 use std::sync::Arc;
 

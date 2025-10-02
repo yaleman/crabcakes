@@ -1,3 +1,7 @@
+//! AWS credential storage and management.
+//!
+//! Loads and manages AWS access key credentials from JSON files for signature verification.
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;

@@ -1,3 +1,8 @@
+//! Filesystem-backed S3 storage operations.
+//!
+//! Implements bucket and object operations using the local filesystem,
+//! with metadata extraction and validation.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;

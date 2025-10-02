@@ -3,7 +3,7 @@
 //! This module provides an async version of `tempfile::SpooledTempFile` that stores data
 //! in memory until it exceeds a threshold, then spills to disk automatically.
 //!
-//! Based on: https://github.com/AverageADF/async-spooled-tempfile
+//! Inspired by: <https://github.com/AverageADF/async-spooled-tempfile>
 
 use std::io::{self, Cursor, Seek, SeekFrom, Write};
 use std::pin::Pin;

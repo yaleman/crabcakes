@@ -1,3 +1,8 @@
+//! S3 API request handlers and routing.
+//!
+//! Implements AWS S3-compatible API operations including bucket and object management,
+//! with signature verification and IAM authorization.
+
 use std::convert::Infallible;
 use std::sync::Arc;
 
