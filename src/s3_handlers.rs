@@ -344,7 +344,7 @@ impl S3Handler {
                             b"<Error><Code>InvalidArgument</Code><Message>Missing x-amz-copy-source header</Message></Error>",
                         ))).unwrap_or(self.internal_error_response())
                     }
-                    Some(copy_source) => self.handle_copy_object(copy_source, key).await,
+                    Some(copy_source) => self.handle_copy_object(copy_source, key, &auth_context).await,
                 }
             }
             // PUT /key or PUT /bucket/key - PutObject
@@ -923,11 +923,51 @@ impl S3Handler {
         }
     }
 
-    async fn handle_copy_object(&self, copy_source: &str, dest_key: &str) -> Response<Full<Bytes>> {
+    async fn handle_copy_object(
+        &self,
+        copy_source: &str,
+        dest_key: &str,
+        auth_context: &AuthContext,
+    ) -> Response<Full<Bytes>> {
         debug!(copy_source = %copy_source, dest_key = %dest_key, "Handling CopyObject request");
 
         // Parse copy source - format is /bucket/key or bucket/key
         let source_key = copy_source.trim_start_matches('/');
+
+        // Extract bucket and key from source for IAM check
+        let (source_bucket, source_object_key) = extract_bucket_and_key(&format!("/{}", source_key));
+
+        // Check s3:GetObject permission on source
+        let source_iam_request = match auth_context.build_iam_request(
+            "s3:GetObject",
+            source_bucket.as_deref(),
+            source_object_key.as_deref(),
+        ) {
+            Ok(req) => req,
+            Err(e) => {
+                error!(error = %e, "Failed to build IAM request for source");
+                return self.internal_error_response();
+            }
+        };
+
+        match self.policy_store.evaluate_request(&source_iam_request).await {
+            Ok(true) => {
+                debug!("Authorization granted for source object");
+            }
+            Ok(false) => {
+                warn!(
+                    principal = ?source_iam_request.principal,
+                    action = "s3:GetObject",
+                    resource = ?source_iam_request.resource,
+                    "Access denied for source object"
+                );
+                return self.access_denied_response();
+            }
+            Err(e) => {
+                error!(error = %e, "Policy evaluation failed for source");
+                return self.internal_error_response();
+            }
+        }
 
         match self.filesystem.copy_file(source_key, dest_key).await {
             Ok(metadata) => {

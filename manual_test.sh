@@ -173,6 +173,52 @@ else
     echo "GetBucketLocation correctly returned error for non-existent bucket"
 fi
 
+# Test CopyObject - server-side copy of existing object
+TEST_COPY_KEY="test-copy.txt"
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api copy-object \
+    --bucket $TEST_BUCKET \
+    --key $TEST_COPY_KEY \
+    --copy-source "$TEST_BUCKET/$TEST_FILE" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "CopyObject successful"
+else
+    echo "CopyObject failed"
+    exit 1
+fi
+
+# Verify copied object exists and has correct content
+COPY_CONTENT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp \
+    s3://$TEST_BUCKET/$TEST_COPY_KEY - \
+    --endpoint-url "$SERVER_ADDRESS")"
+
+ORIGINAL_CONTENT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp \
+    s3://$TEST_BUCKET/$TEST_FILE - \
+    --endpoint-url "$SERVER_ADDRESS")"
+
+if [[ "$COPY_CONTENT" == "$ORIGINAL_CONTENT" ]]; then
+    echo "CopyObject - copied content matches original"
+else
+    echo "CopyObject - copied content does not match original"
+    exit 1
+fi
+
+# Clean up copied object
+AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 rm \
+    s3://$TEST_BUCKET/$TEST_COPY_KEY \
+    --endpoint-url "$SERVER_ADDRESS" > /dev/null 2>&1
+
+# Test CopyObject with non-existent source (should fail)
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api copy-object \
+    --bucket $TEST_BUCKET \
+    --key "copy-dest.txt" \
+    --copy-source "$TEST_BUCKET/nonexistent-source.txt" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "CopyObject should fail for non-existent source"
+    exit 1
+else
+    echo "CopyObject correctly failed for non-existent source"
+fi
+
 # Test DeleteObject - delete the uploaded file
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 rm \
     s3://$TEST_BUCKET/$TEST_UPLOAD_FILE \

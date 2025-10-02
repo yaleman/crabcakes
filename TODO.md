@@ -43,11 +43,13 @@
 - Must be idempotent (deleting non-existent objects is success)
 
 #### 2. CopyObject
-- [ ] Parse `x-amz-copy-source` header to extract source bucket/key
-- [ ] Implement filesystem copy operation
-- [ ] Return XML response with copy metadata
-- [ ] Add `s3:GetObject` (source) and `s3:PutObject` (dest) IAM checks
-- [ ] Write integration test
+- [x] Parse `x-amz-copy-source` header to extract source bucket/key
+- [x] Implement filesystem copy operation
+- [x] Return XML response with copy metadata
+- [x] Add `s3:GetObject` (source) and `s3:PutObject` (dest) IAM checks
+- [x] Write integration test
+
+**Status:** ✅ Complete
 
 **Key Details:**
 - Request: `PUT /dest-key` with `x-amz-copy-source: /source-bucket/source-key` header
