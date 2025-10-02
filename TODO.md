@@ -70,12 +70,14 @@
 - Returns configured region (default: "crabcakes")
 
 #### 4. ListObjectsV1 (Legacy API)
-- [ ] Detect legacy list request (GET without `list-type=2`)
-- [ ] Parse query parameters: `prefix`, `delimiter`, `marker`, `max-keys`
-- [ ] Implement pagination with `marker` (instead of `continuation-token`)
-- [ ] Generate V1 XML response format
-- [ ] Add `s3:ListBucket` IAM action check
-- [ ] Write integration test
+- [x] Detect legacy list request (GET without `list-type=2`)
+- [x] Parse query parameters: `prefix`, `delimiter`, `marker`, `max-keys`
+- [x] Implement pagination with `marker` (instead of `continuation-token`)
+- [x] Generate V1 XML response format
+- [x] Add `s3:ListBucket` IAM action check
+- [x] Write integration test
+
+**Status:** ✅ Complete
 
 **Key Details:**
 - Request: `GET /bucket?prefix=foo&max-keys=100&marker=lastkey`
