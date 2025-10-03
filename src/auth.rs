@@ -264,6 +264,12 @@ pub fn http_method_to_s3_action(
         ("GET", _, q, false) if q.contains("uploadId") => "s3:ListMultipartUploadParts",
         ("POST", _, q, false) if q.contains("uploadId") => "s3:PutObject", // CompleteMultipartUpload
 
+        // Object tagging operations
+        ("GET", _, q, false) if q.contains("tagging") => "s3:GetObjectTagging",
+        ("PUT", _, q, false) if q.contains("tagging") => "s3:PutObjectTagging",
+        ("DELETE", _, q, false) if q.contains("tagging") => "s3:DeleteObjectTagging",
+        ("GET", _, q, false) if q.contains("attributes") => "s3:GetObjectAttributes",
+
         // Special cases
         ("GET", _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
         ("GET", _, q, _) if q.contains("location") => "s3:GetBucketLocation",

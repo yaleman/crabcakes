@@ -1,3 +1,4 @@
+pub(crate) mod db_tests;
 pub(crate) mod policy_tests;
 pub(crate) mod server_tests;
 

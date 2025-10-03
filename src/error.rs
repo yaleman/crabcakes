@@ -10,6 +10,7 @@ pub enum CrabCakesError {
     Other(String),
     SerdeJson(serde_json::Error),
     Io(std::io::Error),
+    Database(String),
     NoPolicies,
     NoAuthenticationSupplied(String),
     InvalidCredential,
@@ -25,6 +26,7 @@ impl std::fmt::Display for CrabCakesError {
             CrabCakesError::Other(msg) => write!(f, "Error: {}", msg),
             CrabCakesError::SerdeJson(e) => write!(f, "Serde-JSON Error: {}", e),
             CrabCakesError::Io(e) => write!(f, "IO Error: {:?}", e),
+            CrabCakesError::Database(msg) => write!(f, "Database Error: {}", msg),
             CrabCakesError::NoPolicies => write!(f, "No IAM policies found"),
             CrabCakesError::NoAuthenticationSupplied(msg) => {
                 write!(f, "No Authentication Supplied: {}", msg)
@@ -68,6 +70,12 @@ impl From<EvaluationError> for CrabCakesError {
 impl From<AddrParseError> for CrabCakesError {
     fn from(err: AddrParseError) -> Self {
         CrabCakesError::Other(err.to_string())
+    }
+}
+
+impl From<sea_orm::DbErr> for CrabCakesError {
+    fn from(err: sea_orm::DbErr) -> Self {
+        CrabCakesError::Database(err.to_string())
     }
 }
 

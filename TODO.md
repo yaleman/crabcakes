@@ -1,15 +1,35 @@
 # Crabcakes S3 API Implementation TODO
 
-## Currently Implemented Operations (9)
+## Currently Implemented Operations (24)
+### Core Operations
 - ✅ ListBuckets
 - ✅ ListObjectsV2
+- ✅ ListObjectsV1 (legacy)
 - ✅ HeadBucket
 - ✅ CreateBucket
 - ✅ DeleteBucket
+- ✅ GetBucketLocation
 - ✅ GetObject
 - ✅ HeadObject
 - ✅ PutObject
 - ✅ DeleteObject
+- ✅ DeleteObjects (batch)
+- ✅ CopyObject
+
+### Multipart Upload Operations
+- ✅ CreateMultipartUpload
+- ✅ UploadPart
+- ✅ UploadPartCopy
+- ✅ CompleteMultipartUpload
+- ✅ AbortMultipartUpload
+- ✅ ListMultipartUploads
+- ✅ ListParts
+
+### Object Tagging Operations
+- ✅ PutObjectTagging
+- ✅ GetObjectTagging
+- ✅ DeleteObjectTagging
+- ✅ GetObjectAttributes
 
 ## Implementation Phases
 
@@ -136,7 +156,7 @@
 ---
 
 ### Phase 3: Multipart Upload Completion
-**Status:** Partially Complete
+**Status:** ✅ Complete
 
 #### 10. CompleteMultipartUpload
 - [x] Parse `POST /key?uploadId=X` with XML body listing parts + ETags
@@ -150,55 +170,57 @@
 **Status:** ✅ Complete
 
 #### 11. UploadPartCopy
-- [ ] Parse `PUT /key?uploadId=X&partNumber=Y` with `x-amz-copy-source` header
-- [ ] Read source object
-- [ ] Support `x-amz-copy-source-range` for partial copies
-- [ ] Store as part
-- [ ] Return XML with part ETag
-- [ ] Add source `s3:GetObject` and dest `s3:PutObject` IAM checks
+- [x] Parse `PUT /key?uploadId=X&partNumber=Y` with `x-amz-copy-source` header
+- [x] Read source object
+- [x] Support `x-amz-copy-source-range` for partial copies
+- [x] Store as part
+- [x] Return ETag header
+- [x] Add source `s3:GetObject` and dest `s3:PutObject` IAM checks
 
-**Status:** Not Started
-
-**Estimated Time:** 1-2 hours
+**Status:** ✅ Complete
 
 ---
 
 ### Phase 4: Object Tagging
-**Status:** Not Started
+**Status:** ✅ Complete
 
 #### Infrastructure
-- [ ] Design tag storage mechanism
-  - Option A: Extended attributes (xattr) - platform-dependent
-  - Option B: JSON sidecar files (`{key}.tags.json`)
-  - Recommendation: JSON sidecar for portability
-- [ ] Create tag serialization/deserialization
+- [x] Design tag storage mechanism - SQLite database with SeaORM
+- [x] Create database migration framework using sea-orm-migration
+- [x] Implement DBService for tag operations
+- [x] Create object_tags table with proper indexes
 
 #### 12. PutObjectTagging
-- [ ] Parse `PUT /key?tagging` with XML tag set
-- [ ] Validate tag keys/values (AWS limits)
-- [ ] Store tags in sidecar file
-- [ ] Return 200 OK
-- [ ] Add `s3:PutObjectTagging` IAM action
+- [x] Parse `PUT /key?tagging` with XML tag set
+- [x] Validate tag keys/values (AWS limits: max 10 tags, 128 char key, 256 char value)
+- [x] Store tags in SQLite database
+- [x] Return 200 OK
+- [x] Add `s3:PutObjectTagging` IAM action
 
 #### 13. GetObjectTagging
-- [ ] Parse `GET /key?tagging` request
-- [ ] Read tags from storage
-- [ ] Return XML tag set
-- [ ] Add `s3:GetObjectTagging` IAM action
+- [x] Parse `GET /key?tagging` request
+- [x] Read tags from database
+- [x] Return XML tag set
+- [x] Add `s3:GetObjectTagging` IAM action
 
 #### 14. DeleteObjectTagging
-- [ ] Parse `DELETE /key?tagging` request
-- [ ] Remove tag storage file
-- [ ] Return 204 No Content
-- [ ] Add `s3:DeleteObjectTagging` IAM action
+- [x] Parse `DELETE /key?tagging` request
+- [x] Remove tags from database
+- [x] Return 204 No Content
+- [x] Add `s3:DeleteObjectTagging` IAM action
 
 #### 15. GetObjectAttributes
-- [ ] Parse `GET /key?attributes` request with `x-amz-object-attributes` header
-- [ ] Return requested attributes (ETag, Checksum, ObjectParts, StorageClass, ObjectSize)
-- [ ] Include tags if tag storage exists
-- [ ] Add `s3:GetObjectAttributes` IAM action
+- [x] Parse `GET /key?attributes` request
+- [x] Return object attributes (ETag, LastModified, ObjectSize)
+- [x] Add `s3:GetObjectAttributes` IAM action
 
-**Estimated Time:** 2-3 hours
+**Completed:** All tagging operations implemented with SQLite storage, migrations, and manual tests
+
+**Database Details:**
+- Location: `{config_dir}/crabcakes.sqlite3`
+- Migration system: SeaORM migrations run automatically on startup
+- Schema: `object_tags` table with unique constraint on (bucket, key, tag_key)
+- Service: `DBService` provides tag CRUD operations with validation
 
 ---
 

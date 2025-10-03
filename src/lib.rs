@@ -20,6 +20,7 @@ pub mod auth;
 pub mod body_buffer;
 pub mod cli;
 pub mod credentials;
+pub mod db;
 pub mod error;
 pub mod filesystem;
 pub mod multipart;

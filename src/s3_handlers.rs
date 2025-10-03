@@ -11,7 +11,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
 use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tracing::{debug, error, info, warn};
 
 use crate::auth::{
@@ -20,14 +20,16 @@ use crate::auth::{
 };
 use crate::body_buffer::BufferedBody;
 use crate::credentials::CredentialStore;
+use crate::db::DBService;
 use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::xml_responses::{
     CompleteMultipartUploadRequest, CompleteMultipartUploadResponse, CopyObjectResponse,
     DeleteError, DeleteRequest, DeleteResponse, DeletedObject, GetBucketLocationResponse,
-    InitiateMultipartUploadResponse, ListBucketResponse, ListBucketV1Response, ListBucketsResponse,
-    ListMultipartUploadsResponse, ListPartsResponse, MultipartUploadItem, PartItem,
+    GetObjectAttributesResponse, GetObjectTaggingResponse, InitiateMultipartUploadResponse,
+    ListBucketResponse, ListBucketV1Response, ListBucketsResponse, ListMultipartUploadsResponse,
+    ListPartsResponse, MultipartUploadItem, PartItem, Tag, TagSet, TaggingRequest,
 };
 
 pub struct S3Handler {
@@ -36,6 +38,7 @@ pub struct S3Handler {
     policy_store: Arc<PolicyStore>,
     credentials_store: Arc<CredentialStore>,
     multipart_manager: Arc<MultipartManager>,
+    db_service: Arc<DBService>,
     region: String,
     require_signature: bool,
 }
@@ -46,6 +49,7 @@ impl S3Handler {
         policy_store: Arc<PolicyStore>,
         credentials_store: Arc<CredentialStore>,
         multipart_manager: Arc<MultipartManager>,
+        db_service: Arc<DBService>,
         region: String,
         require_signature: bool,
         server_addr: String,
@@ -55,6 +59,7 @@ impl S3Handler {
             policy_store,
             credentials_store,
             multipart_manager,
+            db_service,
             region,
             require_signature,
             server_addr,
@@ -203,6 +208,12 @@ impl S3Handler {
             .get("x-amz-copy-source")
             .and_then(|v| v.to_str().ok());
 
+        // Check for x-amz-copy-source-range header for partial copies
+        let copy_source_range = parts
+            .headers
+            .get("x-amz-copy-source-range")
+            .and_then(|v| v.to_str().ok());
+
         info!(
             method = %method,
             path = %path,
@@ -320,6 +331,34 @@ impl S3Handler {
                 self.handle_create_multipart_upload(bucket_for_operation, key)
                     .await
             }
+            // PUT /key?uploadId=X&partNumber=Y with x-amz-copy-source - UploadPartCopy
+            (&Method::PUT, false, false, key, _)
+                if !key.is_empty()
+                    && upload_id_opt.is_some()
+                    && part_number_opt.is_some()
+                    && copy_source.is_some() =>
+            {
+                let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                let part_number = part_number_opt.unwrap_or(0);
+                let source = copy_source.unwrap_or("");
+                debug!(
+                    key = %key,
+                    upload_id = %upload_id,
+                    part_number = %part_number,
+                    copy_source = %source,
+                    "Handling UploadPartCopy request"
+                );
+                self.handle_upload_part_copy(
+                    bucket_for_operation,
+                    key,
+                    upload_id,
+                    part_number,
+                    source,
+                    copy_source_range,
+                    &auth_context,
+                )
+                .await
+            }
             // PUT /key?uploadId=X&partNumber=Y - UploadPart
             (&Method::PUT, false, false, key, _)
                 if !key.is_empty() && upload_id_opt.is_some() && part_number_opt.is_some() =>
@@ -411,6 +450,46 @@ impl S3Handler {
             (&Method::HEAD, false, false, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling HeadObject request");
                 self.handle_head_object(key).await
+            }
+            // GET /key?tagging - GetObjectTagging
+            (&Method::GET, false, false, key, query)
+                if !key.is_empty() && query.contains("tagging") =>
+            {
+                debug!(key = %key, "Handling GetObjectTagging request");
+                self.handle_get_object_tagging(bucket_for_operation, key)
+                    .await
+            }
+            // PUT /key?tagging - PutObjectTagging
+            (&Method::PUT, false, false, key, query)
+                if !key.is_empty() && query.contains("tagging") =>
+            {
+                debug!(key = %key, "Handling PutObjectTagging request");
+                match buffered_body.to_vec().await {
+                    Ok(body_bytes) => {
+                        self.handle_put_object_tagging(bucket_for_operation, key, &body_bytes)
+                            .await
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to read request body");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            // DELETE /key?tagging - DeleteObjectTagging
+            (&Method::DELETE, false, false, key, query)
+                if !key.is_empty() && query.contains("tagging") =>
+            {
+                debug!(key = %key, "Handling DeleteObjectTagging request");
+                self.handle_delete_object_tagging(bucket_for_operation, key)
+                    .await
+            }
+            // GET /key?attributes - GetObjectAttributes
+            (&Method::GET, false, false, key, query)
+                if !key.is_empty() && query.contains("attributes") =>
+            {
+                debug!(key = %key, "Handling GetObjectAttributes request");
+                self.handle_get_object_attributes(bucket_for_operation, key)
+                    .await
             }
             // GET /key or GET /bucket/key - GetObject
             (&Method::GET, false, false, key, _) if !key.is_empty() => {
@@ -1266,6 +1345,189 @@ impl S3Handler {
         }
     }
 
+    async fn handle_upload_part_copy(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: u32,
+        copy_source: &str,
+        copy_source_range: Option<&str>,
+        auth_context: &AuthContext,
+    ) -> Response<Full<Bytes>> {
+        debug!(
+            bucket = %bucket,
+            key = %key,
+            upload_id = %upload_id,
+            part_number = %part_number,
+            copy_source = %copy_source,
+            copy_source_range = ?copy_source_range,
+            "Handling UploadPartCopy request"
+        );
+
+        // Parse copy source - format is /bucket/key or bucket/key
+        let source_key = copy_source.trim_start_matches('/');
+
+        // Extract bucket and key from source for IAM check
+        let (source_bucket, source_object_key) =
+            extract_bucket_and_key(&format!("/{}", source_key));
+
+        // Check s3:GetObject permission on source
+        let source_iam_request = match auth_context.build_iam_request(
+            "s3:GetObject",
+            source_bucket.as_deref(),
+            source_object_key.as_deref(),
+        ) {
+            Ok(req) => req,
+            Err(e) => {
+                error!(error = %e, "Failed to build IAM request for source");
+                return self.internal_error_response();
+            }
+        };
+
+        match self
+            .policy_store
+            .evaluate_request(&source_iam_request)
+            .await
+        {
+            Ok(true) => {
+                debug!("Authorization granted for source object");
+            }
+            Ok(false) => {
+                warn!(
+                    principal = ?source_iam_request.principal,
+                    action = "s3:GetObject",
+                    resource = ?source_iam_request.resource,
+                    "Access denied for source object"
+                );
+                return self.access_denied_response();
+            }
+            Err(e) => {
+                error!(error = %e, "Policy evaluation failed for source");
+                return self.internal_error_response();
+            }
+        }
+
+        // Read source object
+        let source_path = self.filesystem.resolve_path(source_key);
+        let mut file = match File::open(&source_path).await {
+            Ok(f) => f,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    warn!(source = %source_key, "Source object not found");
+                    return self.not_found_response();
+                }
+                error!(source = %source_key, error = %e, "Failed to open source file");
+                return self.internal_error_response();
+            }
+        };
+
+        // Read data (with optional range)
+        let data = if let Some(range_str) = copy_source_range {
+            // Parse range: "bytes=start-end"
+            if let Some(range_spec) = range_str.strip_prefix("bytes=") {
+                if let Some((start_str, end_str)) = range_spec.split_once('-') {
+                    let start: u64 = match start_str.parse() {
+                        Ok(s) => s,
+                        Err(_) => {
+                            warn!(range = %range_str, "Invalid range format");
+                            #[allow(clippy::expect_used)]
+                            return Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .body(Full::new(Bytes::from("Invalid range format")))
+                                .expect("Failed to generate error response");
+                        }
+                    };
+                    let end: u64 = match end_str.parse() {
+                        Ok(e) => e,
+                        Err(_) => {
+                            warn!(range = %range_str, "Invalid range format");
+                            #[allow(clippy::expect_used)]
+                            return Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .body(Full::new(Bytes::from("Invalid range format")))
+                                .expect("Failed to generate error response");
+                        }
+                    };
+
+                    // Seek to start position
+                    if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+                        error!(error = %e, "Failed to seek in source file");
+                        return self.internal_error_response();
+                    }
+
+                    // Read the range
+                    let bytes_to_read = (end - start + 1) as usize;
+                    let mut buffer = vec![0u8; bytes_to_read];
+                    match file.read_exact(&mut buffer).await {
+                        Ok(_) => buffer,
+                        Err(e) => {
+                            error!(error = %e, "Failed to read source file range");
+                            return self.internal_error_response();
+                        }
+                    }
+                } else {
+                    warn!(range = %range_str, "Invalid range format - missing dash");
+                    #[allow(clippy::expect_used)]
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Full::new(Bytes::from("Invalid range format")))
+                        .expect("Failed to generate error response");
+                }
+            } else {
+                warn!(range = %range_str, "Invalid range format - must start with bytes=");
+                #[allow(clippy::expect_used)]
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(Bytes::from("Invalid range format")))
+                    .expect("Failed to generate error response");
+            }
+        } else {
+            // Read entire file
+            let mut contents = Vec::new();
+            match file.read_to_end(&mut contents).await {
+                Ok(_) => contents,
+                Err(e) => {
+                    error!(source = %source_key, error = %e, "Failed to read source file");
+                    return self.internal_error_response();
+                }
+            }
+        };
+
+        // Upload the data as a part
+        match self
+            .multipart_manager
+            .upload_part(bucket, upload_id, part_number, &data)
+            .await
+        {
+            Ok(part_info) => {
+                debug!(
+                    upload_id = %upload_id,
+                    part_number = %part_number,
+                    etag = %part_info.etag,
+                    source = %source_key,
+                    "UploadPartCopy success"
+                );
+
+                #[allow(clippy::expect_used)]
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("ETag", part_info.etag)
+                    .body(Full::new(Bytes::new()))
+                    .expect("Failed to generate UploadPartCopy response")
+            }
+            Err(e) => {
+                error!(
+                    upload_id = %upload_id,
+                    part_number = %part_number,
+                    error = %e,
+                    "Failed to upload part copy"
+                );
+                self.internal_error_response()
+            }
+        }
+    }
+
     async fn handle_abort_multipart_upload(
         &self,
         bucket: &str,
@@ -1496,6 +1758,170 @@ impl S3Handler {
                     "Failed to complete multipart upload"
                 );
                 self.internal_error_response()
+            }
+        }
+    }
+
+    // ===== Object Tagging Handlers =====
+
+    async fn handle_put_object_tagging(
+        &self,
+        bucket: &str,
+        key: &str,
+        body: &[u8],
+    ) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, key = %key, "Handling PutObjectTagging request");
+
+        // Parse XML request
+        let tagging_request: TaggingRequest = match quick_xml::de::from_reader(body) {
+            Ok(req) => req,
+            Err(e) => {
+                error!(error = %e, "Failed to parse tagging request");
+                return self.internal_error_response();
+            }
+        };
+
+        // Convert tags to vec of tuples
+        let tags: Vec<(String, String)> = tagging_request
+            .tag_set
+            .tags
+            .into_iter()
+            .map(|t| (t.key, t.value))
+            .collect();
+
+        // Store tags
+        match self.db_service.put_tags(bucket, key, tags).await {
+            Ok(()) => {
+                debug!(bucket = %bucket, key = %key, "Tags stored successfully");
+                #[allow(clippy::expect_used)]
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Full::new(Bytes::new()))
+                    .expect("Failed to generate PutObjectTagging response")
+            }
+            Err(e) => {
+                error!(bucket = %bucket, key = %key, error = %e, "Failed to store tags");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_get_object_tagging(&self, bucket: &str, key: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, key = %key, "Handling GetObjectTagging request");
+
+        // Get tags from database
+        match self.db_service.get_tags(bucket, key).await {
+            Ok(tags) => {
+                let tag_set = TagSet {
+                    tags: tags
+                        .into_iter()
+                        .map(|(k, v)| Tag { key: k, value: v })
+                        .collect(),
+                };
+
+                let response = GetObjectTaggingResponse { tag_set };
+
+                match response.to_xml() {
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate GetObjectTagging response")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize tagging response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                error!(bucket = %bucket, key = %key, error = %e, "Failed to get tags");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_delete_object_tagging(&self, bucket: &str, key: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, key = %key, "Handling DeleteObjectTagging request");
+
+        match self.db_service.delete_tags(bucket, key).await {
+            Ok(()) => {
+                debug!(bucket = %bucket, key = %key, "Tags deleted successfully");
+                #[allow(clippy::expect_used)]
+                Response::builder()
+                    .status(StatusCode::NO_CONTENT)
+                    .body(Full::new(Bytes::new()))
+                    .expect("Failed to generate DeleteObjectTagging response")
+            }
+            Err(e) => {
+                error!(bucket = %bucket, key = %key, error = %e, "Failed to delete tags");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_get_object_attributes(&self, bucket: &str, key: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, key = %key, "Handling GetObjectAttributes request");
+
+        // Resolve the file path
+        let file_key = if bucket.is_empty() {
+            key
+        } else {
+            &format!("{}/{}", bucket, key)
+        };
+        let file_path = self.filesystem.resolve_path(file_key);
+
+        // Get file metadata
+        match tokio::fs::metadata(&file_path).await {
+            Ok(metadata) => {
+                let object_size = metadata.len();
+
+                // Generate ETag (simplified - using file size and modification time)
+                let modified_time = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let etag = format!("\"{:x}\"", object_size ^ modified_time);
+
+                let last_modified = chrono::DateTime::<chrono::Utc>::from(
+                    metadata.modified().unwrap_or(std::time::SystemTime::now()),
+                )
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+                let response = GetObjectAttributesResponse {
+                    etag: Some(etag),
+                    last_modified: Some(last_modified),
+                    object_size: Some(object_size),
+                };
+
+                match response.to_xml() {
+                    Ok(xml) =>
+                    {
+                        #[allow(clippy::expect_used)]
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/xml")
+                            .body(Full::new(Bytes::from(xml)))
+                            .expect("Failed to generate GetObjectAttributes response")
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize attributes response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    self.not_found_response()
+                } else {
+                    error!(error = %e, "Failed to get file metadata");
+                    self.internal_error_response()
+                }
             }
         }
     }

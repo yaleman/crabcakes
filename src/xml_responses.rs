@@ -405,3 +405,60 @@ impl CompleteMultipartUploadResponse {
         Ok(xml)
     }
 }
+
+// ===== Object Tagging Structures =====
+
+#[derive(Deserialize)]
+#[serde(rename = "Tagging")]
+pub struct TaggingRequest {
+    #[serde(rename = "TagSet")]
+    pub tag_set: TagSet,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TagSet {
+    #[serde(rename = "Tag", default)]
+    pub tags: Vec<Tag>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Tag {
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "Value")]
+    pub value: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename = "Tagging")]
+pub struct GetObjectTaggingResponse {
+    #[serde(rename = "TagSet")]
+    pub tag_set: TagSet,
+}
+
+impl GetObjectTaggingResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename = "GetObjectAttributesOutput")]
+pub struct GetObjectAttributesResponse {
+    #[serde(rename = "ETag", skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+    #[serde(rename = "LastModified", skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+    #[serde(rename = "ObjectSize", skip_serializing_if = "Option::is_none")]
+    pub object_size: Option<u64>,
+}
+
+impl GetObjectAttributesResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}

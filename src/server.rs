@@ -22,6 +22,7 @@ use tracing::{debug, error, info};
 
 use crate::cli::Cli;
 use crate::credentials::CredentialStore;
+use crate::db::{DBService, initialize_database};
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
@@ -108,6 +109,10 @@ impl Server {
         // Create multipart manager
         let multipart_manager = Arc::new(MultipartManager::new(&self.root_dir));
 
+        // Initialize database and create DBService
+        let db = initialize_database(&self.config_dir).await?;
+        let db_service = Arc::new(DBService::new(Arc::new(db)));
+
         if self.tls_cert.is_some() {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         }
@@ -118,6 +123,7 @@ impl Server {
             policy_store,
             credentials_store,
             multipart_manager,
+            db_service,
             self.region.clone(),
             self.require_signature,
             addr.to_string(),

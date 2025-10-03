@@ -18,6 +18,12 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
 - `src/credentials.rs` - Credential storage and loading from JSON files
 - `src/body_buffer.rs` - Smart request body buffering (memory/disk spillover)
 - `src/policy.rs` - IAM policy loading and evaluation (with wildcard principal support)
+- `src/multipart.rs` - Multipart upload state management
+- `src/db/` - Database layer for metadata storage (tags, attributes, etc.)
+  - `src/db/mod.rs` - Database initialization and migration runner
+  - `src/db/service.rs` - DBService for metadata operations
+  - `src/db/entities/` - SeaORM entity models
+  - `src/db/migration/` - Database migrations
 - `src/error.rs` - Centralized error handling
 - `src/lib.rs` - Library module declarations
 - `src/tests/` - Test modules (server_tests.rs, policy_tests.rs)
@@ -29,11 +35,14 @@ The server:
 - Loads IAM policies and credentials from a configurable config directory (defaults: ./config)
   - Policies loaded from `config_dir/policies/`
   - Credentials loaded from `config_dir/credentials/`
+  - SQLite database at `config_dir/crabcakes.sqlite3` for metadata storage
 - Verifies AWS Signature V4 signatures on all requests (configurable via --require-signature)
 - Uses Tokio for async operations and connection handling
 - Implements AWS S3-compatible API with XML responses
 - Enforces IAM policy-based authorization on all S3 operations
 - Smart body buffering: memory for <50MB, disk spillover for ≥50MB
+- Stores object metadata (tags) in SQLite with SeaORM
+- Runs database migrations automatically on startup
 - CLI accepts `--host`, `--port`, `--root-dir`, `--config-dir`, and `--require-signature` flags or environment variables
 - Uses tracing for structured logging (configure with RUST_LOG environment variable)
 
@@ -118,6 +127,66 @@ The server supports AWS CLI path-style requests where the bucket name appears in
 
 - `GET /bucket1/test.txt` → retrieves file at `./data/bucket1/test.txt`
 - `GET /bucket1?list-type=2&prefix=test.txt` → lists files with prefix `bucket1/test.txt`
+
+### Object Tagging Operations
+
+#### PutObjectTagging (PUT /key?tagging)
+
+Adds or replaces tags on an object. Accepts XML request body with tag set. Tags are stored in SQLite database. Validates:
+- Maximum 10 tags per object
+- Tag keys: maximum 128 characters
+- Tag values: maximum 256 characters
+
+#### GetObjectTagging (GET /key?tagging)
+
+Returns all tags for an object as XML. Returns empty tag set if object has no tags.
+
+#### DeleteObjectTagging (DELETE /key?tagging)
+
+Removes all tags from an object. Returns 204 No Content.
+
+#### GetObjectAttributes (GET /key?attributes)
+
+Returns object metadata including ETag, LastModified, and ObjectSize.
+
+## Metadata Storage
+
+The server uses SQLite for storing object metadata (tags, future: ACLs, object attributes).
+
+### Database Location
+
+- Database file: `{config_dir}/crabcakes.sqlite3` (default: `./config/crabcakes.sqlite3`)
+- Automatically created on first startup
+- Migrations run automatically on startup using SeaORM migration framework
+
+### Schema
+
+**`object_tags` table:**
+- `id` INTEGER PRIMARY KEY
+- `bucket` TEXT NOT NULL
+- `key` TEXT NOT NULL
+- `tag_key` TEXT NOT NULL
+- `tag_value` TEXT NOT NULL
+- `created_at` DATETIME NOT NULL
+- Unique index on `(bucket, key, tag_key)`
+- Lookup index on `(bucket, key)`
+
+### Migrations
+
+New database migrations should be added to `src/db/migration/`:
+1. Create new migration file: `src/db/migration/mYYYYMMDD_HHMMSS_description.rs`
+2. Implement `up()` and `down()` methods using SeaORM schema builder
+3. Add to migration list in `src/db/migration/mod.rs`
+4. Migrations run automatically on server startup
+
+### DBService
+
+The `DBService` struct in `src/db/service.rs` provides tag operations:
+- `put_tags(bucket, key, tags)` - Store/replace tags with validation
+- `get_tags(bucket, key)` - Retrieve all tags for an object
+- `delete_tags(bucket, key)` - Remove all tags for an object
+
+Future metadata operations (ACLs, object attributes) will be added to DBService.
 
 ## AWS Signature V4 Authentication
 
@@ -304,3 +373,4 @@ The server accepts configuration via:
 - Policy evaluation tests verify IAM policy logic with different principals and resources
 - All new features require test coverage for: signed/unsigned requests, success/failure cases
 - Integration tests must be added to `manual_test.sh` for signed request validation
+- all tests that might involve the database should be against an in-memory database where possible, or if it's testing disk functionality then the config dir should be a temporary directory for that test

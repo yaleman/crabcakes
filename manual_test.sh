@@ -551,6 +551,125 @@ fi
 # Clean up multipart test files
 rm -f "$MULTIPART_FILE" "$PART1" "$PART2" "$DOWNLOADED_FILE" "$TEMPDIR2/complete-multipart.json"
 
+# Test UploadPartCopy (copy parts from existing object)
+echo "Testing UploadPartCopy..."
+
+# Create a source object for copying (10MB)
+SOURCE_KEY="source-object.bin"
+dd if=/dev/urandom of="$TEMPDIR2/$SOURCE_KEY" bs=1M count=10 2>/dev/null
+
+# Upload the source object
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3 cp "$TEMPDIR2/$SOURCE_KEY" "s3://$TEST_BUCKET/$SOURCE_KEY" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "Source object uploaded successfully"
+else
+    echo "Failed to upload source object"
+    exit 1
+fi
+
+# Initiate multipart upload for destination
+COPY_UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api create-multipart-upload \
+    --bucket $TEST_BUCKET \
+    --key "copied-object.bin" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+COPY_UPLOAD_ID=$(echo "$COPY_UPLOAD_OUTPUT" | jq -r '.UploadId')
+echo "Created multipart upload for copy with ID: $COPY_UPLOAD_ID"
+
+# Copy first 5MB using UploadPartCopy
+echo "Copying part 1 (bytes 0-5242879)..."
+COPY_PART1_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api upload-part-copy \
+    --bucket $TEST_BUCKET \
+    --key "copied-object.bin" \
+    --part-number 1 \
+    --upload-id "$COPY_UPLOAD_ID" \
+    --copy-source "$TEST_BUCKET/$SOURCE_KEY" \
+    --copy-source-range "bytes=0-5242879" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+COPY_PART1_ETAG=$(echo "$COPY_PART1_OUTPUT" | jq -r '.CopyPartResult.ETag')
+echo "Part 1 copied with ETag: $COPY_PART1_ETAG"
+
+# Copy second 5MB using UploadPartCopy
+echo "Copying part 2 (bytes 5242880-10485759)..."
+COPY_PART2_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api upload-part-copy \
+    --bucket $TEST_BUCKET \
+    --key "copied-object.bin" \
+    --part-number 2 \
+    --upload-id "$COPY_UPLOAD_ID" \
+    --copy-source "$TEST_BUCKET/$SOURCE_KEY" \
+    --copy-source-range "bytes=5242880-10485759" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+COPY_PART2_ETAG=$(echo "$COPY_PART2_OUTPUT" | jq -r '.CopyPartResult.ETag')
+echo "Part 2 copied with ETag: $COPY_PART2_ETAG"
+
+# Create complete request JSON for UploadPartCopy
+cat > "$TEMPDIR2/complete-copy.json" << EOF
+{
+  "Parts": [
+    {
+      "ETag": $COPY_PART1_ETAG,
+      "PartNumber": 1
+    },
+    {
+      "ETag": $COPY_PART2_ETAG,
+      "PartNumber": 2
+    }
+  ]
+}
+EOF
+
+# Complete multipart upload
+echo "Completing multipart upload for copy..."
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api complete-multipart-upload \
+    --bucket $TEST_BUCKET \
+    --key "copied-object.bin" \
+    --upload-id "$COPY_UPLOAD_ID" \
+    --multipart-upload "file://$TEMPDIR2/complete-copy.json" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "Multipart upload completed successfully"
+else
+    echo "Failed to complete multipart upload"
+    exit 1
+fi
+
+# Download copied object and verify
+AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3 cp "s3://$TEST_BUCKET/copied-object.bin" "$TEMPDIR2/copied-downloaded.bin" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1
+
+# Verify copied object matches source
+if command -v md5 &> /dev/null; then
+    SOURCE_MD5=$(md5 -q "$TEMPDIR2/$SOURCE_KEY")
+    COPIED_MD5=$(md5 -q "$TEMPDIR2/copied-downloaded.bin")
+elif command -v md5sum &> /dev/null; then
+    SOURCE_MD5=$(md5sum "$TEMPDIR2/$SOURCE_KEY" | awk '{print $1}')
+    COPIED_MD5=$(md5sum "$TEMPDIR2/copied-downloaded.bin" | awk '{print $1}')
+else
+    echo "md5 or md5sum command not found, skipping checksum verification"
+    SOURCE_MD5=""
+    COPIED_MD5=""
+fi
+
+if [ -n "$SOURCE_MD5" ] && [ "$SOURCE_MD5" = "$COPIED_MD5" ]; then
+    echo "UploadPartCopy successful - checksums match (MD5: $SOURCE_MD5)"
+else
+    echo "UploadPartCopy checksum verification failed or skipped"
+    if [ -n "$SOURCE_MD5" ]; then
+        echo "Expected: $SOURCE_MD5, Got: $COPIED_MD5"
+        exit 1
+    fi
+fi
+
+# Clean up copy test files
+rm -f "$TEMPDIR2/$SOURCE_KEY" "$TEMPDIR2/copied-downloaded.bin" "$TEMPDIR2/complete-copy.json"
+
 # Test abort multipart upload (create a new upload and abort it)
 echo "Testing abort multipart upload..."
 ABORT_UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
@@ -573,6 +692,107 @@ else
     echo "AbortMultipartUpload failed"
     exit 1
 fi
+
+# Test object tagging
+echo "Testing object tagging operations..."
+
+# Upload a test object for tagging
+TAGGING_KEY="tagging-test.txt"
+echo "test content for tagging" > "$TEMPDIR2/tagging-test.txt"
+
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3 cp "$TEMPDIR2/tagging-test.txt" "s3://$TEST_BUCKET/$TAGGING_KEY" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "Test object uploaded for tagging"
+else
+    echo "Failed to upload test object for tagging"
+    exit 1
+fi
+
+# Create tagging JSON
+cat > "$TEMPDIR2/tagging.json" << EOF
+{
+  "TagSet": [
+    {
+      "Key": "Environment",
+      "Value": "Test"
+    },
+    {
+      "Key": "Project",
+      "Value": "Crabcakes"
+    }
+  ]
+}
+EOF
+
+# Put object tagging
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api put-object-tagging \
+    --bucket $TEST_BUCKET \
+    --key "$TAGGING_KEY" \
+    --tagging "file://$TEMPDIR2/tagging.json" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "PutObjectTagging successful"
+else
+    echo "PutObjectTagging failed"
+    exit 1
+fi
+
+# Get object tagging
+TAGS_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api get-object-tagging \
+    --bucket $TEST_BUCKET \
+    --key "$TAGGING_KEY" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+TAGS_COUNT=$(echo "$TAGS_OUTPUT" | jq '.TagSet | length')
+if [ "$TAGS_COUNT" -eq 2 ]; then
+    echo "GetObjectTagging successful - found $TAGS_COUNT tags"
+else
+    echo "GetObjectTagging failed - expected 2 tags, got $TAGS_COUNT"
+    exit 1
+fi
+
+# Verify tag values
+ENV_TAG=$(echo "$TAGS_OUTPUT" | jq -r '.TagSet[] | select(.Key == "Environment") | .Value')
+PROJECT_TAG=$(echo "$TAGS_OUTPUT" | jq -r '.TagSet[] | select(.Key == "Project") | .Value')
+
+if [ "$ENV_TAG" = "Test" ] && [ "$PROJECT_TAG" = "Crabcakes" ]; then
+    echo "Tag values verified successfully"
+else
+    echo "Tag values incorrect - Environment: $ENV_TAG, Project: $PROJECT_TAG"
+    exit 1
+fi
+
+# Delete object tagging
+if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api delete-object-tagging \
+    --bucket $TEST_BUCKET \
+    --key "$TAGGING_KEY" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1; then
+    echo "DeleteObjectTagging successful"
+else
+    echo "DeleteObjectTagging failed"
+    exit 1
+fi
+
+# Verify tags were deleted
+TAGS_AFTER_DELETE=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    aws s3api get-object-tagging \
+    --bucket $TEST_BUCKET \
+    --key "$TAGGING_KEY" \
+    --endpoint-url "$SERVER_ADDRESS" 2>&1)
+
+TAGS_COUNT_AFTER=$(echo "$TAGS_AFTER_DELETE" | jq '.TagSet | length')
+if [ "$TAGS_COUNT_AFTER" -eq 0 ]; then
+    echo "Tags successfully deleted - verified empty tag set"
+else
+    echo "Failed to delete tags - still found $TAGS_COUNT_AFTER tags"
+    exit 1
+fi
+
+# Clean up tagging test files
+rm -f "$TEMPDIR2/tagging-test.txt" "$TEMPDIR2/tagging.json"
 
 echo "All tests passed, killing crabcakes (PID $CRABCAKES_PID) and cleaning up $TEMPDIR"
 rm -rf "$TEMPDIR"
