@@ -39,4 +39,13 @@ pub struct Cli {
 
     #[clap(long, env = "CRABCAKES_TLS_KEY")]
     pub tls_key: Option<PathBuf>,
+
+    #[clap(long, default_value = "false", env = "CRABCAKES_ENABLE_API")]
+    pub enable_api: bool,
+
+    #[clap(long, env = "CRABCAKES_OIDC_CLIENT_ID")]
+    pub oidc_client_id: Option<String>,
+
+    #[clap(long, env = "CRABCAKES_OIDC_DISCOVERY_URL")]
+    pub oidc_discovery_url: Option<String>,
 }

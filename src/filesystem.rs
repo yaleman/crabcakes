@@ -13,6 +13,22 @@ use tokio::fs as async_fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 
+/// Reserved bucket names that cannot be used as S3 buckets
+/// These are reserved for the admin UI and API endpoints
+const RESERVED_BUCKET_NAMES: &[&str] = &[
+    "admin",
+    "api",
+    "login",
+    "logout",
+    "oauth2",
+    ".well-known",
+    "config",
+    "oidc",
+    "crabcakes",
+    "docs",
+    "help",
+];
+
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
     pub path: PathBuf,
@@ -214,6 +230,14 @@ impl FilesystemService {
 
     pub async fn create_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
         debug!(bucket = %bucket, "Creating bucket");
+
+        // Check if bucket name is reserved
+        if RESERVED_BUCKET_NAMES.contains(&bucket) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Bucket name '{}' is reserved and cannot be used", bucket),
+            ));
+        }
 
         // Validate bucket name
         if bucket.is_empty() || bucket.len() > 63 {
