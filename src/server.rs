@@ -58,8 +58,9 @@ impl Server {
         }
     }
 
+    #[cfg(test)]
     /// Create a server instance for testing that binds to a random available port
-    pub async fn test_mode(
+    pub(crate) async fn test_mode(
         root_dir: PathBuf,
         config_dir: PathBuf,
     ) -> Result<(Self, u16), CrabCakesError> {
