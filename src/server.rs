@@ -22,6 +22,8 @@ use tracing::{debug, error, info};
 
 use crate::cli::Cli;
 use crate::credentials::CredentialStore;
+#[cfg(test)]
+use crate::db::initialize_in_memory_database;
 use crate::db::{DBService, initialize_database};
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
@@ -57,14 +59,15 @@ impl Server {
     }
 
     /// Create a server instance for testing that binds to a random available port
-    pub async fn test_mode(root_dir: PathBuf) -> Result<(Self, u16), CrabCakesError> {
+    pub async fn test_mode(
+        root_dir: PathBuf,
+        config_dir: PathBuf,
+    ) -> Result<(Self, u16), CrabCakesError> {
         // Try to find an available port in the high port range
         let host = "127.0.0.1".to_string();
         let addr = format!("{host}:0");
         // Try to bind to the port
         if let Ok(listener) = TcpListener::bind(&addr).await {
-            // Use test_config directory for tests
-            let config_dir = PathBuf::from("test_config");
             let port = listener.local_addr()?.port();
             let server = Server::new(Cli {
                 hostname: None,
@@ -90,7 +93,7 @@ impl Server {
         ))
     }
 
-    pub async fn run(self) -> Result<(), CrabCakesError> {
+    pub async fn run(self, use_in_memory_db: bool) -> Result<(), CrabCakesError> {
         let addr: SocketAddr = format!("{}:{}", self.host, self.port).parse()?;
 
         // Create filesystem service
@@ -110,7 +113,19 @@ impl Server {
         let multipart_manager = Arc::new(MultipartManager::new(&self.root_dir));
 
         // Initialize database and create DBService
-        let db = initialize_database(&self.config_dir).await?;
+        let db = if use_in_memory_db {
+            #[cfg(test)]
+            {
+                initialize_in_memory_database().await?
+            }
+            #[cfg(not(test))]
+            {
+                // In production builds, always use disk-based database
+                initialize_database(&self.config_dir).await?
+            }
+        } else {
+            initialize_database(&self.config_dir).await?
+        };
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         if self.tls_cert.is_some() {

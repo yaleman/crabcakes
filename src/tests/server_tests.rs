@@ -33,12 +33,27 @@ fn setup_test_files() -> TempDir {
 }
 
 async fn start_test_server(temp_dir: &Path) -> (tokio::task::JoinHandle<()>, u16) {
-    let (server, port) = Server::test_mode(temp_dir.to_path_buf())
-        .await
-        .expect("Failed to create test server");
+    // Create temporary config directory
+    let temp_config = TempDir::new().expect("Failed to create temp config directory");
+
+    // Copy test fixtures (policies and credentials) to temp config
+    copy_dir_all("test_config/policies", temp_config.path().join("policies"))
+        .expect("Failed to copy test policies");
+    copy_dir_all(
+        "test_config/credentials",
+        temp_config.path().join("credentials"),
+    )
+    .expect("Failed to copy test credentials");
+
+    let (server, port) =
+        Server::test_mode(temp_dir.to_path_buf(), temp_config.path().to_path_buf())
+            .await
+            .expect("Failed to create test server");
 
     let handle = tokio::spawn(async move {
-        if let Err(e) = server.run().await {
+        // Keep temp_config alive for the duration of the server
+        let _temp_config = temp_config;
+        if let Err(e) = server.run(true).await {
             eprintln!("Server error: {}", e);
         }
     });

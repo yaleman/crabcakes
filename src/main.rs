@@ -33,7 +33,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
 
     let server = Server::new(cli);
-    server.run().await.map_err(|err| {
+    server.run(false).await.map_err(|err| {
         eprintln!("Server error: {}", err);
         err.into()
     })
