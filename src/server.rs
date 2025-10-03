@@ -211,7 +211,7 @@ impl Server {
                                 TokioIo::new(tls_stream),
                                 service_fn(move |req| {
                                     let handler = Arc::clone(&handler);
-                                    async move { handler.handle_request(req).await }
+                                    async move { handler.handle_request(req, remote_addr).await }
                                 }),
                             )
                             .await
@@ -234,7 +234,7 @@ impl Server {
                             io,
                             service_fn(move |req| {
                                 let handler = Arc::clone(&handler);
-                                async move { handler.handle_request(req).await }
+                                async move { handler.handle_request(req, remote_addr).await }
                             }),
                         )
                         .await

@@ -175,6 +175,7 @@ impl S3Handler {
     pub async fn handle_request(
         &self,
         req: Request<hyper::body::Incoming>,
+        remote_addr: std::net::SocketAddr,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         // Verify signature and buffer body (or return error response)
         let (authenticated_username, mut buffered_body, parts) =
@@ -219,7 +220,7 @@ impl S3Handler {
             path = %path,
             query = %query,
             bucket = %bucket_name,
-            authenticated_user = ?authenticated_username,
+            authenticated_user = ?authenticated_username.as_ref().unwrap_or(&"-".to_string()),
             copy_source = ?copy_source,
             "Incoming S3 request"
         );
@@ -541,7 +542,31 @@ impl S3Handler {
         };
 
         let status = response.status();
-        info!(status = %status.as_u16(), "Request completed");
+
+        // Log request with all relevant details
+        let user_str = authenticated_username.as_deref().unwrap_or("-");
+        if key.is_empty() {
+            info!(
+                client_ip = %remote_addr.ip(),
+                method = %method,
+                path = %path,
+                bucket = %bucket_for_operation,
+                status = %status.as_u16(),
+                user = %user_str,
+                "Request completed"
+            );
+        } else {
+            info!(
+                client_ip = %remote_addr.ip(),
+                method = %method,
+                path = %path,
+                bucket = %bucket_for_operation,
+                key = %key,
+                status = %status.as_u16(),
+                user = %user_str,
+                "Request completed"
+            );
+        }
 
         Ok(response)
     }
