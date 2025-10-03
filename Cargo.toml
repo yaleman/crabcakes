@@ -42,7 +42,7 @@ sea-orm-migration = { version = "1.1.16", features = ["sqlx-sqlite", "runtime-to
 
 [dev-dependencies]
 aws-config = "1.8"
-aws-sdk-s3 = "1.106"
+aws-sdk-s3 = "1.107"
 reqwest = "0.12"
 tempfile = "3.23"
 tokio-test = "0.4"
