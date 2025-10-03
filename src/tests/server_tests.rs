@@ -1033,3 +1033,47 @@ async fn test_list_objects_v1_pagination() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_reserved_bucket_names() {
+    let temp_dir = setup_test_files();
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // List of reserved bucket names that should be rejected
+    let reserved_names = vec![
+        "admin",
+        "api",
+        "login",
+        "logout",
+        "oauth2",
+        ".well-known",
+        "config",
+        "oidc",
+        "crabcakes",
+        "docs",
+        "help",
+    ];
+
+    for bucket_name in reserved_names {
+        let create_result = client.create_bucket().bucket(bucket_name).send().await;
+
+        assert!(
+            create_result.is_err(),
+            "CreateBucket should fail for reserved bucket name: {}",
+            bucket_name
+        );
+
+        // Verify it returns InvalidBucketName error
+        let err = create_result.unwrap_err();
+        let service_err = err.into_service_error();
+        assert_eq!(
+            service_err.meta().code(),
+            Some("InvalidBucketName"),
+            "Should return InvalidBucketName error for reserved name: {}",
+            bucket_name
+        );
+    }
+
+    handle.abort();
+}
