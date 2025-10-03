@@ -112,6 +112,13 @@
 
 ---
 
+## Future Enhancements
+
+### Server Infrastructure
+- [ ] Investigate using shellflip crate for graceful server restarts
+
+---
+
 ## Out of Scope (Won't Implement)
 - ❌ Versioning operations
 - ❌ Replication operations
