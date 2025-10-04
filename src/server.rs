@@ -111,9 +111,7 @@ impl Server {
     }
 
     pub async fn run(self, use_in_memory_db: bool) -> Result<(), CrabCakesError> {
-        #[cfg(debug_assertions)]
         let addr = format!("{}:{}", self.host, self.port);
-        eprintln!("Starting server on {addr}");
         let addr: SocketAddr = addr.parse()?;
 
         // Create filesystem service
