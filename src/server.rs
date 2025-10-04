@@ -123,7 +123,7 @@ impl Server {
         let credentials_dir = self.config_dir.join("credentials");
 
         // Load IAM policies
-        let policy_store = Arc::new(RwLock::new(PolicyStore::new(&policy_dir)?));
+        let policy_store = Arc::new(PolicyStore::new(&policy_dir)?);
 
         // Load credentials
         let credentials_store = Arc::new(RwLock::new(CredentialStore::new(&credentials_dir)?));

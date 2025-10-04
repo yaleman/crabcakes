@@ -40,7 +40,7 @@ use crate::xml_responses::{
 pub struct S3Handler {
     server_addr: String,
     filesystem: Arc<RwLock<FilesystemService>>,
-    policy_store: Arc<RwLock<PolicyStore>>,
+    policy_store: Arc<PolicyStore>,
     credentials_store: Arc<RwLock<CredentialStore>>,
     multipart_manager: Arc<RwLock<MultipartManager>>,
     db_service: Arc<DBService>,
@@ -50,7 +50,7 @@ pub struct S3Handler {
 impl S3Handler {
     pub fn new(
         filesystem: Arc<RwLock<FilesystemService>>,
-        policy_store: Arc<RwLock<PolicyStore>>,
+        policy_store: Arc<PolicyStore>,
         credentials_store: Arc<RwLock<CredentialStore>>,
         multipart_manager: Arc<RwLock<MultipartManager>>,
         db_service: Arc<DBService>,
@@ -336,13 +336,7 @@ impl S3Handler {
                 }
             };
 
-            match self
-                .policy_store
-                .read()
-                .await
-                .evaluate_request(&iam_request)
-                .await
-            {
+            match self.policy_store.evaluate_request(&iam_request).await {
                 Ok(true) => {
                     debug!("Authorization granted");
                 }
@@ -1306,8 +1300,6 @@ impl S3Handler {
 
         match self
             .policy_store
-            .read()
-            .await
             .evaluate_request(&source_iam_request)
             .await
         {
@@ -1590,8 +1582,6 @@ impl S3Handler {
 
         match self
             .policy_store
-            .read()
-            .await
             .evaluate_request(&source_iam_request)
             .await
         {

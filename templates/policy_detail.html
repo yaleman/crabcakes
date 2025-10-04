@@ -20,6 +20,43 @@
 
 <pre><code class="language-json">{{ policy_json }}</code></pre>
 
+{% if !policy_principals.is_empty() %}
+<h2>Identities Referenced in This Policy</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Identity Name</th>
+            <th>Type</th>
+            <th>Principal ARN</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for principal in policy_principals %}
+        <tr>
+            <td>
+                <a href="/admin/identities/{{ principal.display_name }}" class="identity-link">
+                    {{ principal.display_name }}
+                </a>
+            </td>
+            <td>
+                <span class="badge badge-{{ principal.identity_type | lower }}">
+                    {{ principal.identity_type }}
+                </span>
+            </td>
+            <td><code>{{ principal.arn }}</code></td>
+            <td>
+                <a href="/admin/identities/{{ principal.display_name }}"
+                    class="btn btn-primary btn-small">
+                    View Permissions
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
 <div class="back-link-container">
     <a href="/admin/policies" class="btn btn-primary">← Back to Policies</a>
 </div>

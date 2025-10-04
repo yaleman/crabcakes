@@ -4,7 +4,6 @@
 
 ### Phase 5: Web UI API Endpoints with CSRF Protection (In Progress)
 
-- [x] Create src/web_handlers.rs for web UI routes with placeholder handlers
 - [ ] Session validation middleware for `/api/*` and `/admin/*` routes
 - [ ] **CSRF Protection Implementation**
   - [ ] Add CSRF token generation (using session storage)
@@ -12,14 +11,12 @@
   - [ ] GET /admin/api/csrf-token - Get CSRF token for current session
   - [ ] Add X-CSRF-Token header validation to all mutating endpoints
 - [ ] **PolicyStore Mutation Support**
-  - [ ] Wrap HashMap in RwLock for thread-safe mutations
   - [ ] Store policy_dir path in PolicyStore
   - [ ] Add add_policy(name, policy) with file persistence
   - [ ] Add update_policy(name, policy) with file persistence
   - [ ] Add delete_policy(name) with file deletion
   - [ ] Clear cache on mutations
 - [ ] **CredentialStore Mutation Support**
-  - [ ] Wrap HashMap in RwLock for thread-safe mutations
   - [ ] Store credentials_dir path in CredentialStore
   - [ ] Add add_credential(access_key_id, secret_key) with file persistence
   - [ ] Add update_credential(...) with file persistence
@@ -35,7 +32,6 @@
   - [ ] POST /admin/api/credentials - Create credential (requires CSRF token)
   - [ ] PUT /admin/api/credentials/{access_key} - Update credential (requires CSRF token)
   - [ ] DELETE /admin/api/credentials/{access_key} - Delete credential (requires CSRF token)
-- [x] GET /api/session - Get current session with temp credentials
 - [ ] **Frontend Templates & JavaScript**
   - [ ] Create static/js/csrf.js - CSRF token fetch and caching
   - [ ] Create static/js/policy-crud.js - Policy CRUD with CSRF

@@ -2,6 +2,7 @@
 //!
 //! Handles authentication and API endpoints for the admin web interface.
 
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
+use crate::policy_analyzer;
 
 /// Profile page template
 #[derive(Template)]
@@ -51,6 +53,15 @@ struct PolicyDetailTemplate {
     page: String,
     policy_name: String,
     policy_json: String,
+    policy_principals: Vec<PolicyPrincipalInfo>,
+}
+
+/// Principal info for policy detail page
+#[derive(Debug, Serialize)]
+struct PolicyPrincipalInfo {
+    arn: String,
+    display_name: String,
+    identity_type: String,
 }
 
 /// Policy form template (for creating/editing)
@@ -87,11 +98,39 @@ struct BucketDetailTemplate {
     objects: Vec<ObjectInfo>,
 }
 
+/// Identities list template
+#[derive(Template)]
+#[template(path = "identities.html")]
+struct IdentitiesTemplate {
+    page: String,
+    identities: Vec<IdentitySummary>,
+}
+
+/// Identity detail template
+#[derive(Template)]
+#[template(path = "identity_detail.html")]
+struct IdentityDetailTemplate {
+    page: String,
+    identity: crate::policy_analyzer::IdentityInfo,
+    effective_actions: Vec<String>,
+    effective_resources: Vec<String>,
+}
+
 /// Policy info for listing
 #[derive(Debug)]
 struct PolicyInfo {
     name: String,
     statement_count: usize,
+}
+
+/// Identity summary for listing
+#[derive(Debug)]
+struct IdentitySummary {
+    principal_arn: String,
+    display_name: String,
+    identity_type: String,
+    policy_count: usize,
+    action_count: usize,
 }
 
 /// Object info for bucket listing
@@ -107,7 +146,7 @@ pub struct WebHandler {
     oauth_client: Arc<OAuthClient>,
     db: Arc<DBService>,
     credentials_store: Arc<RwLock<CredentialStore>>,
-    policy_store: Arc<RwLock<PolicyStore>>,
+    policy_store: Arc<PolicyStore>,
     filesystem: Arc<RwLock<FilesystemService>>,
 }
 
@@ -116,7 +155,7 @@ impl WebHandler {
         oauth_client: Arc<OAuthClient>,
         db: Arc<DBService>,
         credentials_store: Arc<RwLock<CredentialStore>>,
-        policy_store: Arc<RwLock<PolicyStore>>,
+        policy_store: Arc<PolicyStore>,
         filesystem: Arc<RwLock<FilesystemService>>,
     ) -> Self {
         Self {
@@ -195,6 +234,12 @@ impl WebHandler {
                     .await
             }
             ("GET", "/admin/credentials") => self.handle_credentials(session.clone()).await,
+            ("GET", "/admin/identities") => self.handle_identities(session.clone()).await,
+            ("GET", path) if path.starts_with("/admin/identities/") => {
+                let access_key_id = path.strip_prefix("/admin/identities/").unwrap_or("");
+                self.handle_identity_detail(session.clone(), access_key_id)
+                    .await
+            }
             ("GET", "/admin/buckets") => self.handle_buckets(session.clone()).await,
             ("GET", path) if path.starts_with("/admin/buckets/") => {
                 let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
@@ -506,18 +551,16 @@ impl WebHandler {
                     .map_err(CrabCakesError::from);
             }
         };
-        let policy_store = self.policy_store.read().await;
-        let policy_names = policy_store.get_policy_names().await;
+        let policy_names = self.policy_store.get_policy_names().await;
         let mut policies: Vec<PolicyInfo> = Vec::new();
         for name in policy_names.iter() {
-            if let Some(policy) = policy_store.get_policy(name).await {
+            if let Some(policy) = self.policy_store.get_policy(name).await {
                 policies.push(PolicyInfo {
                     name: name.clone(),
                     statement_count: policy.statement.len(),
                 });
             }
         }
-        drop(policy_store);
 
         let template = PoliciesTemplate {
             page: "policies".to_string(),
@@ -550,8 +593,6 @@ impl WebHandler {
 
         let policy = self
             .policy_store
-            .read()
-            .await
             .get_policy(policy_name)
             .await
             .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
@@ -559,10 +600,44 @@ impl WebHandler {
         let policy_json = serde_json::to_string_pretty(&policy)
             .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
 
+        // Extract principals from this policy
+        let mut policy_principals = Vec::new();
+        for statement in &policy.statement {
+            if let Some(ref principal) = statement.principal {
+                let principal_to_arns = |principal: &iam_rs::Principal| -> Vec<String> {
+                    use iam_rs::{Principal, PrincipalId};
+                    match principal {
+                        Principal::Wildcard => vec!["*".to_string()],
+                        Principal::Aws(principal_id) => match principal_id {
+                            PrincipalId::String(arn) => vec![arn.clone()],
+                            PrincipalId::Array(arns) => arns.clone(),
+                        },
+                        Principal::Service(principal_id) => match principal_id {
+                            PrincipalId::String(service) => vec![service.clone()],
+                            PrincipalId::Array(services) => services.clone(),
+                        },
+                        _ => vec![],
+                    }
+                };
+
+                for arn in principal_to_arns(principal) {
+                    policy_principals.push(PolicyPrincipalInfo {
+                        arn: arn.clone(),
+                        display_name: crate::policy_analyzer::extract_display_name(&arn),
+                        identity_type: format!(
+                            "{:?}",
+                            crate::policy_analyzer::determine_identity_type(&arn)
+                        ),
+                    });
+                }
+            }
+        }
+
         let template = PolicyDetailTemplate {
             page: "policies".to_string(),
             policy_name: policy_name.to_string(),
             policy_json,
+            policy_principals,
         };
 
         let html = template
@@ -620,8 +695,6 @@ impl WebHandler {
 
         let policy = self
             .policy_store
-            .read()
-            .await
             .get_policy(policy_name)
             .await
             .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
@@ -668,6 +741,122 @@ impl WebHandler {
         let template = CredentialsTemplate {
             page: "credentials".to_string(),
             credentials,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// GET /admin/identities - List all identities (credentials)
+    async fn handle_identities(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(LOCATION, "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        // Get all credentials (these are the identities)
+        let credentials = self
+            .credentials_store
+            .read()
+            .await
+            .get_access_key_ids()
+            .await;
+
+        // Build identity summaries for each credential
+        let mut identities: Vec<IdentitySummary> = Vec::new();
+
+        for access_key_id in credentials {
+            // Build ARN for this user
+            let arn = format!("arn:aws:iam:::user/{}", access_key_id);
+            let identity =
+                policy_analyzer::get_identity_permissions(&arn, self.policy_store.policies.clone())
+                    .await;
+
+            identities.push(IdentitySummary {
+                principal_arn: access_key_id.clone(), // Use access_key_id instead of full ARN
+                display_name: access_key_id.clone(),
+                identity_type: "User".to_string(),
+                policy_count: identity.policies.len(),
+                action_count: identity.action_count(),
+            });
+        }
+
+        let template = IdentitiesTemplate {
+            page: "identities".to_string(),
+            identities,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// GET /admin/identities/{access_key_id} - View identity details
+    async fn handle_identity_detail(
+        &self,
+        session: Session,
+        access_key_id: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(LOCATION, "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        // Build ARN from access_key_id
+        let principal_arn = format!("arn:aws:iam:::user/{}", access_key_id);
+
+        let identity = policy_analyzer::get_identity_permissions(
+            &principal_arn,
+            self.policy_store.policies.clone(),
+        )
+        .await;
+
+        // Calculate effective permissions (unique actions and resources)
+        let mut actions_set = HashSet::new();
+        let mut resources_set = HashSet::new();
+
+        for policy_perm in &identity.policies {
+            if policy_perm.effect == "Allow" {
+                for action in &policy_perm.actions {
+                    actions_set.insert(action.clone());
+                }
+                for resource in &policy_perm.resources {
+                    resources_set.insert(resource.clone());
+                }
+            }
+        }
+
+        let mut effective_actions: Vec<String> = actions_set.into_iter().collect();
+        effective_actions.sort();
+
+        let mut effective_resources: Vec<String> = resources_set.into_iter().collect();
+        effective_resources.sort();
+
+        let template = IdentityDetailTemplate {
+            page: "identities".to_string(),
+            identity,
+            effective_actions,
+            effective_resources,
         };
 
         let html = template
@@ -866,21 +1055,19 @@ impl WebHandler {
         // Check authentication
         self.check_auth(&session).await?;
 
-        let policy_store = self.policy_store.read().await;
         // Get all policy names
-        let policy_names = policy_store.get_policy_names().await;
+        let policy_names = self.policy_store.get_policy_names().await;
 
         // Build response with policy names and statement counts
         let mut policies = Vec::new();
         for name in policy_names {
-            if let Some(policy) = policy_store.get_policy(&name).await {
+            if let Some(policy) = self.policy_store.get_policy(&name).await {
                 policies.push(serde_json::json!({
                     "name": name,
                     "statement_count": policy.statement.len()
                 }));
             }
         }
-        drop(policy_store);
 
         let json = serde_json::to_string(&policies)?;
 
@@ -923,8 +1110,6 @@ impl WebHandler {
 
         // Add policy
         self.policy_store
-            .write()
-            .await
             .add_policy(request.name.clone(), request.policy)
             .await?;
 
@@ -968,8 +1153,6 @@ impl WebHandler {
 
         // Update policy
         self.policy_store
-            .write()
-            .await
             .update_policy(policy_name.to_string(), policy)
             .await?;
 
@@ -1003,11 +1186,7 @@ impl WebHandler {
         self.validate_csrf_token(&session, &parts.headers).await?;
 
         // Delete policy
-        self.policy_store
-            .write()
-            .await
-            .delete_policy(policy_name)
-            .await?;
+        self.policy_store.delete_policy(policy_name).await?;
 
         // Return success
         let json = serde_json::to_string(&serde_json::json!({

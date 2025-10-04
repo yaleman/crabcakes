@@ -26,6 +26,7 @@ pub mod error;
 pub mod filesystem;
 pub mod multipart;
 pub mod policy;
+pub mod policy_analyzer;
 pub mod router;
 pub mod s3_handlers;
 pub mod server;
