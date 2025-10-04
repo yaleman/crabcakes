@@ -145,11 +145,11 @@ impl S3Handler {
             }
 
             // Add host header if missing (HTTP/2 uses :authority pseudo-header instead)
-            if !normalized_parts.headers.contains_key("host")
+            if !normalized_parts.headers.contains_key(HOST)
                 && let Some(authority) = parts.uri.authority()
             {
                 normalized_parts.headers.insert(
-                    "host",
+                    HOST,
                     authority.as_str().parse().map_err(|_| {
                         error!("Failed to parse host header");
                         self.internal_error_response()
