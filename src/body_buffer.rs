@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::async_spooled_tempfile::SpooledTempFile;
 use crate::error::CrabCakesError;
-use tracing::debug;
+use tracing::{debug, error};
 
 const MEMORY_THRESHOLD: usize = 50 * 1024 * 1024; // 50MB
 
@@ -88,8 +88,7 @@ impl BufferedBody {
 
         // Collect the body
         while let Some(frame) = body.frame().await {
-            let frame =
-                frame.map_err(|e| CrabCakesError::other(&format!("Body read error: {}", e)))?;
+            let frame = frame.inspect_err(|e| error!("Body read error: {}", e))?;
 
             if let Some(data) = frame.data_ref() {
                 debug!(
@@ -102,12 +101,10 @@ impl BufferedBody {
                     raw_data.extend_from_slice(data);
                 } else {
                     // Write directly
-                    temp_file.write_all(data).await.map_err(|e| {
-                        CrabCakesError::other(&format!(
-                            "Failed to write to spooled temp file: {}",
-                            e
-                        ))
-                    })?;
+                    temp_file
+                        .write_all(data)
+                        .await
+                        .inspect_err(|e| error!("Failed to write to spooled temp file: {}", e))?;
                     written_bytes += data.len();
                 }
             }
@@ -121,11 +118,8 @@ impl BufferedBody {
             );
             let decoded = decode_aws_chunks(&raw_data)?;
             debug!("Decoded {} bytes from AWS chunks", decoded.len());
-            temp_file.write_all(&decoded).await.map_err(|e| {
-                CrabCakesError::other(&format!(
-                    "Failed to write decoded data to spooled temp file: {}",
-                    e
-                ))
+            temp_file.write_all(&decoded).await.inspect_err(|e| {
+                error!("Failed to write decoded data to spooled temp file: {}", e)
             })?;
             written_bytes = decoded.len();
         }
@@ -144,15 +138,16 @@ impl BufferedBody {
         self.file
             .seek(SeekFrom::Start(0))
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to rewind spooled file: {}", e)))?;
+            .inspect_err(|e| error!("Failed to rewind spooled file: {}", e))?;
         self.file
             .read_to_end(&mut buffer)
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to read spooled file: {}", e)))?;
+            .inspect_err(|e| error!("Failed to read spooled file: {}", e))?;
         // Rewind again so the buffer can be read multiple times
-        self.file.seek(SeekFrom::Start(0)).await.map_err(|e| {
-            CrabCakesError::other(&format!("Failed to rewind spooled file after read: {}", e))
-        })?;
+        self.file
+            .seek(SeekFrom::Start(0))
+            .await
+            .inspect_err(|e| error!("Failed to rewind spooled file after read: {}", e))?;
         Ok(buffer)
     }
 }

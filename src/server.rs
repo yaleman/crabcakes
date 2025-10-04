@@ -83,10 +83,7 @@ impl Server {
                 hostname: None,
                 host,
                 port: NonZeroU16::try_from(port).map_err(|_| {
-                    CrabCakesError::Other(format!(
-                        "Failed to convert port '{}' to NonZeroU16",
-                        port
-                    ))
+                    CrabCakesError::Other(format!("Failed to convert port '{port}' to NonZeroU16",))
                 })?,
                 root_dir,
                 config_dir,
@@ -296,7 +293,7 @@ impl Server {
                 ))),
             }
         } else {
-            Err(CrabCakesError::Other(
+            Err(CrabCakesError::Configuration(
                 "TLS key file not specified".to_string(),
             ))
         }

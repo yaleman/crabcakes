@@ -82,17 +82,18 @@ impl MultipartManager {
         };
 
         let upload_dir = self.upload_dir(bucket, &upload_id);
-        fs::create_dir_all(&upload_dir).await.map_err(|e| {
+        fs::create_dir_all(&upload_dir).await.map_err(|e: std::io::Error| {
+            error!(upload_dir=%upload_dir.display(), "Failed to create upload directory: {}", e);
             CrabCakesError::other(&format!("Failed to create upload directory: {}", e))
         })?;
 
         let metadata_path = self.metadata_path(bucket, &upload_id);
         let metadata_json = serde_json::to_string_pretty(&metadata)
-            .map_err(|e| CrabCakesError::other(&format!("Failed to serialize metadata: {}", e)))?;
+            .inspect_err(|e| error!("Failed to serialize metadata: {}", e))?;
 
         fs::write(&metadata_path, metadata_json)
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to write metadata: {}", e)))?;
+            .inspect_err(|e| error!("Failed to write metadata: {}", e))?;
 
         debug!(
             upload_id = %upload_id,
@@ -113,14 +114,16 @@ impl MultipartManager {
         let metadata_path = self.metadata_path(bucket, upload_id);
         let metadata_json = fs::read_to_string(&metadata_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                CrabCakesError::other(&String::from("Upload not found"))
+                CrabCakesError::Other("Upload not found".to_string())
             } else {
-                CrabCakesError::other(&format!("Failed to read metadata: {}", e))
+                CrabCakesError::Other(format!("Failed to read metadata: {e}"))
             }
         })?;
 
-        serde_json::from_str(&metadata_json)
-            .map_err(|e| CrabCakesError::other(&format!("Failed to parse metadata: {}", e)))
+        serde_json::from_str(&metadata_json).map_err(|e| {
+            error!("Failed to parse metadata: {}", e);
+            e.into()
+        })
     }
 
     /// Upload a part
@@ -144,15 +147,15 @@ impl MultipartManager {
         let part_path = self.part_path(bucket, upload_id, part_number);
         let mut file = fs::File::create(&part_path)
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to create part file: {}", e)))?;
+            .inspect_err(|e| error!("Failed to create part file: {}", e))?;
 
         file.write_all(data)
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to write part data: {}", e)))?;
+            .inspect_err(|e| error!("Failed to write part data: {}", e))?;
 
         file.sync_all()
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to sync part file: {}", e)))?;
+            .inspect_err(|e| error!("Failed to sync part file: {}", e))?;
 
         // Generate ETag (MD5 hash of content)
         let etag = format!("\"{:x}\"", md5::compute(data));
@@ -186,14 +189,14 @@ impl MultipartManager {
         let upload_dir = self.upload_dir(bucket, upload_id);
         let mut parts = Vec::new();
 
-        let mut entries = fs::read_dir(&upload_dir).await.map_err(|e| {
-            CrabCakesError::other(&format!("Failed to read upload directory: {}", e))
+        let mut entries = fs::read_dir(&upload_dir).await.inspect_err(|e| {
+            error!("Failed to read upload directory: {}", e);
         })?;
 
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to read directory entry: {}", e)))?
+            .inspect_err(|e| error!("Failed to read directory entry: {}", e))?
         {
             let file_name = entry.file_name();
             let name_str = file_name.to_string_lossy();
@@ -202,13 +205,14 @@ impl MultipartManager {
                 && let Some(part_num_str) = name_str.strip_prefix("part-")
                 && let Ok(part_number) = part_num_str.parse::<u32>()
             {
-                let metadata = entry.metadata().await.map_err(|e| {
-                    CrabCakesError::other(&format!("Failed to read file metadata: {}", e))
-                })?;
+                let metadata = entry
+                    .metadata()
+                    .await
+                    .inspect_err(|e| error!("Failed to read file metadata: {}", e))?;
 
-                let data = fs::read(entry.path()).await.map_err(|e| {
-                    CrabCakesError::other(&format!("Failed to read part file: {}", e))
-                })?;
+                let data = fs::read(entry.path())
+                    .await
+                    .inspect_err(|e| error!("Failed to read part file: {}", e))?;
 
                 let etag = format!("\"{:x}\"", md5::compute(&data));
 
@@ -233,9 +237,9 @@ impl MultipartManager {
         self.get_metadata(bucket, upload_id).await?;
 
         let upload_dir = self.upload_dir(bucket, upload_id);
-        fs::remove_dir_all(&upload_dir).await.map_err(|e| {
-            CrabCakesError::other(&format!("Failed to remove upload directory: {}", e))
-        })?;
+        fs::remove_dir_all(&upload_dir).await.inspect_err(
+            |e| error!(upload_dir=%upload_dir.display(), "Failed to remove upload directory: {e}"),
+        )?;
 
         debug!(upload_id = %upload_id, "Aborted multipart upload");
 
@@ -258,20 +262,19 @@ impl MultipartManager {
 
         let mut entries = fs::read_dir(&bucket_dir).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                return CrabCakesError::other(&String::from("Bucket not found"));
+                return CrabCakesError::BucketNotFound(bucket.to_string());
             }
-            CrabCakesError::other(&format!("Failed to read bucket directory: {}", e))
+            error!(
+                bucket_dir = %bucket_dir.display(),
+                "Failed to read bucket directory: {}", e
+            );
+            e.into()
         })?;
 
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to read directory entry: {}", e)))?
-        {
-            let file_type = entry
-                .file_type()
-                .await
-                .map_err(|e| CrabCakesError::other(&format!("Failed to read file type: {}", e)))?;
+        while let Some(entry) = entries.next_entry().await? {
+            let file_type = entry.file_type().await.inspect_err(
+                |e| error!(filename=%entry.file_name().as_os_str().to_string_lossy(), "Failed to read file type: {}", e),
+            )?;
 
             if file_type.is_dir() {
                 let upload_id = entry.file_name().to_string_lossy().to_string();
@@ -315,8 +318,8 @@ impl MultipartManager {
                 )));
             }
 
-            let data = fs::read(&part_path).await.map_err(|e| {
-                CrabCakesError::other(&format!("Failed to read part {}: {}", part_number, e))
+            let data = fs::read(&part_path).await.inspect_err(|e| {
+                error!(part_path=%part_path.display(), "Failed to read part {}: {}", part_number, e)
             })?;
 
             let actual_etag = format!("\"{:x}\"", md5::compute(&data));
@@ -329,28 +332,28 @@ impl MultipartManager {
         }
 
         // Create destination file and concatenate all parts
-        let mut dest_file = fs::File::create(dest_path).await.map_err(|e| {
-            CrabCakesError::other(&format!("Failed to create destination file: {}", e))
-        })?;
+        let mut dest_file = fs::File::create(dest_path).await.inspect_err(
+            |e| error!(dest_path=%dest_path.display(), "Failed to create destination file: {}", e),
+        )?;
 
         let mut all_data = Vec::new();
 
         for (part_number, _) in parts {
             let part_path = self.part_path(bucket, upload_id, *part_number);
-            let data = fs::read(&part_path).await.map_err(|e| {
-                CrabCakesError::other(&format!("Failed to read part {}: {}", part_number, e))
+            let data = fs::read(&part_path).await.inspect_err(|e| {
+                error!(part_path=%part_path.display(), "Failed to read part {}: {}", part_number, e)
             })?;
 
-            dest_file.write_all(&data).await.map_err(|e| {
-                CrabCakesError::other(&format!("Failed to write part {}: {}", part_number, e))
-            })?;
+            dest_file.write_all(&data).await.inspect_err(
+                |e| error!(part_number=%part_number, "Failed to write part {}: {}", part_number, e),
+            )?;
 
             all_data.extend_from_slice(&data);
         }
 
-        dest_file.sync_all().await.map_err(|e| {
-            CrabCakesError::other(&format!("Failed to sync destination file: {}", e))
-        })?;
+        dest_file.sync_all().await.inspect_err(
+            |e| error!(dest_path=%dest_path.display(), "Failed to sync destination file: {}", e),
+        )?;
 
         // Generate final ETag (MD5 of complete object)
         let final_etag = format!("\"{:x}\"", md5::compute(&all_data));

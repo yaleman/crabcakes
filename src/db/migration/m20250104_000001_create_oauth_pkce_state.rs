@@ -17,12 +17,32 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(OauthPkceState::CodeVerifier).string().not_null())
+                    .col(
+                        ColumnDef::new(OauthPkceState::CodeVerifier)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(OauthPkceState::Nonce).string().not_null())
-                    .col(ColumnDef::new(OauthPkceState::PkceChallenge).string().not_null())
-                    .col(ColumnDef::new(OauthPkceState::RedirectUri).string().not_null())
-                    .col(ColumnDef::new(OauthPkceState::ExpiresAt).date_time().not_null())
-                    .col(ColumnDef::new(OauthPkceState::CreatedAt).date_time().not_null())
+                    .col(
+                        ColumnDef::new(OauthPkceState::PkceChallenge)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OauthPkceState::RedirectUri)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OauthPkceState::ExpiresAt)
+                            .date_time()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OauthPkceState::CreatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;

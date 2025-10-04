@@ -17,12 +17,36 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(TemporaryCredentials::SecretAccessKey).string().not_null())
-                    .col(ColumnDef::new(TemporaryCredentials::SessionId).string().not_null())
-                    .col(ColumnDef::new(TemporaryCredentials::UserEmail).string().not_null())
-                    .col(ColumnDef::new(TemporaryCredentials::UserId).string().not_null())
-                    .col(ColumnDef::new(TemporaryCredentials::ExpiresAt).date_time().not_null())
-                    .col(ColumnDef::new(TemporaryCredentials::CreatedAt).date_time().not_null())
+                    .col(
+                        ColumnDef::new(TemporaryCredentials::SecretAccessKey)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TemporaryCredentials::SessionId)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TemporaryCredentials::UserEmail)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TemporaryCredentials::UserId)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TemporaryCredentials::ExpiresAt)
+                            .date_time()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TemporaryCredentials::CreatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;

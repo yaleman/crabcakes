@@ -4,7 +4,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use std::sync::Arc;
 use tracing::debug;
 
-use super::entities::{object_tags, oauth_pkce_state, temporary_credentials};
+use super::entities::{oauth_pkce_state, object_tags, temporary_credentials};
 use crate::error::CrabCakesError;
 
 const MAX_TAGS: usize = 10;
@@ -236,7 +236,10 @@ impl DBService {
         Ok(())
     }
 
-    pub async fn delete_credentials_by_session(&self, session_id: &str) -> Result<(), CrabCakesError> {
+    pub async fn delete_credentials_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), CrabCakesError> {
         let result = temporary_credentials::Entity::delete_many()
             .filter(temporary_credentials::Column::SessionId.eq(session_id))
             .exec(&*self.db)

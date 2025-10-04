@@ -5,9 +5,9 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use hyper::{Request, Response, StatusCode};
-use hyper::body::Bytes;
 use http_body_util::Full;
+use hyper::body::Bytes;
+use hyper::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
@@ -64,7 +64,7 @@ impl WebHandler {
 
         match result {
             Ok(resp) => Ok(resp),
-            Err(e) => Ok(self.error_response(e)),
+            Err(e) => Ok(self.error_response(&e)),
         }
     }
 
@@ -76,7 +76,7 @@ impl WebHandler {
             .status(StatusCode::FOUND)
             .header("Location", auth_url)
             .body(Full::new(Bytes::new()))
-            .map_err(|e| CrabCakesError::other(&format!("Failed to build response: {}", e)))
+            .map_err(CrabCakesError::from)
     }
 
     /// GET /oauth2/callback - Handle OAuth callback
@@ -88,7 +88,9 @@ impl WebHandler {
         // TODO: Exchange code for tokens
         // TODO: Create session
         // TODO: Generate temp credentials
-        Err(CrabCakesError::other(&"OAuth callback not yet implemented".to_string()))
+        Err(CrabCakesError::other(
+            &"OAuth callback not yet implemented".to_string(),
+        ))
     }
 
     /// POST /logout - Delete session and credentials
@@ -96,10 +98,10 @@ impl WebHandler {
         // TODO: Get session ID from cookie
         // TODO: Delete temp credentials
         // TODO: Delete session
-        Ok(Response::builder()
+        Response::builder()
             .status(StatusCode::NO_CONTENT)
             .body(Full::new(Bytes::new()))
-            .map_err(|e| CrabCakesError::other(&format!("Failed to build response: {}", e)))?)
+            .map_err(CrabCakesError::from)
     }
 
     /// GET /api/session - Return session info with temp credentials
@@ -107,28 +109,25 @@ impl WebHandler {
         // TODO: Get session from cookie
         // TODO: Look up temp credentials
         // TODO: Return session info as JSON
-        Err(CrabCakesError::other(&"Session endpoint not yet implemented".to_string()))
+        Err(CrabCakesError::other(
+            &"Session endpoint not yet implemented".to_string(),
+        ))
     }
 
     /// 404 Not Found response
     async fn not_found(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        Ok(Response::builder()
+        Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Full::new(Bytes::from("Not Found")))
-            .map_err(|e| CrabCakesError::other(&format!("Failed to build response: {}", e)))?)
+            .map_err(CrabCakesError::from)
     }
 
     /// Error response
-    fn error_response(&self, error: CrabCakesError) -> Response<Full<Bytes>> {
-        Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(Full::new(Bytes::from(format!("Error: {}", error))))
-            .unwrap_or_else(|_| {
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Full::new(Bytes::from("Internal Server Error")))
-                    .expect("Failed to build fallback error response")
-            })
+    fn error_response(&self, error: &CrabCakesError) -> Response<Full<Bytes>> {
+        let error_body = Full::new(Bytes::from(format!("Error: {}", error)));
+        let mut response = Response::new(error_body);
+        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        response
     }
 }
 

@@ -261,14 +261,25 @@ impl S3Handler {
 
         // Check if bucket name is reserved (admin UI paths)
         const RESERVED_BUCKET_NAMES: &[&str] = &[
-            "admin", "api", "login", "logout", "oauth2", ".well-known",
-            "config", "oidc", "crabcakes", "docs", "help",
+            "admin",
+            "api",
+            "login",
+            "logout",
+            "oauth2",
+            ".well-known",
+            "config",
+            "oidc",
+            "crabcakes",
+            "docs",
+            "help",
         ];
 
-        if !bucket_for_operation.is_empty() && RESERVED_BUCKET_NAMES.contains(&bucket_for_operation) {
+        if !bucket_for_operation.is_empty() && RESERVED_BUCKET_NAMES.contains(&bucket_for_operation)
+        {
             warn!(bucket = %bucket_for_operation, "Request to reserved bucket name");
             return Ok(self.invalid_bucket_name_response(&format!(
-                "Bucket name '{}' is reserved and cannot be used", bucket_for_operation
+                "Bucket name '{}' is reserved and cannot be used",
+                bucket_for_operation
             )));
         }
 

@@ -17,6 +17,12 @@ pub enum CrabCakesError {
     Rustls(String),
     Sigv4Verification(String),
     NoUserIdInPrincipal,
+    OidcStateParameterExpired,
+    HttpResponseError(String),
+    BucketNotFound(String),
+    Configuration(String),
+    Hyper(String),
+    Reqwest(String),
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -39,7 +45,43 @@ impl std::fmt::Display for CrabCakesError {
             CrabCakesError::NoUserIdInPrincipal => {
                 write!(f, "No User ID found in principal")
             }
+            CrabCakesError::OidcStateParameterExpired => {
+                write!(f, "OIDC state parameter expired")
+            }
+            CrabCakesError::HttpResponseError(msg) => {
+                write!(f, "HTTP Response Error: {}", msg)
+            }
+            CrabCakesError::BucketNotFound(bucket) => {
+                write!(f, "Bucket '{bucket}' Not Found")
+            }
+            CrabCakesError::Configuration(msg) => {
+                write!(f, "Configuration Error: {}", msg)
+            }
+            CrabCakesError::Hyper(msg) => {
+                write!(f, "Hyper HTTP Error: {}", msg)
+            }
+            CrabCakesError::Reqwest(msg) => {
+                write!(f, "Reqwest HTTP Error: {}", msg)
+            }
         }
+    }
+}
+
+impl From<reqwest::Error> for CrabCakesError {
+    fn from(err: reqwest::Error) -> Self {
+        CrabCakesError::Reqwest(err.to_string())
+    }
+}
+
+impl From<hyper::Error> for CrabCakesError {
+    fn from(err: hyper::Error) -> Self {
+        CrabCakesError::Hyper(err.to_string())
+    }
+}
+
+impl From<http::Error> for CrabCakesError {
+    fn from(err: http::Error) -> Self {
+        CrabCakesError::HttpResponseError(err.to_string())
     }
 }
 

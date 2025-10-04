@@ -2,17 +2,22 @@
 
 ## Web Admin UI Implementation (In Progress)
 
-### Phase 4: OIDC/OAuth2 with PKCE Authentication (Partial)
-- [x] Add Rust dependencies: openidconnect, rand, tower-sessions, tower-sessions-sqlx-store
+### Phase 4: OIDC/OAuth2 with PKCE Authentication (Complete)
+- [x] Add Rust dependencies: openidconnect, rand, tower-sessions, tower-sessions-sqlx-store, reqwest
 - [x] Create src/auth/ module structure (reorganized with sigv4.rs + oauth.rs)
-- [x] Create src/auth/oauth.rs with placeholder for OIDC client and PKCE flow
+- [x] Create src/auth/oauth.rs with OAuthClient implementation
 - [x] Implement temporary AWS credential generation
-- [ ] Complete OIDC/OAuth2 implementation (openidconnect 4.x API)
-- [ ] Implement GET /login - Generate PKCE challenge, redirect to OIDC provider
-- [ ] Implement GET /oauth2/callback - Exchange code for tokens, create session
-- [ ] Implement POST /logout - Delete session and temp credentials
+- [x] Complete OIDC/OAuth2 implementation (openidconnect 4.x API with async HTTP)
+- [x] Implement PKCE flow (SHA256 challenge/verifier)
+- [x] Implement OIDC discovery with async reqwest client
+- [x] Implement authorization URL generation with state/nonce
+- [x] Implement token exchange with code verifier
+- [x] Implement ID token validation with nonce verification
+- [x] Extract user info from ID token (email, sub)
+- [x] Add CrabCakesError::OidcStateParameterExpired variant
+- [ ] Wire up OAuth handlers in web_handlers.rs (GET /login, GET /oauth2/callback, POST /logout)
 - [ ] Create session cookie (HTTP-only, Secure, SameSite)
-- [ ] Extract user info from ID token (email, sub)
+- [ ] Store temporary credentials in database after successful login
 
 ### Phase 5: Web UI API Endpoints (Partial)
 - [x] Create src/web_handlers.rs for web UI routes with placeholder handlers

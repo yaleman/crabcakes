@@ -43,6 +43,7 @@ tower-sessions = "0.14.0"
 tower-sessions-sqlx-store = { version = "0.15.0", features = ["sqlite"] }
 openidconnect = "4.0.1"
 rand = "0.9.2"
+reqwest = "0.12"
 
 [dev-dependencies]
 aws-config = "1.8"
