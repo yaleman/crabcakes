@@ -18,44 +18,47 @@
         class="btn btn-danger">Delete Policy</button>
 </div>
 
-<pre><code class="language-json">{{ policy_json }}</code></pre>
-
-{% if !policy_principals.is_empty() %}
-<h2>Identities Referenced in This Policy</h2>
+{% if !policy_principal_permissions.is_empty() %}
 <table>
     <thead>
         <tr>
             <th>Identity Name</th>
             <th>Type</th>
-            <th>Principal ARN</th>
-            <th>Actions</th>
+            <th>Effect</th>
+            <th>Action</th>
+            <th>Resource</th>
         </tr>
     </thead>
     <tbody>
-        {% for principal in policy_principals %}
+        {% for perm in policy_principal_permissions %}
         <tr>
             <td>
-                <a href="/admin/identities/{{ principal.display_name }}" class="identity-link">
-                    {{ principal.display_name }}
+                <a href="/admin/identities/{{ perm.display_name }}"
+                    class="identity-link">
+                    {{ perm.display_name }}
                 </a>
             </td>
             <td>
-                <span class="badge badge-{{ principal.identity_type | lower }}">
-                    {{ principal.identity_type }}
+                <span class="badge badge-{{ perm.identity_type | lower }}">
+                    {{ perm.identity_type }}
                 </span>
             </td>
-            <td><code>{{ principal.arn }}</code></td>
             <td>
-                <a href="/admin/identities/{{ principal.display_name }}"
-                    class="btn btn-primary btn-small">
-                    View Permissions
-                </a>
+                <span class="badge badge-{{ perm.effect | lower }}">
+                    {{ perm.effect }}
+                </span>
             </td>
+            <td><code>{{ perm.action }}</code></td>
+            <td><code>{{ perm.resource }}</code></td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 {% endif %}
+
+<h2>Raw policy JSON</h2>
+
+<pre><code class="language-json">{{ policy_json }}</code></pre>
 
 <div class="back-link-container">
     <a href="/admin/policies" class="btn btn-primary">← Back to Policies</a>

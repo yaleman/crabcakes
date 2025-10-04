@@ -2,7 +2,6 @@
 //!
 //! Handles authentication and API endpoints for the admin web interface.
 
-use std::collections::HashSet;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -53,15 +52,18 @@ struct PolicyDetailTemplate {
     page: String,
     policy_name: String,
     policy_json: String,
-    policy_principals: Vec<PolicyPrincipalInfo>,
+    policy_principal_permissions: Vec<PolicyPrincipalPermission>,
 }
 
-/// Principal info for policy detail page
-#[derive(Debug, Serialize)]
-struct PolicyPrincipalInfo {
+/// Principal permission entry for policy detail page (one row per principal+action+resource)
+#[derive(Debug, Serialize, PartialEq, Eq, Hash)]
+struct PolicyPrincipalPermission {
     arn: String,
     display_name: String,
     identity_type: String,
+    effect: String,
+    action: String,
+    resource: String,
 }
 
 /// Policy form template (for creating/editing)
@@ -112,8 +114,6 @@ struct IdentitiesTemplate {
 struct IdentityDetailTemplate {
     page: String,
     identity: crate::policy_analyzer::IdentityInfo,
-    effective_actions: Vec<String>,
-    effective_resources: Vec<String>,
 }
 
 /// Policy info for listing
@@ -600,8 +600,8 @@ impl WebHandler {
         let policy_json = serde_json::to_string_pretty(&policy)
             .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
 
-        // Extract principals from this policy
-        let mut policy_principals = Vec::new();
+        // Extract principal + action + resource combinations from this policy
+        let mut policy_principal_permissions = Vec::new();
         for statement in &policy.statement {
             if let Some(ref principal) = statement.principal {
                 let principal_to_arns = |principal: &iam_rs::Principal| -> Vec<String> {
@@ -620,15 +620,53 @@ impl WebHandler {
                     }
                 };
 
+                // Extract actions from statement
+                let actions = if let Some(ref action) = statement.action {
+                    use iam_rs::IAMAction;
+                    match action {
+                        IAMAction::Single(s) => vec![s.clone()],
+                        IAMAction::Multiple(v) => v.clone(),
+                    }
+                } else {
+                    vec![]
+                };
+
+                // Extract resources from statement
+                let resources = if let Some(ref resource) = statement.resource {
+                    use iam_rs::IAMResource;
+                    match resource {
+                        IAMResource::Single(s) => vec![s.to_string()],
+                        IAMResource::Multiple(v) => v.iter().map(|r| r.to_string()).collect(),
+                    }
+                } else {
+                    vec![]
+                };
+
+                let effect = format!("{:?}", statement.effect);
+
+                // Create a row for each principal + action + resource combination
                 for arn in principal_to_arns(principal) {
-                    policy_principals.push(PolicyPrincipalInfo {
-                        arn: arn.clone(),
-                        display_name: crate::policy_analyzer::extract_display_name(&arn),
-                        identity_type: format!(
-                            "{:?}",
-                            crate::policy_analyzer::determine_identity_type(&arn)
-                        ),
-                    });
+                    let display_name = crate::policy_analyzer::extract_display_name(&arn);
+                    let identity_type = format!(
+                        "{}",
+                        crate::policy_analyzer::determine_identity_type(&arn)
+                    );
+
+                    for action in &actions {
+                        for resource in &resources {
+                            let permission = PolicyPrincipalPermission {
+                                arn: arn.clone(),
+                                display_name: display_name.clone(),
+                                identity_type: identity_type.clone(),
+                                effect: effect.clone(),
+                                action: action.clone(),
+                                resource: resource.clone(),
+                            };
+                            if !policy_principal_permissions.contains(&permission) {
+                                policy_principal_permissions.push(permission);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -637,7 +675,7 @@ impl WebHandler {
             page: "policies".to_string(),
             policy_name: policy_name.to_string(),
             policy_json,
-            policy_principals,
+            policy_principal_permissions,
         };
 
         let html = template
@@ -831,32 +869,9 @@ impl WebHandler {
         )
         .await;
 
-        // Calculate effective permissions (unique actions and resources)
-        let mut actions_set = HashSet::new();
-        let mut resources_set = HashSet::new();
-
-        for policy_perm in &identity.policies {
-            if policy_perm.effect == "Allow" {
-                for action in &policy_perm.actions {
-                    actions_set.insert(action.clone());
-                }
-                for resource in &policy_perm.resources {
-                    resources_set.insert(resource.clone());
-                }
-            }
-        }
-
-        let mut effective_actions: Vec<String> = actions_set.into_iter().collect();
-        effective_actions.sort();
-
-        let mut effective_resources: Vec<String> = resources_set.into_iter().collect();
-        effective_resources.sort();
-
         let template = IdentityDetailTemplate {
             page: "identities".to_string(),
             identity,
-            effective_actions,
-            effective_resources,
         };
 
         let html = template

@@ -1,10 +1,12 @@
 {% extends "layout.html" %}
 
-{% block title %}{{ identity.display_name }} - Identities - Crabcakes Admin{% endblock %}
+{% block title %}{{ identity.display_name }} - Identities - Crabcakes Admin{%
+endblock %}
 
 {% block content %}
 <div class="breadcrumb">
-    <h1><a href="/admin/identities">Identities</a> / {{ identity.display_name }}</h1>
+    <h1><a href="/admin/identities">Identities</a> / {{ identity.display_name
+        }}</h1>
 </div>
 
 <div class="identity-info-card">
@@ -35,15 +37,16 @@
         <tr>
             <th>Policy Name</th>
             <th>Effect</th>
-            <th>Actions</th>
             <th>Resources</th>
+            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
         {% for policy in identity.policies %}
         <tr>
             <td>
-                <a href="/admin/policies/{{ policy.policy_name }}" class="policy-link">
+                <a href="/admin/policies/{{ policy.policy_name }}"
+                    class="policy-link">
                     {{ policy.policy_name }}
                 </a>
             </td>
@@ -53,16 +56,16 @@
                 </span>
             </td>
             <td>
-                <ul class="action-list">
-                    {% for action in policy.actions %}
-                    <li><code>{{ action }}</code></li>
+                <ul class="resource-list no-list-style">
+                    {% for resource in policy.resources %}
+                    <li><code>{{ resource }}</code></li>
                     {% endfor %}
                 </ul>
             </td>
             <td>
-                <ul class="resource-list">
-                    {% for resource in policy.resources %}
-                    <li><code>{{ resource }}</code></li>
+                <ul class="action-list no-list-style">
+                    {% for action in policy.actions %}
+                    <li><code>{{ action }}</code></li>
                     {% endfor %}
                 </ul>
             </td>
@@ -76,35 +79,6 @@
     <p>No policies grant permissions to this identity</p>
 </div>
 {% endif %}
-
-<h2>Effective Permissions Summary</h2>
-<div class="effective-permissions">
-    <div class="permissions-section">
-        <h3>Allowed Actions ({{ effective_actions.len() }})</h3>
-        {% if effective_actions.is_empty() %}
-        <p class="empty-message">No actions allowed</p>
-        {% else %}
-        <ul class="action-list">
-            {% for action in effective_actions %}
-            <li><code>{{ action }}</code></li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-    </div>
-
-    <div class="permissions-section">
-        <h3>Allowed Resources ({{ effective_resources.len() }})</h3>
-        {% if effective_resources.is_empty() %}
-        <p class="empty-message">No resources allowed</p>
-        {% else %}
-        <ul class="resource-list">
-            {% for resource in effective_resources %}
-            <li><code>{{ resource }}</code></li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-    </div>
-</div>
 
 <div class="back-link-container">
     <a href="/admin/identities" class="btn btn-primary">← Back to Identities</a>
