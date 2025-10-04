@@ -137,10 +137,18 @@
 ### Server Infrastructure
 - [ ] Investigate using shellflip crate for graceful server restarts - example implementation here <https://github.com/cloudflare/shellflip/blob/main/examples/restarter.rs>
 - [ ] Enable dual-stack (IPv4/IPv6) listening support
+- [ ] policy troubleshooter - input the bucket/key/action/user and see what the result will be
+- [ ] policy suggester - enable the mode, take some actions, and get suggestions as to what's missing from policy
+  - [ ] this stores all actions while it's running (maybe in the database?) for later reference 
+- [ ] regular database vacuum with a record of when it was last done, so if it's overdue or really needs it, then just run the task
+- [ ] turn on consistency features for sqlite to handle crashes better if there are some
+- [ ] possibly look at offering postgresql as a database backend
+- [ ] manual task to scan the buckets and see if the database has metadata stored for missing items
 
 ---
 
 ## Out of Scope (Won't Implement)
+
 - ❌ Versioning operations
 - ❌ Replication operations
 - ❌ Analytics operations
