@@ -19,6 +19,7 @@ use tower::BoxError;
 use tracing::{debug, trace};
 
 use crate::credentials::CredentialStore;
+use crate::db::DBService;
 use crate::error::CrabCakesError;
 
 /// Mock AWS Account ID for generated principals
@@ -41,6 +42,7 @@ pub struct VerifiedRequest {
 pub async fn verify_sigv4(
     req: http::Request<Vec<u8>>,
     credentials_store: Arc<CredentialStore>,
+    db: Arc<DBService>,
     region: &str,
 ) -> Result<VerifiedRequest, CrabCakesError> {
     // Check if Authorization header exists
@@ -55,25 +57,53 @@ pub async fn verify_sigv4(
     // Create a closure that will fetch signing keys
     let get_signing_key = {
         let cred_store = credentials_store.clone();
+        let db_service = db.clone();
         move |request: GetSigningKeyRequest| {
             let cred_store = cred_store.clone();
+            let db_service = db_service.clone();
             async move {
                 let access_key = request.access_key().to_string();
                 debug!(access_key = %access_key, "Looking up signing key");
 
-                // Get the credential from the store
-                let secret_access_key = cred_store
-                    .get_credential(&access_key)
-                    .await
-                    .ok_or(CrabCakesError::InvalidCredential)?;
+                // Try to get the credential from the permanent store first
+                let secret_access_key = if let Some(secret) =
+                    cred_store.get_credential(&access_key).await
+                {
+                    debug!(access_key = %access_key, "Found credential in permanent store");
+                    secret
+                } else {
+                    // Try the database for temporary credentials
+                    debug!(access_key = %access_key, "Checking database for temporary credentials");
+                    let temp_cred = db_service
+                        .get_temporary_credentials(&access_key)
+                        .await
+                        .map_err(|e| {
+                            debug!(access_key = %access_key, error = %e, "Database lookup failed");
+                            BoxError::from(format!("Database lookup failed: {}", e))
+                        })?
+                        .ok_or_else(|| {
+                            debug!(access_key = %access_key, "Credential not found in database");
+                            BoxError::from("Invalid credential identifier".to_string())
+                        })?;
+
+                    // Check if temporary credentials are expired
+                    if temp_cred.expires_at < chrono::Utc::now().naive_utc() {
+                        debug!(access_key = %access_key, "Temporary credentials have expired");
+                        return Err(BoxError::from("Temporary credentials expired".to_string()));
+                    }
+
+                    debug!(access_key = %access_key, "Found valid temporary credential in database");
+                    temp_cred.secret_access_key
+                };
 
                 // Convert secret key to KSecretKey
+                debug!(access_key = %access_key, secret_key_length = secret_access_key.len(), "About to parse secret key");
                 let secret_key = KSecretKey::from_str(&secret_access_key).map_err(|err| {
                     debug!(
                         access_key_id = access_key,
                         "Failed to parse secret key: {}", err
                     );
-                    CrabCakesError::InvalidCredential
+                    BoxError::from(format!("Failed to parse secret key: {}", err))
                 })?;
 
                 // Generate signing key
@@ -90,10 +120,13 @@ pub async fn verify_sigv4(
                             BoxError::from(format!("Failed to create principal: {}", e))
                         })?;
 
-                Ok(GetSigningKeyResponse::builder()
+                GetSigningKeyResponse::builder()
                     .principal(principal)
                     .signing_key(signing_key)
-                    .build()?)
+                    .build()
+                    .map_err(|e| {
+                        BoxError::from(format!("Failed to build signing key response: {}", e))
+                    })
             }
         }
     };
@@ -105,6 +138,14 @@ pub async fn verify_sigv4(
     let signature_options = SignatureOptions::S3;
 
     trace!("Signature options: {:?}", signature_options);
+
+    // Log request details for debugging
+    trace!(
+        method = %req.method(),
+        uri = %req.uri(),
+        headers = ?req.headers(),
+        "Validating SigV4 request"
+    );
 
     // Validate the request
     let (_parts, _body, auth) = sigv4_validate_request(
@@ -625,6 +666,8 @@ mod tests {
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_required() {
         let cred_store = Arc::new(CredentialStore::new_empty());
+        let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
+        let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
         let request = http::Request::builder()
@@ -634,7 +677,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature required - should fail
-        let result = verify_sigv4(request, cred_store, "crabcakes").await;
+        let result = verify_sigv4(request, cred_store, db, "crabcakes").await;
 
         assert!(
             result.is_err(),
@@ -650,6 +693,8 @@ mod tests {
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_not_required() {
         let cred_store = Arc::new(CredentialStore::new_empty());
+        let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
+        let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
         let request = http::Request::builder()
@@ -659,7 +704,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature not required - should return error indicating no auth
-        let result = verify_sigv4(request, cred_store, "crabcakes").await;
+        let result = verify_sigv4(request, cred_store, db, "crabcakes").await;
 
         assert!(
             result.is_err(),
@@ -675,6 +720,8 @@ mod tests {
     #[tokio::test]
     async fn test_verify_sigv4_with_malformed_auth_header() {
         let cred_store = Arc::new(CredentialStore::new_empty());
+        let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
+        let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request with malformed Authorization header
         let request = http::Request::builder()
@@ -685,7 +732,7 @@ mod tests {
             .unwrap();
 
         // Verify - should fail
-        let result = verify_sigv4(request, cred_store, "crabcakes").await;
+        let result = verify_sigv4(request, cred_store, db, "crabcakes").await;
 
         assert!(
             result.is_err(),

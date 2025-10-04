@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::async_spooled_tempfile::SpooledTempFile;
 use crate::error::CrabCakesError;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 const MEMORY_THRESHOLD: usize = 50 * 1024 * 1024; // 50MB
 
@@ -91,7 +91,7 @@ impl BufferedBody {
             let frame = frame.inspect_err(|e| error!("Body read error: {}", e))?;
 
             if let Some(data) = frame.data_ref() {
-                debug!(
+                trace!(
                     "Body frame received: {} bytes, first 100 bytes: {:?}",
                     data.len(),
                     &data[..data.len().min(100)]

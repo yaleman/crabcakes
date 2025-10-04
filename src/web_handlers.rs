@@ -724,13 +724,21 @@ impl WebHandler {
 
         let objects: Vec<ObjectInfo> = entries
             .iter()
-            .map(|entry| ObjectInfo {
-                key: entry.key.clone(),
-                size_formatted: format_size(entry.size),
-                last_modified: entry
-                    .last_modified
-                    .format("%Y-%m-%d %H:%M:%S UTC")
-                    .to_string(),
+            .map(|entry| {
+                // Strip bucket name from key for S3 operations
+                let key = entry
+                    .key
+                    .strip_prefix(&format!("{}/", bucket_name))
+                    .unwrap_or(&entry.key)
+                    .to_string();
+                ObjectInfo {
+                    key,
+                    size_formatted: format_size(entry.size),
+                    last_modified: entry
+                        .last_modified
+                        .format("%Y-%m-%d %H:%M:%S UTC")
+                        .to_string(),
+                }
             })
             .collect();
 

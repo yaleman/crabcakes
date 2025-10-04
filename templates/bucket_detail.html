@@ -22,8 +22,7 @@
         <tr>
             {% if !objects.is_empty() %}
             <th class="select-column">
-                <input type="checkbox" id="select-all"
-                    onchange="toggleSelectAll(this)">
+                <input type="checkbox" id="select-all">
             </th>
             {% endif %}
             <th>Key</th>
@@ -38,8 +37,7 @@
             <td>
                 <input type="checkbox" class="object-checkbox"
                     data-bucket="{{ bucket_name }}"
-                    data-key="{{ object.key }}"
-                    onchange="toggleObjectSelection(this)">
+                    data-key="{{ object.key }}">
             </td>
             <td>{{ object.key }}</td>
             <td>{{ object.size_formatted }}</td>

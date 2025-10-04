@@ -135,9 +135,38 @@ impl S3Handler {
         } else {
             debug!("Using standard signature verification");
             // Reconstruct the request with the buffered body for verification
-            let http_request = http::Request::from_parts(parts.clone(), body_vec.clone());
+            // Normalize URI to path+query only (HTTP/2 sends absolute URIs but AWS SDK signs with relative)
+            let mut normalized_parts = parts.clone();
+            if let Some(path_and_query) = normalized_parts.uri.path_and_query() {
+                normalized_parts.uri = path_and_query
+                    .as_str()
+                    .parse()
+                    .unwrap_or_else(|_| parts.uri.clone());
+            }
 
-            match verify_sigv4(http_request, self.credentials_store.clone(), &self.region).await {
+            // Add host header if missing (HTTP/2 uses :authority pseudo-header instead)
+            if !normalized_parts.headers.contains_key("host")
+                && let Some(authority) = parts.uri.authority()
+            {
+                normalized_parts.headers.insert(
+                    "host",
+                    authority.as_str().parse().map_err(|_| {
+                        error!("Failed to parse host header");
+                        self.internal_error_response()
+                    })?,
+                );
+            }
+
+            let http_request = http::Request::from_parts(normalized_parts, body_vec.clone());
+
+            match verify_sigv4(
+                http_request,
+                self.credentials_store.clone(),
+                self.db_service.clone(),
+                &self.region,
+            )
+            .await
+            {
                 Ok(v) => v,
                 Err(e) => {
                     warn!(error = %e, "Signature verification failed");
@@ -266,34 +295,50 @@ impl S3Handler {
             )));
         }
 
-        // Build IAM request and evaluate policy
-        let iam_request = match auth_context.build_iam_request(
-            s3_action,
-            bucket.as_deref(),
-            extracted_key.as_deref(),
-        ) {
-            Ok(req) => req,
-            Err(e) => {
-                error!(error = %e, "Failed to build IAM request");
-                return Ok(self.internal_error_response());
-            }
+        // Check if this is a temporary credential (OAuth-based) - they get full access
+        let is_temp_credential = if let Some(ref username) = authenticated_username {
+            self.db_service
+                .get_temporary_credentials(username)
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+        } else {
+            false
         };
 
-        match self.policy_store.evaluate_request(&iam_request).await {
-            Ok(true) => {
-                debug!("Authorization granted");
-            }
-            Ok(false) => {
-                warn!(
-                    principal = ?iam_request.principal,
-                    action = %s3_action,
-                    "Authorization denied"
-                );
-                return Ok(self.access_denied_response());
-            }
-            Err(e) => {
-                error!(error = %e, "Error evaluating policy");
-                return Ok(self.internal_error_response());
+        // Build IAM request and evaluate policy (skip for temporary credentials)
+        if is_temp_credential {
+            debug!(access_key = ?authenticated_username, "Temporary credential - granting full access");
+        } else {
+            let iam_request = match auth_context.build_iam_request(
+                s3_action,
+                bucket.as_deref(),
+                extracted_key.as_deref(),
+            ) {
+                Ok(req) => req,
+                Err(e) => {
+                    error!(error = %e, "Failed to build IAM request");
+                    return Ok(self.internal_error_response());
+                }
+            };
+
+            match self.policy_store.evaluate_request(&iam_request).await {
+                Ok(true) => {
+                    debug!("Authorization granted");
+                }
+                Ok(false) => {
+                    warn!(
+                        principal = ?iam_request.principal,
+                        action = %s3_action,
+                        "Authorization denied"
+                    );
+                    return Ok(self.access_denied_response());
+                }
+                Err(e) => {
+                    error!(error = %e, "Error evaluating policy");
+                    return Ok(self.internal_error_response());
+                }
             }
         }
 
@@ -1744,8 +1789,7 @@ impl S3Handler {
             .collect();
 
         // Build full key path
-        let full_key = format!("{}/{}", bucket, key);
-        let dest_path = self.filesystem.resolve_path(&full_key);
+        let dest_path = self.filesystem.resolve_path(key);
 
         // Complete multipart upload
         match self
@@ -1756,7 +1800,8 @@ impl S3Handler {
             Ok(etag) => {
                 debug!(
                     upload_id = %upload_id,
-                    key = %full_key,
+                    bucket = %bucket,
+                    key = %key,
                     "CompleteMultipartUpload success"
                 );
 

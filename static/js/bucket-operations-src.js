@@ -12,7 +12,6 @@ function getS3Client() {
     if (!accessKeyId || !secretAccessKey) {
         throw new Error('No credentials found. Please refresh the page.');
     }
-
     return new S3Client({
         region: 'crabcakes',
         endpoint: window.location.origin,
@@ -32,7 +31,6 @@ async function downloadObject(bucket, key) {
             Bucket: bucket,
             Key: key,
         });
-
         const response = await client.send(command);
 
         // Convert response body to blob

@@ -26,7 +26,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let log_level_sqlx = std::env::var("RUST_LOG_SQLX").unwrap_or("warn".to_string());
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(format!(
-            "crabcakes={log_level},tower_http=info,h2=warn,sqlx={log_level_sqlx}",
+            "crabcakes={log_level},scratchstack_aws_signature=debug,tower_http=info,h2=warn,sqlx={log_level_sqlx}",
         )))
         .with(tracing_subscriber::fmt::layer())
         .init();

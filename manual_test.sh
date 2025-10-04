@@ -454,8 +454,9 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-ETAG1=$(echo "$PART1_OUTPUT" | jq -r '.ETag')
-echo "Uploaded part 1 with ETag: $ETAG1"
+ETAG1=$(echo "$PART1_OUTPUT" | jq -r '.ETag' | tr -d '"')
+echo "PART1_OUTPUT=${PART1_OUTPUT}"
+echo "Uploaded part 1 with ETag: '$ETAG1'"
 
 # Upload part 2
 PART2_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
@@ -473,8 +474,9 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-ETAG2=$(echo "$PART2_OUTPUT" | jq -r '.ETag')
-echo "Uploaded part 2 with ETag: $ETAG2"
+echo "PART2_OUTPUT=${PART2_OUTPUT}"
+ETAG2=$(echo "$PART2_OUTPUT" | jq -r '.ETag'| tr -d '"')
+echo "Uploaded part 2 with ETag: '$ETAG2'"
 
 # List parts to verify
 LIST_PARTS_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
@@ -498,15 +500,16 @@ cat > "$TEMPDIR2/complete-multipart.json" <<EOF
   "Parts": [
     {
       "PartNumber": 1,
-      "ETag": $ETAG1
+      "ETag": "\"$ETAG1\""
     },
     {
       "PartNumber": 2,
-      "ETag": $ETAG2
+      "ETag": "\"$ETAG2\""
     }
   ]
 }
 EOF
+cat "$TEMPDIR2/complete-multipart.json"
 
 # Complete multipart upload
 COMPLETE_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \

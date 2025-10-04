@@ -38,3 +38,11 @@ docker_run: docker_build
         -p 8090:8090 \
         --mount type=bind,src=$(pwd)/config,target=/config \
         ghcr.io/yaleman/crabcakes:latest
+
+run:
+    pnpm build && \
+    cargo run --
+
+run_debug:
+    pnpm build && \
+    RUST_LOG=debug cargo run
