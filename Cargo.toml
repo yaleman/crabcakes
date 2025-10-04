@@ -37,8 +37,16 @@ num_cpus = "1.17.0"
 hmac = "0.12.1"
 uuid = { version = "1.18.1", features = ["v4"] }
 md5 = "0.8.0"
-sea-orm = { version = "1.1.16", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "mock"] }
-sea-orm-migration = { version = "1.1.16", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+sea-orm = { version = "1.1.16", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+    "mock",
+] }
+sea-orm-migration = { version = "1.1.16", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+] }
 tower-sessions = "0.14.0"
 tower-sessions-sqlx-store = { version = "0.15.0", features = ["sqlite"] }
 openidconnect = "4.0.1"
@@ -47,8 +55,8 @@ reqwest = "0.12"
 form_urlencoded = "1.2.2"
 
 [dev-dependencies]
-aws-config = "1.8"
-aws-sdk-s3 = "1.106"
+aws-config = "1.8.7"
+aws-sdk-s3 = "1.107"
 reqwest = "0.12"
 tempfile = "3.23"
 tokio-test = "0.4"
