@@ -147,6 +147,20 @@ impl WebHandler {
                 self.handle_api_delete_policy(req, session.clone(), policy_name)
                     .await
             }
+            ("GET", "/admin/api/credentials") => self.handle_api_list_credentials(session.clone()).await,
+            ("POST", "/admin/api/credentials") => {
+                self.handle_api_create_credential(req, session.clone()).await
+            }
+            ("PUT", path) if path.starts_with("/admin/api/credentials/") => {
+                let access_key_id = path.strip_prefix("/admin/api/credentials/").unwrap_or("");
+                self.handle_api_update_credential(req, session.clone(), access_key_id)
+                    .await
+            }
+            ("DELETE", path) if path.starts_with("/admin/api/credentials/") => {
+                let access_key_id = path.strip_prefix("/admin/api/credentials/").unwrap_or("");
+                self.handle_api_delete_credential(req, session.clone(), access_key_id)
+                    .await
+            }
             ("GET", "/admin") | ("GET", "/admin/") => self.handle_root().await,
             ("GET", "/admin/profile") => self.handle_profile(session.clone()).await,
             ("GET", "/admin/policies") => self.handle_policies(session.clone()).await,
@@ -874,6 +888,162 @@ impl WebHandler {
         let json = serde_json::to_string(&serde_json::json!({
             "success": true,
             "name": policy_name
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/api/credentials - List all credentials (JSON)
+    async fn handle_api_list_credentials(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Get all access key IDs (NOT secret keys)
+        let access_key_ids = self.credentials_store.get_access_key_ids().await;
+
+        // Build response with just access key IDs
+        let credentials: Vec<serde_json::Value> = access_key_ids
+            .into_iter()
+            .map(|id| serde_json::json!({
+                "access_key_id": id
+            }))
+            .collect();
+
+        let json = serde_json::to_string(&credentials)?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// POST /admin/api/credentials - Create a new credential
+    async fn handle_api_create_credential(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts and body
+        let (parts, body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Read request body
+        let body_bytes = body.collect().await?.to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+
+        // Parse request body
+        #[derive(serde::Deserialize)]
+        struct CreateCredentialRequest {
+            access_key_id: String,
+            secret_access_key: String,
+        }
+
+        let request: CreateCredentialRequest = serde_json::from_str(body_str)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+
+        // Add credential
+        self.credentials_store
+            .add_credential(request.access_key_id.clone(), request.secret_access_key)
+            .await?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "access_key_id": request.access_key_id
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::CREATED)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// PUT /admin/api/credentials/{access_key_id} - Update an existing credential
+    async fn handle_api_update_credential(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+        access_key_id: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts and body
+        let (parts, body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Read request body
+        let body_bytes = body.collect().await?.to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+
+        // Parse secret key from request body
+        #[derive(serde::Deserialize)]
+        struct UpdateCredentialRequest {
+            secret_access_key: String,
+        }
+
+        let request: UpdateCredentialRequest = serde_json::from_str(body_str)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+
+        // Update credential
+        self.credentials_store
+            .update_credential(access_key_id.to_string(), request.secret_access_key)
+            .await?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "access_key_id": access_key_id
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// DELETE /admin/api/credentials/{access_key_id} - Delete a credential
+    async fn handle_api_delete_credential(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+        access_key_id: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts for CSRF validation
+        let (parts, _body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Delete credential
+        self.credentials_store.delete_credential(access_key_id).await?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "access_key_id": access_key_id
         }))?;
 
         Response::builder()
