@@ -152,6 +152,12 @@ impl WebHandler {
                 CrabCakesError::other(&format!("Failed to store access_key_id in session: {}", e))
             })?;
 
+        // Cycle the session to ensure it gets an ID
+        session
+            .cycle_id()
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to cycle session ID: {}", e)))?;
+
         // Get session ID
         let session_id = session
             .id()

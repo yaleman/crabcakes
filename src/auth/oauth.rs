@@ -9,7 +9,7 @@ use openidconnect::{
 };
 use rand::Rng;
 use reqwest;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::db::DBService;
 use crate::error::CrabCakesError;
@@ -172,10 +172,10 @@ impl OAuthClient {
                     async move {
                         let uri = http_request.uri().to_string();
                         let body = http_request.body();
-                        debug!("Token request to: {}", uri);
-                        debug!("Token request headers: {:?}", http_request.headers());
+                        trace!("Token request to: {}", uri);
+                        trace!("Token request headers: {:?}", http_request.headers());
                         if let Ok(body_str) = String::from_utf8(body.clone()) {
-                            debug!("Token request body: {}", body_str);
+                            trace!("Token request body: {}", body_str);
                         }
 
                         let response = http_client
