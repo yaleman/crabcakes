@@ -15,6 +15,7 @@
 - [x] Implement ID token validation with nonce verification
 - [x] Extract user info from ID token (email, sub)
 - [x] Add CrabCakesError::OidcStateParameterExpired variant
+- [x] Background cleanup task for expired PKCE states and temporary credentials (5-minute interval)
 - [ ] Wire up OAuth handlers in web_handlers.rs (GET /login, GET /oauth2/callback, POST /logout)
 - [ ] Create session cookie (HTTP-only, Secure, SameSite)
 - [ ] Store temporary credentials in database after successful login

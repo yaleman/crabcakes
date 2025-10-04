@@ -18,6 +18,7 @@
 pub mod async_spooled_tempfile;
 pub mod auth;
 pub mod body_buffer;
+pub mod cleanup;
 pub mod cli;
 pub mod credentials;
 pub mod db;

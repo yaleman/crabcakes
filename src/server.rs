@@ -20,6 +20,7 @@ use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info};
 
+use crate::cleanup::CleanupTask;
 use crate::cli::Cli;
 use crate::credentials::CredentialStore;
 #[cfg(test)]
@@ -140,6 +141,12 @@ impl Server {
             initialize_database(&self.config_dir).await?
         };
         let db_service = Arc::new(DBService::new(Arc::new(db)));
+
+        // Spawn background cleanup task for expired PKCE states and temporary credentials
+        let cleanup_task = CleanupTask::new(db_service.clone(), 300); // Run every 5 minutes
+        tokio::spawn(async move {
+            cleanup_task.run().await;
+        });
 
         if self.tls_cert.is_some() {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();

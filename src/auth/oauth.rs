@@ -141,7 +141,7 @@ impl OAuthClient {
             .db
             .get_pkce_state(state)
             .await?
-            .ok_or_else(|| CrabCakesError::OidcStateParameterExpired)?;
+            .ok_or(CrabCakesError::OidcStateParameterExpired)?;
 
         // Check if expired
         if pkce_state.expires_at < chrono::Utc::now().naive_utc() {

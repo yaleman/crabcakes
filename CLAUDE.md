@@ -19,6 +19,7 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
 - `src/body_buffer.rs` - Smart request body buffering (memory/disk spillover)
 - `src/policy.rs` - IAM policy loading and evaluation (with wildcard principal support)
 - `src/multipart.rs` - Multipart upload state management
+- `src/cleanup.rs` - Background cleanup task for expired PKCE states and credentials
 - `src/db/` - Database layer for metadata storage (tags, sessions, credentials, etc.)
   - `src/db/mod.rs` - Database initialization and migration runner
   - `src/db/service.rs` - DBService for metadata, PKCE state, and temp credential operations
@@ -225,6 +226,18 @@ The `DBService` struct in `src/db/service.rs` provides database operations:
 - `delete_temporary_credentials(access_key_id)` - Delete specific credentials
 - `delete_credentials_by_session(session_id)` - Delete all session credentials
 - `cleanup_expired_credentials()` - Remove expired credentials
+
+### Background Cleanup Task
+
+The server spawns a background cleanup task (`CleanupTask` in `src/cleanup.rs`) on startup:
+- Runs every 5 minutes (configurable interval)
+- Calls `cleanup_expired_pkce_states()` to remove expired OAuth PKCE states
+- Calls `cleanup_expired_credentials()` to remove expired temporary credentials
+- Logs info messages when records are cleaned up
+- Logs errors if cleanup fails (but continues running)
+- Task is spawned with `tokio::spawn()` and runs independently
+
+This ensures that expired sessions and credentials don't accumulate in the database.
 
 Future: ACL operations, object attributes
 
