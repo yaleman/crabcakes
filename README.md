@@ -52,3 +52,7 @@ aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/so
 cargo test                  # Run all tests
 bash manual_test.sh         # Test with AWS CLI
 ```
+
+## Credits
+
+- Syntax highlighting powered by [Prism.js](https://prismjs.com)

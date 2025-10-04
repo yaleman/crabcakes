@@ -2,6 +2,10 @@
 
 {% block title %}{{ policy_name }} - Policies - Crabcakes Admin{% endblock %}
 
+{% block extra_styles %}
+<link rel="stylesheet" href="/admin/static/css/prism.css">
+{% endblock %}
+
 {% block content %}
 <div class="breadcrumb">
     <a href="/admin/policies">Policies</a> / {{ policy_name }}
@@ -10,9 +14,13 @@
 <h1>Policy: {{ policy_name }}</h1>
 <p class="subtitle">IAM policy document</p>
 
-<div class="code-block">{{ policy_json }}</div>
+<pre><code class="language-json">{{ policy_json }}</code></pre>
 
 <div class="back-link-container">
     <a href="/admin/policies" class="btn btn-primary">← Back to Policies</a>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/prism.js"></script>
 {% endblock %}
