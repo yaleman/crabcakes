@@ -20,17 +20,48 @@
 - [ ] Create session cookie (HTTP-only, Secure, SameSite)
 - [ ] Store temporary credentials in database after successful login
 
-### Phase 5: Web UI API Endpoints (Partial)
+### Phase 5: Web UI API Endpoints with CSRF Protection (In Progress)
 - [x] Create src/web_handlers.rs for web UI routes with placeholder handlers
 - [ ] Session validation middleware for /api/* and /admin/* routes
-- [ ] GET /api/credentials - List all permanent credentials
-- [ ] POST /api/credentials - Create new permanent credential
-- [ ] DELETE /api/credentials/{access_key_id} - Delete credential
-- [ ] GET /api/policies - List all policies
-- [ ] GET /api/policies/{name} - Get policy details
-- [ ] POST /api/policies - Create/update policy
-- [ ] DELETE /api/policies/{name} - Delete policy
-- [ ] GET /api/session - Get current session with temp credentials
+- [ ] **CSRF Protection Implementation**
+  - [ ] Add CSRF token generation (using session storage)
+  - [ ] Add CSRF token validation on all POST/PUT/DELETE requests
+  - [ ] GET /admin/api/csrf-token - Get CSRF token for current session
+  - [ ] Add X-CSRF-Token header validation to all mutating endpoints
+- [ ] **PolicyStore Mutation Support**
+  - [ ] Wrap HashMap in RwLock for thread-safe mutations
+  - [ ] Store policy_dir path in PolicyStore
+  - [ ] Add add_policy(name, policy) with file persistence
+  - [ ] Add update_policy(name, policy) with file persistence
+  - [ ] Add delete_policy(name) with file deletion
+  - [ ] Clear cache on mutations
+- [ ] **CredentialStore Mutation Support**
+  - [ ] Wrap HashMap in RwLock for thread-safe mutations
+  - [ ] Store credentials_dir path in CredentialStore
+  - [ ] Add add_credential(access_key_id, secret_key) with file persistence
+  - [ ] Add update_credential(...) with file persistence
+  - [ ] Add delete_credential(access_key_id) with file deletion
+- [ ] **Policy CRUD API Endpoints**
+  - [ ] GET /admin/api/policies - List all policies (read-only, no CSRF)
+  - [ ] GET /admin/api/policies/{name} - Get policy details (read-only, no CSRF)
+  - [ ] POST /admin/api/policies - Create policy (requires CSRF token)
+  - [ ] PUT /admin/api/policies/{name} - Update policy (requires CSRF token)
+  - [ ] DELETE /admin/api/policies/{name} - Delete policy (requires CSRF token)
+- [ ] **Credential CRUD API Endpoints**
+  - [ ] GET /admin/api/credentials - List all credentials (read-only, no CSRF)
+  - [ ] POST /admin/api/credentials - Create credential (requires CSRF token)
+  - [ ] PUT /admin/api/credentials/{access_key} - Update credential (requires CSRF token)
+  - [ ] DELETE /admin/api/credentials/{access_key} - Delete credential (requires CSRF token)
+- [x] GET /api/session - Get current session with temp credentials
+- [ ] **Frontend Templates & JavaScript**
+  - [ ] Create static/js/csrf.js - CSRF token fetch and caching
+  - [ ] Create static/js/policy-crud.js - Policy CRUD with CSRF
+  - [ ] Create static/js/credential-crud.js - Credential CRUD with CSRF
+  - [ ] Create templates/policy_form.html - Create/edit policy form
+  - [ ] Create templates/credential_form.html - Create/edit credential form
+  - [ ] Update templates/policies.html - Add Create button
+  - [ ] Update templates/policy_detail.html - Add Edit/Delete buttons
+  - [ ] Update templates/credentials.html - Add Create and Delete buttons
 
 ### Phase 6: Routing & Request Dispatch
 - [ ] Update server.rs::run() to dispatch based on disable_api flag

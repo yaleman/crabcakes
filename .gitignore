@@ -7,3 +7,4 @@ tarpaulin-report.html
 
 # Test artifacts
 test_config/*.sqlite3
+.DS_Store

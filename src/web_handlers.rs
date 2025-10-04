@@ -132,6 +132,7 @@ impl WebHandler {
             }
             ("POST", "/logout") => self.handle_logout(session.clone()).await,
             ("GET", "/api/session") => self.handle_get_session(session.clone()).await,
+            ("GET", "/admin/api/csrf-token") => self.handle_csrf_token(session.clone()).await,
             ("GET", "/admin") | ("GET", "/admin/") => self.handle_root().await,
             ("GET", "/admin/profile") => self.handle_profile(session.clone()).await,
             ("GET", "/admin/policies") => self.handle_policies(session.clone()).await,
@@ -317,6 +318,57 @@ impl WebHandler {
             .ok_or_else(|| CrabCakesError::other(&"User email not found"))?;
 
         Ok((user_id, user_email))
+    }
+
+    /// Helper: Generate CSRF token and store in session
+    async fn generate_csrf_token(&self, session: &Session) -> Result<String, CrabCakesError> {
+        use rand::Rng;
+
+        // Generate a random 32-byte token
+        let token: String = rand::rng()
+            .sample_iter(rand::distr::Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect();
+
+        // Store in session
+        session
+            .insert("csrf_token", token.clone())
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to store CSRF token: {}", e)))?;
+
+        Ok(token)
+    }
+
+    /// Helper: Validate CSRF token from request header
+    #[allow(dead_code)]
+    async fn validate_csrf_token(
+        &self,
+        session: &Session,
+        req: &Request<hyper::body::Incoming>,
+    ) -> Result<(), CrabCakesError> {
+        // Get token from X-CSRF-Token header
+        let header_token = req
+            .headers()
+            .get("X-CSRF-Token")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| CrabCakesError::other(&"Missing CSRF token"))?;
+
+        // Get token from session
+        let session_token: Option<String> = session
+            .get("csrf_token")
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to get CSRF token: {}", e)))?;
+
+        let session_token = session_token
+            .ok_or_else(|| CrabCakesError::other(&"No CSRF token in session"))?;
+
+        // Compare tokens
+        if header_token != session_token {
+            return Err(CrabCakesError::other(&"Invalid CSRF token"));
+        }
+
+        Ok(())
     }
 
     /// Helper: Build HTML response with security headers including CSP
@@ -633,6 +685,29 @@ impl WebHandler {
 
         // Return JSON response
         let json = serde_json::to_string(&session_info)?;
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/api/csrf-token - Get CSRF token for current session
+    async fn handle_csrf_token(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Generate or retrieve CSRF token
+        let token = self.generate_csrf_token(&session).await?;
+
+        // Return JSON response
+        let json = serde_json::to_string(&serde_json::json!({
+            "csrf_token": token
+        }))?;
+
         Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "application/json")
