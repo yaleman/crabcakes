@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use askama::Template;
 use form_urlencoded;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -122,9 +122,9 @@ impl WebHandler {
         session: Session,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let method = req.method().clone();
-        let path = req.uri().path();
+        let path = req.uri().path().to_string();
 
-        let result = match (method.as_str(), path) {
+        let result = match (method.as_str(), path.as_str()) {
             ("GET", "/") => self.handle_root().await,
             ("GET", "/login") => self.handle_login().await,
             ("GET", path) if path.starts_with("/oauth2/callback") => {
@@ -133,6 +133,20 @@ impl WebHandler {
             ("POST", "/logout") => self.handle_logout(session.clone()).await,
             ("GET", "/api/session") => self.handle_get_session(session.clone()).await,
             ("GET", "/admin/api/csrf-token") => self.handle_csrf_token(session.clone()).await,
+            ("GET", "/admin/api/policies") => self.handle_api_list_policies(session.clone()).await,
+            ("POST", "/admin/api/policies") => {
+                self.handle_api_create_policy(req, session.clone()).await
+            }
+            ("PUT", path) if path.starts_with("/admin/api/policies/") => {
+                let policy_name = path.strip_prefix("/admin/api/policies/").unwrap_or("");
+                self.handle_api_update_policy(req, session.clone(), policy_name)
+                    .await
+            }
+            ("DELETE", path) if path.starts_with("/admin/api/policies/") => {
+                let policy_name = path.strip_prefix("/admin/api/policies/").unwrap_or("");
+                self.handle_api_delete_policy(req, session.clone(), policy_name)
+                    .await
+            }
             ("GET", "/admin") | ("GET", "/admin/") => self.handle_root().await,
             ("GET", "/admin/profile") => self.handle_profile(session.clone()).await,
             ("GET", "/admin/policies") => self.handle_policies(session.clone()).await,
@@ -345,11 +359,10 @@ impl WebHandler {
     async fn validate_csrf_token(
         &self,
         session: &Session,
-        req: &Request<hyper::body::Incoming>,
+        headers: &http::HeaderMap,
     ) -> Result<(), CrabCakesError> {
         // Get token from X-CSRF-Token header
-        let header_token = req
-            .headers()
+        let header_token = headers
             .get("X-CSRF-Token")
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| CrabCakesError::other(&"Missing CSRF token"))?;
@@ -707,6 +720,160 @@ impl WebHandler {
         // Return JSON response
         let json = serde_json::to_string(&serde_json::json!({
             "csrf_token": token
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/api/policies - List all policies (JSON)
+    async fn handle_api_list_policies(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Get all policy names
+        let policy_names = self.policy_store.get_policy_names().await;
+
+        // Build response with policy names and statement counts
+        let mut policies = Vec::new();
+        for name in policy_names {
+            if let Some(policy) = self.policy_store.get_policy(&name).await {
+                policies.push(serde_json::json!({
+                    "name": name,
+                    "statement_count": policy.statement.len()
+                }));
+            }
+        }
+
+        let json = serde_json::to_string(&policies)?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// POST /admin/api/policies - Create a new policy
+    async fn handle_api_create_policy(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts and body
+        let (parts, body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Read request body
+        let body_bytes = body.collect().await?.to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+
+        // Parse request body
+        #[derive(serde::Deserialize)]
+        struct CreatePolicyRequest {
+            name: String,
+            policy: iam_rs::IAMPolicy,
+        }
+
+        let request: CreatePolicyRequest = serde_json::from_str(body_str)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+
+        // Add policy
+        self.policy_store
+            .add_policy(request.name.clone(), request.policy)
+            .await?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "name": request.name
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::CREATED)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// PUT /admin/api/policies/{name} - Update an existing policy
+    async fn handle_api_update_policy(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+        policy_name: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts and body
+        let (parts, body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Read request body
+        let body_bytes = body.collect().await?.to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+
+        // Parse policy from request body
+        let policy: iam_rs::IAMPolicy = serde_json::from_str(body_str)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+
+        // Update policy
+        self.policy_store
+            .update_policy(policy_name.to_string(), policy)
+            .await?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "name": policy_name
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// DELETE /admin/api/policies/{name} - Delete a policy
+    async fn handle_api_delete_policy(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+        policy_name: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts for CSRF validation
+        let (parts, _body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Delete policy
+        self.policy_store.delete_policy(policy_name).await?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "name": policy_name
         }))?;
 
         Response::builder()

@@ -4,11 +4,8 @@
 
 {% block content %}
 <div class="breadcrumb">
-    <a href="/admin/buckets">Buckets</a> / {{ bucket_name }}
+    <h1><a href="/admin/buckets">Buckets</a> / {{ bucket_name }}</h1>
 </div>
-
-<h1>Bucket: {{ bucket_name }}</h1>
-<p class="subtitle">Objects in this bucket</p>
 
 <table>
     <thead>
@@ -21,11 +18,7 @@
     <tbody>
         {% for object in objects %}
         <tr>
-            <td>
-                <code class="code-inline">
-                    {{ object.key }}
-                </code>
-            </td>
+            <td>{{ object.key }}</td>
             <td>{{ object.size_formatted }}</td>
             <td>{{ object.last_modified }}</td>
         </tr>

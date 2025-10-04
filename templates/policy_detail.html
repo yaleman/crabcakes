@@ -8,11 +8,8 @@
 
 {% block content %}
 <div class="breadcrumb">
-    <a href="/admin/policies">Policies</a> / {{ policy_name }}
+    <h1><a href="/admin/policies">Policies</a> / {{ policy_name }}</h1>
 </div>
-
-<h1>Policy: {{ policy_name }}</h1>
-<p class="subtitle">IAM policy document</p>
 
 <pre><code class="language-json">{{ policy_json }}</code></pre>
 

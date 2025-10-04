@@ -4,7 +4,6 @@
 
 {% block content %}
 <h1>S3 Buckets</h1>
-<p class="subtitle">Browse your S3-compatible storage buckets</p>
 
 <table>
     <thead>
@@ -22,7 +21,8 @@
                 </a>
             </td>
             <td>
-                <a href="/admin/buckets/{{ bucket }}" class="btn btn-primary btn-small">
+                <a href="/admin/buckets/{{ bucket }}"
+                    class="btn btn-primary btn-small">
                     Browse Objects
                 </a>
             </td>

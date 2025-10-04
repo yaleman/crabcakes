@@ -3,8 +3,7 @@
 {% block title %}Policies - Crabcakes Admin{% endblock %}
 
 {% block content %}
-<h1>IAM Policies</h1>
-<p class="subtitle">View loaded IAM policy documents</p>
+<h1>Policies</h1>
 
 <table>
     <thead>
@@ -24,7 +23,8 @@
             </td>
             <td>{{ policy.statement_count }}</td>
             <td>
-                <a href="/admin/policies/{{ policy.name }}" class="btn btn-primary btn-small">
+                <a href="/admin/policies/{{ policy.name }}"
+                    class="btn btn-primary btn-small">
                     View Details
                 </a>
             </td>
