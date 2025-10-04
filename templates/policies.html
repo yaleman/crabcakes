@@ -18,13 +18,13 @@
         {% for policy in policies %}
         <tr>
             <td>
-                <a href="/admin/policies/{{ policy.name }}" style="color: #667eea; text-decoration: none; font-weight: 500;">
+                <a href="/admin/policies/{{ policy.name }}" class="policy-link">
                     {{ policy.name }}
                 </a>
             </td>
             <td>{{ policy.statement_count }}</td>
             <td>
-                <a href="/admin/policies/{{ policy.name }}" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
+                <a href="/admin/policies/{{ policy.name }}" class="btn btn-primary btn-small">
                     View Details
                 </a>
             </td>
@@ -34,8 +34,8 @@
 </table>
 
 {% if policies.is_empty() %}
-<div class="info-section" style="text-align: center; padding: 40px;">
-    <p style="color: #666;">No policies loaded</p>
+<div class="info-section empty-state">
+    <p>No policies loaded</p>
 </div>
 {% endif %}
 {% endblock %}

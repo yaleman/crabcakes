@@ -461,3 +461,4 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - Status badge: Green (#28a745) when authenticated
 - Sign out button: Red (#dc3545) with hover effects
 - Maintain cohesive purple vibe throughout all UI elements
+- all sign out buttons should be red

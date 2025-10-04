@@ -17,12 +17,12 @@
         {% for bucket in buckets %}
         <tr>
             <td>
-                <a href="/admin/buckets/{{ bucket }}" style="color: #667eea; text-decoration: none; font-weight: 500;">
+                <a href="/admin/buckets/{{ bucket }}" class="bucket-link">
                     📦 {{ bucket }}
                 </a>
             </td>
             <td>
-                <a href="/admin/buckets/{{ bucket }}" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
+                <a href="/admin/buckets/{{ bucket }}" class="btn btn-primary btn-small">
                     Browse Objects
                 </a>
             </td>
@@ -32,8 +32,8 @@
 </table>
 
 {% if buckets.is_empty() %}
-<div class="info-section" style="text-align: center; padding: 40px;">
-    <p style="color: #666;">No buckets found</p>
+<div class="info-section empty-state">
+    <p>No buckets found</p>
 </div>
 {% endif %}
 {% endblock %}

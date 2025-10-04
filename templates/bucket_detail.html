@@ -22,7 +22,7 @@
         {% for object in objects %}
         <tr>
             <td>
-                <code style="background: rgba(102, 126, 234, 0.1); padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+                <code class="code-inline">
                     {{ object.key }}
                 </code>
             </td>
@@ -34,12 +34,12 @@
 </table>
 
 {% if objects.is_empty() %}
-<div class="info-section" style="text-align: center; padding: 40px;">
-    <p style="color: #666;">No objects in this bucket</p>
+<div class="info-section empty-state">
+    <p>No objects in this bucket</p>
 </div>
 {% endif %}
 
-<div style="margin-top: 20px;">
+<div class="back-link-container">
     <a href="/admin/buckets" class="btn btn-primary">← Back to Buckets</a>
 </div>
 {% endblock %}

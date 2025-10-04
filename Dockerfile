@@ -29,6 +29,8 @@ FROM gcr.io/distroless/cc-debian12 AS crabcakes
 # # ======================
 # https://github.com/GoogleContainerTools/distroless/blob/main/examples/rust/Dockerfile
 COPY --from=builder /crabcakes/target/release/crabcakes /
+COPY --from=builder /crabcakes/static /static
+COPY --from=builder /crabcakes/templates /templates
 
 WORKDIR /
 USER nonroot

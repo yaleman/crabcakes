@@ -137,13 +137,18 @@ impl WebHandler {
             ("GET", "/admin/policies") => self.handle_policies(session.clone()).await,
             ("GET", path) if path.starts_with("/admin/policies/") => {
                 let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
-                self.handle_policy_detail(session.clone(), policy_name).await
+                self.handle_policy_detail(session.clone(), policy_name)
+                    .await
             }
             ("GET", "/admin/credentials") => self.handle_credentials(session.clone()).await,
             ("GET", "/admin/buckets") => self.handle_buckets(session.clone()).await,
             ("GET", path) if path.starts_with("/admin/buckets/") => {
                 let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
-                self.handle_bucket_detail(session.clone(), bucket_path).await
+                self.handle_bucket_detail(session.clone(), bucket_path)
+                    .await
+            }
+            ("GET", path) if path.starts_with("/admin/static/") => {
+                self.handle_static_file(path).await
             }
             _ => self.not_found().await,
         };
@@ -314,6 +319,22 @@ impl WebHandler {
         Ok((user_id, user_email))
     }
 
+    /// Helper: Build HTML response with security headers including CSP
+    fn build_html_response(&self, html: String) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:;"
+            )
+            .header("X-Content-Type-Options", "nosniff")
+            .header("X-Frame-Options", "DENY")
+            .header("Referrer-Policy", "strict-origin-when-cross-origin")
+            .body(Full::new(Bytes::from(html)))
+            .map_err(CrabCakesError::from)
+    }
+
     /// GET /admin/profile - User profile page
     async fn handle_profile(
         &self,
@@ -363,11 +384,7 @@ impl WebHandler {
             .render()
             .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(html)))
-            .map_err(CrabCakesError::from)
+        self.build_html_response(html)
     }
 
     /// GET /admin/policies - List all policies
@@ -406,11 +423,7 @@ impl WebHandler {
             .render()
             .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(html)))
-            .map_err(CrabCakesError::from)
+        self.build_html_response(html)
     }
 
     /// GET /admin/policies/{name} - View policy details
@@ -448,11 +461,7 @@ impl WebHandler {
             .render()
             .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(html)))
-            .map_err(CrabCakesError::from)
+        self.build_html_response(html)
     }
 
     /// GET /admin/credentials - List all credentials
@@ -482,11 +491,7 @@ impl WebHandler {
             .render()
             .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(html)))
-            .map_err(CrabCakesError::from)
+        self.build_html_response(html)
     }
 
     /// GET /admin/buckets - List all buckets
@@ -505,7 +510,10 @@ impl WebHandler {
             }
         };
 
-        let buckets = self.filesystem.list_buckets().map_err(CrabCakesError::from)?;
+        let buckets = self
+            .filesystem
+            .list_buckets()
+            .map_err(CrabCakesError::from)?;
 
         let template = BucketsTemplate {
             page: "buckets".to_string(),
@@ -516,11 +524,7 @@ impl WebHandler {
             .render()
             .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(html)))
-            .map_err(CrabCakesError::from)
+        self.build_html_response(html)
     }
 
     /// GET /admin/buckets/{bucket} - View bucket contents
@@ -554,7 +558,10 @@ impl WebHandler {
             .map(|entry| ObjectInfo {
                 key: entry.key.clone(),
                 size_formatted: format_size(entry.size),
-                last_modified: entry.last_modified.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+                last_modified: entry
+                    .last_modified
+                    .format("%Y-%m-%d %H:%M:%S UTC")
+                    .to_string(),
             })
             .collect();
 
@@ -568,11 +575,7 @@ impl WebHandler {
             .render()
             .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(html)))
-            .map_err(CrabCakesError::from)
+        self.build_html_response(html)
     }
 
     /// GET /api/session - Return session info with temp credentials
@@ -634,6 +637,57 @@ impl WebHandler {
             .status(StatusCode::OK)
             .header("Content-Type", "application/json")
             .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// Serve static files (CSS, JS)
+    async fn handle_static_file(
+        &self,
+        path: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        use std::path::PathBuf;
+        use tokio::fs;
+
+        // Strip /admin/static/ prefix
+        let file_path = path.strip_prefix("/admin/static/").unwrap_or("");
+
+        // Prevent directory traversal attacks
+        if file_path.contains("..") {
+            return Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(Full::new(Bytes::from("Forbidden")))
+                .map_err(CrabCakesError::from);
+        }
+
+        // Build absolute path to static file
+        let static_dir = PathBuf::from("static");
+        let absolute_path = static_dir.join(file_path);
+
+        // Read file
+        let content = match fs::read(&absolute_path).await {
+            Ok(content) => content,
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Full::new(Bytes::from("Not Found")))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        // Determine content type
+        let content_type = if file_path.ends_with(".js") {
+            "application/javascript"
+        } else if file_path.ends_with(".css") {
+            "text/css"
+        } else {
+            "application/octet-stream"
+        };
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", content_type)
+            .header("Cache-Control", "public, max-age=3600")
+            .body(Full::new(Bytes::from(content)))
             .map_err(CrabCakesError::from)
     }
 
