@@ -6,7 +6,8 @@
 <h1>Identities</h1>
 
 <p class="info-text">
-    Identities are principals (users, roles, services) referenced in IAM policies.
+    Identities are principals (users, roles, services) referenced in IAM
+    policies.
     View which permissions each identity has across all policies.
 </p>
 
@@ -15,6 +16,7 @@
         <tr>
             <th>Identity Name</th>
             <th>Type</th>
+            <th>Credential</th>
             <th>Policies</th>
             <th>Actions</th>
             <th>Actions</th>
@@ -33,6 +35,17 @@
                 <span class="badge badge-{{ identity.identity_type | lower }}">
                     {{ identity.identity_type }}
                 </span>
+            </td>
+            <td>
+                {% if identity.has_credential %}
+                <span class="badge badge-green">
+                    ✓ Credential
+                </span>
+                {% else %}
+                <span class="badge badge-red">
+                    ⚠ No Credential
+                </span>
+                {% endif %}
             </td>
             <td>{{ identity.policy_count }}</td>
             <td>{{ identity.action_count }}</td>

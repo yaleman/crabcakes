@@ -83,6 +83,23 @@ struct CredentialsTemplate {
     credentials: Vec<String>,
 }
 
+/// Credential form template (for creating/editing)
+#[derive(Template)]
+#[template(path = "credential_form.html")]
+struct CredentialFormTemplate {
+    page: String,
+    access_key_id: String,
+    is_edit: bool,
+}
+
+/// Credential detail template
+#[derive(Template)]
+#[template(path = "credential_detail.html")]
+struct CredentialDetailTemplate {
+    page: String,
+    access_key_id: String,
+}
+
 /// Buckets list template
 #[derive(Template)]
 #[template(path = "buckets.html")]
@@ -131,6 +148,7 @@ struct IdentitySummary {
     identity_type: String,
     policy_count: usize,
     action_count: usize,
+    has_credential: bool,
 }
 
 /// Object info for bucket listing
@@ -234,6 +252,22 @@ impl WebHandler {
                     .await
             }
             ("GET", "/admin/credentials") => self.handle_credentials(session.clone()).await,
+            ("GET", "/admin/credentials/new") => {
+                self.handle_credential_new_form(session.clone()).await
+            }
+            ("GET", path) if path.starts_with("/admin/credentials/") && path.ends_with("/edit") => {
+                let access_key_id = path
+                    .strip_prefix("/admin/credentials/")
+                    .and_then(|s| s.strip_suffix("/edit"))
+                    .unwrap_or("");
+                self.handle_credential_edit_form(session.clone(), access_key_id)
+                    .await
+            }
+            ("GET", path) if path.starts_with("/admin/credentials/") => {
+                let access_key_id = path.strip_prefix("/admin/credentials/").unwrap_or("");
+                self.handle_credential_detail(session.clone(), access_key_id)
+                    .await
+            }
             ("GET", "/admin/identities") => self.handle_identities(session.clone()).await,
             ("GET", path) if path.starts_with("/admin/identities/") => {
                 let access_key_id = path.strip_prefix("/admin/identities/").unwrap_or("");
@@ -788,6 +822,118 @@ impl WebHandler {
         self.build_html_response(html)
     }
 
+    /// GET /admin/credentials/new - Show form for creating a new credential
+    async fn handle_credential_new_form(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(LOCATION, "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        let template = CredentialFormTemplate {
+            page: "credentials".to_string(),
+            access_key_id: String::new(),
+            is_edit: false,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// GET /admin/credentials/{id}/edit - Show form for editing a credential
+    async fn handle_credential_edit_form(
+        &self,
+        session: Session,
+        access_key_id: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(LOCATION, "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        // Verify credential exists
+        if self
+            .credentials_store
+            .read()
+            .await
+            .get_credential(access_key_id)
+            .await
+            .is_none()
+        {
+            return self.not_found().await;
+        }
+
+        let template = CredentialFormTemplate {
+            page: "credentials".to_string(),
+            access_key_id: access_key_id.to_string(),
+            is_edit: true,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// GET /admin/credentials/{id} - View credential details
+    async fn handle_credential_detail(
+        &self,
+        session: Session,
+        access_key_id: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(LOCATION, "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        // Verify credential exists
+        if self
+            .credentials_store
+            .read()
+            .await
+            .get_credential(access_key_id)
+            .await
+            .is_none()
+        {
+            return self.not_found().await;
+        }
+
+        let template = CredentialDetailTemplate {
+            page: "credentials".to_string(),
+            access_key_id: access_key_id.to_string(),
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
     /// GET /admin/identities - List all identities (credentials)
     async fn handle_identities(
         &self,
@@ -804,13 +950,9 @@ impl WebHandler {
             }
         };
 
-        // Get all credentials (these are the identities)
-        let credentials = self
-            .credentials_store
-            .read()
-            .await
-            .get_access_key_ids()
-            .await;
+        // Get all credentials
+        let credential_store = self.credentials_store.read().await;
+        let credentials = credential_store.get_access_key_ids().await;
 
         // Build identity summaries for each credential
         let mut identities: Vec<IdentitySummary> = Vec::new();
@@ -822,12 +964,19 @@ impl WebHandler {
                 policy_analyzer::get_identity_permissions(&arn, self.policy_store.policies.clone())
                     .await;
 
+            // Check if credential exists
+            let has_credential = credential_store
+                .get_credential(&access_key_id)
+                .await
+                .is_some();
+
             identities.push(IdentitySummary {
                 principal_arn: access_key_id.clone(), // Use access_key_id instead of full ARN
                 display_name: access_key_id.clone(),
                 identity_type: "User".to_string(),
                 policy_count: identity.policies.len(),
                 action_count: identity.action_count(),
+                has_credential,
             });
         }
 

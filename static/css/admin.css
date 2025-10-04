@@ -1,14 +1,26 @@
 :root {
     --bgcolor-red: #c82333;
     --bgcolor-white: #ffffff;
+    --bgcolor-green: #28a745;
+    --bgcolor-purple: #6f42c1;
+
+    --border-radius: 0.7rem;
+    --border-radius-button: 0.5rem;
 
     --color-white: #ffffff;
+    /* 🤘🏻 */
+    --color-secondary: #666;
+    --color-purple-light: #5a67d8;
+    --color-purple-dark: #6f42c1;
+    --color-purple-95pct: rgba(102, 126, 234, 0.95);
+    --color-purple-50pct: rgba(102, 126, 234, 0.5);
+    --color-purple-30pct: rgba(102, 126, 234, 0.3);
 
     --font-size-h1: 28px;
     --font-size-normal: 14px;
     --font-size-small: 12px;
 
-    --font-code: 'Monaco', 'Courier New', monospace;
+    --font-code: 'Source Code Pro', 'Monaco', 'Courier New', monospace;
 }
 
 * {
@@ -28,7 +40,7 @@ body {
     width: 250px;
     background: linear-gradient(180deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
     padding: 20px;
-    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.2);
+    box-shadow: 4px 0 20px var(--color-purple-30pct);
 }
 
 .logo {
@@ -39,16 +51,6 @@ body {
     text-align: center;
 }
 
-.btn-danger {
-    background: var(--bgcolor-red);
-    color: var(--color-white);
-    border: none;
-    padding: 10px 15px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: var(--font-size-normal);
-    transition: background 0.2s;
-}
 
 .nav-menu {
     list-style: none;
@@ -58,17 +60,21 @@ body {
     margin-bottom: 5px;
 }
 
+.nav-btn {
+    width: 100%;
+}
+
 .logout-item {
     margin-top: 20px;
 }
 
 .nav-link {
     display: block;
-    padding: 12px 16px;
+    padding: 0.8rem 1.0rem;
     color: var(--color-white);
     text-decoration: none;
-    border-radius: 6px;
-    transition: all 0.2s;
+    border-radius: var(--border-radius-button);
+    transition: all 0.152s;
 }
 
 .nav-link:hover {
@@ -85,40 +91,24 @@ body {
     margin: 0;
 }
 
-.logout-link {
-    color: var(--color-white);
-    width: 100%;
-    text-align: left;
-    background: var(--bgcolor-red);
-    border: none;
-    font-family: inherit;
-    font-size: inherit;
-    cursor: pointer;
-}
-
-.logout-link:hover {
-    background: var(--bgcolor-red);
-    color: var(--color-white);
-}
-
 .main-content {
     flex: 1;
-    padding: 40px;
+    padding: 2.0rem;
     overflow-y: auto;
 }
 
 .container {
     background: var(--bgcolor-white);
-    border-radius: 12px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-    max-width: 1200px;
+    border-radius: var(--border-radius);
+    box-shadow: 0 1.0rem 2.0rem rgba(0, 0, 0, 0.3);
+    max-width: 100%;
     margin: 0 auto;
-    padding: 40px;
+    padding: 2.0rem;
 }
 
 h1 {
     color: #333;
-    margin-bottom: 10px;
+    margin-bottom: 0.5rem;
     font-size: var(--font-size-h1);
 }
 
@@ -131,7 +121,7 @@ h1 {
 .info-section {
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
     border: 2px solid rgba(102, 126, 234, 0.2);
-    border-radius: 8px;
+    border-radius: var(--border-radius);
     padding: 20px;
     margin-bottom: 20px;
 }
@@ -161,8 +151,11 @@ h1 {
 
 table {
     width: 100%;
-    border-collapse: collapse;
-    margin: 20px 0;
+    /* border-collapse: collapse; */
+    border: 0px solid;
+    margin: 0.5rem 0;
+    border-radius: var(--border-radius);
+
 }
 
 th {
@@ -171,7 +164,7 @@ th {
     padding: 12px;
     text-align: left;
     font-weight: 600;
-    border-bottom: 2px solid rgba(102, 126, 234, 0.3);
+    border-bottom: 2px solid var(--color-purple-30pct);
 }
 
 td {
@@ -183,37 +176,69 @@ tr:hover {
     background: rgba(102, 126, 234, 0.05);
 }
 
+ul.button-list {
+    list-style: none;
+    display: flex;
+    gap: 0.5rem;
+}
+
 .btn {
     display: inline-block;
-    padding: 8px 16px;
-    border-radius: 6px;
+    padding: 0.75rem 1.0rem;
     text-decoration: none;
     font-weight: 500;
-    transition: all 0.2s;
+    transition: box-shadow 0.2s;
     border: none;
+    border-radius: var(--border-radius-button);
     cursor: pointer;
     font-size: var(--font-size-normal);
+    margin: 0.5rem;
+}
+
+/* Disabled button state */
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn:hover {
+    box-shadow: var(--color-purple-30pct) 0.2rem 0.3rem 0.5rem;
+}
+
+
+.btn-small {
+    font-size: var(--font-size-normal);
+    padding: 0.375rem 0.75rem;
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--color-purple-light);
     color: white;
 }
 
 .btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    background: linear-gradient(135deg, var(--color-purple-light) 50%, var(--color-purple-dark) 100%);
 }
 
-.status {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 12px;
-    background: #28a745;
+
+.btn-secondary {
+    background: var(--bgcolor-purple);
     color: var(--color-white);
-    font-size: var(--font-size-normal);
-    font-weight: 600;
+    cursor: pointer;
 }
+
+.btn-danger {
+    background: var(--bgcolor-red);
+    color: var(--color-white);
+    cursor: pointer;
+}
+
+.btn-danger:hover {
+    background: linear-gradient(135deg, var(--bgcolor-red) 50%, darkred 100%);
+}
+
+
+
 
 .code-block {
     background: #2d3748;
@@ -268,10 +293,6 @@ tr:hover {
     font-weight: 500;
 }
 
-.btn-small {
-    font-size: var(--font-size-normal);
-    padding: 6px 12px;
-}
 
 .note-text {
     color: #666;
@@ -315,8 +336,28 @@ textarea#policy-json {
 }
 
 .selection-counter {
-    color: #666;
+    color: var(--color-secondary);
     font-size: var(--font-size-normal);
+}
+
+.help-text {
+    color: var(--color-secondary);
+    font-size: var(--font-size-small);
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Text input styling */
+input[type="text"],
+input[type="password"] {
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: var(--font-size-normal);
+    ;
 }
 
 /* Checkbox styling */
@@ -331,12 +372,6 @@ input[type="checkbox"]:disabled {
     opacity: 0.5;
 }
 
-/* Disabled button state */
-.btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 /* Action buttons in table rows */
 table td button {
     margin-right: 5px;
@@ -348,4 +383,37 @@ table td button:last-child {
 
 th .select-column {
     width: 1.0em;
+}
+
+
+.badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    color: var(--color-white);
+    font-size: var(--font-size-normal);
+    font-weight: 600;
+}
+
+.badge-deny,
+.badge-red {
+    background: var(--bgcolor-red);
+    color: var(--color-white);
+}
+
+.badge-allow,
+.badge-green {
+    background: var(--bgcolor-green);
+    color: var(--color-white);
+}
+
+.badge-user,
+.badge-purple {
+    background: var(--bgcolor-purple);
+    color: var(--color-white);
+}
+
+.no-list-style {
+    list-style: none;
+    padding-left: 0;
 }
