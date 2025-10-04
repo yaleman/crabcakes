@@ -19,11 +19,11 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
 - `src/body_buffer.rs` - Smart request body buffering (memory/disk spillover)
 - `src/policy.rs` - IAM policy loading and evaluation (with wildcard principal support)
 - `src/multipart.rs` - Multipart upload state management
-- `src/db/` - Database layer for metadata storage (tags, attributes, etc.)
+- `src/db/` - Database layer for metadata storage (tags, sessions, credentials, etc.)
   - `src/db/mod.rs` - Database initialization and migration runner
-  - `src/db/service.rs` - DBService for metadata operations
-  - `src/db/entities/` - SeaORM entity models
-  - `src/db/migration/` - Database migrations
+  - `src/db/service.rs` - DBService for metadata, PKCE state, and temp credential operations
+  - `src/db/entities/` - SeaORM entity models (object_tags, oauth_pkce_state, temporary_credentials)
+  - `src/db/migration/` - Database migrations (SeaORM migration framework)
 - `src/error.rs` - Centralized error handling
 - `src/lib.rs` - Library module declarations
 - `src/tests/` - Test modules (server_tests.rs, policy_tests.rs)
@@ -41,10 +41,12 @@ The server:
 - Implements AWS S3-compatible API with XML responses
 - Enforces IAM policy-based authorization on all S3 operations
 - Smart body buffering: memory for <50MB, disk spillover for ≥50MB
-- Stores object metadata (tags) in SQLite with SeaORM
+- Stores object metadata (tags, OAuth PKCE state, temporary credentials) in SQLite with SeaORM
 - Runs database migrations automatically on startup
-- CLI accepts `--host`, `--port`, `--root-dir`, `--config-dir`, and `--require-signature` flags or environment variables
+- Optional admin UI with OIDC/OAuth2 authentication (configurable via --disable-api)
+- CLI accepts `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url` flags or environment variables
 - Uses tracing for structured logging (configure with RUST_LOG environment variable)
+- Protected bucket names: admin, api, login, logout, oauth2, .well-known, config, oidc, crabcakes, docs, help
 
 ## S3 API Operations
 
@@ -151,13 +153,14 @@ Returns object metadata including ETag, LastModified, and ObjectSize.
 
 ## Metadata Storage
 
-The server uses SQLite for storing object metadata (tags, future: ACLs, object attributes).
+The server uses SQLite for storing object metadata, OAuth PKCE state, and temporary credentials.
 
 ### Database Location
 
 - Database file: `{config_dir}/crabcakes.sqlite3` (default: `./config/crabcakes.sqlite3`)
 - Automatically created on first startup
 - Migrations run automatically on startup using SeaORM migration framework
+- Sessions managed by tower-sessions (auto-creates its own table)
 
 ### Schema
 
@@ -171,6 +174,27 @@ The server uses SQLite for storing object metadata (tags, future: ACLs, object a
 - Unique index on `(bucket, key, tag_key)`
 - Lookup index on `(bucket, key)`
 
+**`oauth_pkce_state` table:**
+- `state` TEXT PRIMARY KEY (OAuth state parameter)
+- `code_verifier` TEXT NOT NULL (PKCE code verifier)
+- `nonce` TEXT NOT NULL (OIDC nonce)
+- `pkce_challenge` TEXT NOT NULL (PKCE code challenge)
+- `redirect_uri` TEXT NOT NULL (OAuth redirect URI)
+- `expires_at` DATETIME NOT NULL
+- `created_at` DATETIME NOT NULL
+- Index on `expires_at` for cleanup
+
+**`temporary_credentials` table:**
+- `access_key_id` TEXT PRIMARY KEY
+- `secret_access_key` TEXT NOT NULL
+- `session_id` TEXT NOT NULL (links to tower-sessions)
+- `user_email` TEXT NOT NULL
+- `user_id` TEXT NOT NULL (from OIDC sub claim)
+- `expires_at` DATETIME NOT NULL
+- `created_at` DATETIME NOT NULL
+- Index on `session_id` for lookups
+- Index on `expires_at` for cleanup
+
 ### Migrations
 
 New database migrations should be added to `src/db/migration/`:
@@ -181,12 +205,28 @@ New database migrations should be added to `src/db/migration/`:
 
 ### DBService
 
-The `DBService` struct in `src/db/service.rs` provides tag operations:
+The `DBService` struct in `src/db/service.rs` provides database operations:
+
+**Tag Operations:**
 - `put_tags(bucket, key, tags)` - Store/replace tags with validation
 - `get_tags(bucket, key)` - Retrieve all tags for an object
 - `delete_tags(bucket, key)` - Remove all tags for an object
 
-Future metadata operations (ACLs, object attributes) will be added to DBService.
+**OAuth PKCE State Operations:**
+- `store_pkce_state(...)` - Store PKCE state for OAuth flow
+- `get_pkce_state(state)` - Retrieve PKCE state by state parameter
+- `delete_pkce_state(state)` - Delete PKCE state after use
+- `cleanup_expired_pkce_states()` - Remove expired PKCE states
+
+**Temporary Credentials Operations:**
+- `store_temporary_credentials(...)` - Store temp AWS credentials for session
+- `get_temporary_credentials(access_key_id)` - Get credentials by access key
+- `get_credentials_by_session(session_id)` - Get all credentials for a session
+- `delete_temporary_credentials(access_key_id)` - Delete specific credentials
+- `delete_credentials_by_session(session_id)` - Delete all session credentials
+- `cleanup_expired_credentials()` - Remove expired credentials
+
+Future: ACL operations, object attributes
 
 ## AWS Signature V4 Authentication
 
@@ -194,7 +234,10 @@ The server implements full AWS Signature V4 (SigV4) authentication for productio
 
 ### Credential Management
 
-- Credentials stored in JSON files in `config_dir/credentials/` (default: `./config/credentials/`)
+The server supports two types of AWS credentials:
+
+**Permanent Credentials** (for S3 operations):
+- Stored in JSON files in `config_dir/credentials/` (default: `./config/credentials/`)
 - Each credential file contains:
   ```json
   {
@@ -204,6 +247,13 @@ The server implements full AWS Signature V4 (SigV4) authentication for productio
   ```
 - CredentialStore loads all JSON files at startup
 - Credentials mapped by access_key_id for fast lookup during signature verification
+
+**Temporary Credentials** (for admin UI users):
+- Generated on successful OIDC login
+- Stored in SQLite `temporary_credentials` table
+- Linked to user session via `session_id`
+- Automatically expired and cleaned up
+- Returned to web UI for client-side S3 operations
 
 ### Signature Verification Flow
 
@@ -227,6 +277,9 @@ The server implements full AWS Signature V4 (SigV4) authentication for productio
   - Credentials loaded from `config_dir/credentials/`
 - `--require-signature <bool>` or `CRABCAKES_REQUIRE_SIGNATURE`: Whether to require signature verification (default: `true`)
 - `--region <name>` or `CRABCAKES_REGION`: AWS region name (default: `crabcakes`)
+- `--disable-api` or `CRABCAKES_DISABLE_API`: Disable admin UI and API (default: `false`, API enabled)
+- `--oidc-client-id <id>` or `CRABCAKES_OIDC_CLIENT_ID`: OAuth client ID (required if API enabled)
+- `--oidc-discovery-url <url>` or `CRABCAKES_OIDC_DISCOVERY_URL`: OIDC discovery URL (required if API enabled)
 
 ### Test Mode
 
@@ -290,13 +343,14 @@ See `test_config/policies/` directory for examples:
 
 ```bash
 cargo build --quiet                                     # Build the project
-cargo run --quiet                                       # Run with defaults 127.0.0.1:8090, ./data, ./config, require_signature=true)
+cargo run --quiet                                       # Run with defaults (127.0.0.1:8090, ./data, ./config)
 cargo run --quiet -- --port 3000                        # Run on custom port
 cargo run --quiet -- --host 0.0.0.0 --port 8080         # Run on all interfaces
 cargo run --quiet -- --root-dir /path/to/data           # Serve from custom directory
 cargo run --quiet -- --config-dir /path/to/config       # Load policies and credentials from custom directory
 cargo run --quiet -- --require-signature false          # Disable signature verification (testing only)
-cargo run --quiet -- --region foobar                 # Set region (default: crabcakes)
+cargo run --quiet -- --region us-east-1                 # Set region (default: crabcakes)
+cargo run --quiet -- --disable-api                      # Disable admin UI
 RUST_LOG=debug cargo run --quiet                        # Run with debug logging
 ```
 
@@ -342,6 +396,11 @@ Key dependencies:
 - `tower` - Service trait for signature verification
 - `http` - HTTP types for signature verification
 - `tempfile` - Temporary files for large request body spillover
+- `sea-orm` + `sea-orm-migration` - ORM and migrations for SQLite
+- `tower-sessions` - Session management middleware
+- `tower-sessions-sqlx-store` - SQLite session store
+- `openidconnect` - OIDC/OAuth2 client with PKCE support
+- `rand` - Random generation for credentials and PKCE
 
 Dev dependencies:
 - `aws-sdk-s3` + `aws-config` - AWS CLI compatibility testing
@@ -350,15 +409,18 @@ Dev dependencies:
 ## Configuration
 
 The server accepts configuration via:
-- CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`
-- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`, `CRABCAKES_REGION`
+- CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url`
+- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`, `CRABCAKES_REGION`, `CRABCAKES_DISABLE_API`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
 - Config directory defaults to `./config` (if it doesn't exist, server starts with no policies/credentials)
   - Policies loaded from `config_dir/policies/`
   - Credentials loaded from `config_dir/credentials/`
+  - SQLite database at `config_dir/crabcakes.sqlite3`
 - Signature verification defaults to `true` (set to `false` to disable)
 - Region defaults to `"crabcakes"` and is returned by GetBucketLocation
+- Admin UI enabled by default (set `--disable-api` to disable)
+- Reserved bucket names cannot be created: admin, api, login, logout, oauth2, .well-known, config, oidc, crabcakes, docs, help
 
 ## Testing Guidelines
 
@@ -374,3 +436,4 @@ The server accepts configuration via:
 - All new features require test coverage for: signed/unsigned requests, success/failure cases
 - Integration tests must be added to `manual_test.sh` for signed request validation
 - all tests that might involve the database should be against an in-memory database where possible, or if it's testing disk functionality then the config dir should be a temporary directory for that test
+- Ensure CLAUDE.md is kept up to date with the current design
