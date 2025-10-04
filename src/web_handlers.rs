@@ -360,8 +360,8 @@ impl WebHandler {
             .await
             .map_err(|e| CrabCakesError::other(&format!("Failed to get CSRF token: {}", e)))?;
 
-        let session_token = session_token
-            .ok_or_else(|| CrabCakesError::other(&"No CSRF token in session"))?;
+        let session_token =
+            session_token.ok_or_else(|| CrabCakesError::other(&"No CSRF token in session"))?;
 
         // Compare tokens
         if header_token != session_token {
