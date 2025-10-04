@@ -88,8 +88,14 @@ fn test_sigv4_key() {
 }
 
 async fn create_s3_client(port: u16) -> Client {
-    // Use alice's test credentials that match credentials/alice.json
-    let creds = Credentials::new("alice", "alicesecret123", None, None, "test");
+    // Use testuser's test credentials that match test_config/credentials/testuser.json
+    let creds = Credentials::new(
+        "testuser",
+        "test123456789012345678901234567890123456",
+        None,
+        None,
+        "test",
+    );
     let config = aws_config::defaults(BehaviorVersion::latest())
         .credentials_provider(creds)
         .region(Region::new("crabcakes"))

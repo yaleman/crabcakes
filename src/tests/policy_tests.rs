@@ -10,11 +10,7 @@ async fn test_policy_loading() {
 
     // Should have loaded both alice.json and allow-all.json
     let count = policy_store.policy_count().await;
-    assert!(
-        count >= 1,
-        "Expected at least 1 policy, got {}",
-        count
-    );
+    assert!(count >= 1, "Expected at least 1 policy, got {}", count);
 }
 
 #[tokio::test]

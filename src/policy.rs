@@ -202,7 +202,12 @@ impl PolicyStore {
     }
 
     pub async fn policies(&self) -> Vec<IAMPolicy> {
-        self.policies.read().await.values().cloned().collect::<Vec<_>>()
+        self.policies
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
     }
 
     /// Get all policy names
@@ -229,7 +234,10 @@ impl PolicyStore {
         {
             let policies = self.policies.read().await;
             if policies.contains_key(&name) {
-                return Err(CrabCakesError::other(&format!("Policy '{}' already exists", name)));
+                return Err(CrabCakesError::other(&format!(
+                    "Policy '{}' already exists",
+                    name
+                )));
             }
         }
 
@@ -255,7 +263,11 @@ impl PolicyStore {
     }
 
     /// Update an existing policy
-    pub async fn update_policy(&self, name: String, policy: IAMPolicy) -> Result<(), CrabCakesError> {
+    pub async fn update_policy(
+        &self,
+        name: String,
+        policy: IAMPolicy,
+    ) -> Result<(), CrabCakesError> {
         // Validate policy name (no path traversal)
         if name.contains("..") || name.contains('/') || name.contains('\\') {
             return Err(CrabCakesError::other(&"Invalid policy name"));
@@ -265,7 +277,10 @@ impl PolicyStore {
         {
             let policies = self.policies.read().await;
             if !policies.contains_key(&name) {
-                return Err(CrabCakesError::other(&format!("Policy '{}' not found", name)));
+                return Err(CrabCakesError::other(&format!(
+                    "Policy '{}' not found",
+                    name
+                )));
             }
         }
 
@@ -301,7 +316,10 @@ impl PolicyStore {
         {
             let policies = self.policies.read().await;
             if !policies.contains_key(name) {
-                return Err(CrabCakesError::other(&format!("Policy '{}' not found", name)));
+                return Err(CrabCakesError::other(&format!(
+                    "Policy '{}' not found",
+                    name
+                )));
             }
         }
 

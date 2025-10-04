@@ -116,20 +116,28 @@ impl CredentialStore {
         secret_access_key: String,
     ) -> Result<(), CrabCakesError> {
         // Validate access key ID (no path traversal)
-        if access_key_id.contains("..") || access_key_id.contains('/') || access_key_id.contains('\\') {
+        if access_key_id.contains("..")
+            || access_key_id.contains('/')
+            || access_key_id.contains('\\')
+        {
             return Err(CrabCakesError::other(&"Invalid access key ID"));
         }
 
         // Validate secret key length (AWS standard is 40 characters)
         if secret_access_key.len() != 40 {
-            return Err(CrabCakesError::other(&"Secret access key must be 40 characters"));
+            return Err(CrabCakesError::other(
+                &"Secret access key must be 40 characters",
+            ));
         }
 
         // Check if credential already exists
         {
             let credentials = self.credentials.read().await;
             if credentials.contains_key(&access_key_id) {
-                return Err(CrabCakesError::other(&format!("Credential '{}' already exists", access_key_id)));
+                return Err(CrabCakesError::other(&format!(
+                    "Credential '{}' already exists",
+                    access_key_id
+                )));
             }
         }
 
@@ -159,20 +167,28 @@ impl CredentialStore {
         secret_access_key: String,
     ) -> Result<(), CrabCakesError> {
         // Validate access key ID (no path traversal)
-        if access_key_id.contains("..") || access_key_id.contains('/') || access_key_id.contains('\\') {
+        if access_key_id.contains("..")
+            || access_key_id.contains('/')
+            || access_key_id.contains('\\')
+        {
             return Err(CrabCakesError::other(&"Invalid access key ID"));
         }
 
         // Validate secret key length (AWS standard is 40 characters)
         if secret_access_key.len() != 40 {
-            return Err(CrabCakesError::other(&"Secret access key must be 40 characters"));
+            return Err(CrabCakesError::other(
+                &"Secret access key must be 40 characters",
+            ));
         }
 
         // Check if credential exists
         {
             let credentials = self.credentials.read().await;
             if !credentials.contains_key(&access_key_id) {
-                return Err(CrabCakesError::other(&format!("Credential '{}' not found", access_key_id)));
+                return Err(CrabCakesError::other(&format!(
+                    "Credential '{}' not found",
+                    access_key_id
+                )));
             }
         }
 
@@ -198,7 +214,10 @@ impl CredentialStore {
     /// Delete a credential
     pub async fn delete_credential(&self, access_key_id: &str) -> Result<(), CrabCakesError> {
         // Validate access key ID (no path traversal)
-        if access_key_id.contains("..") || access_key_id.contains('/') || access_key_id.contains('\\') {
+        if access_key_id.contains("..")
+            || access_key_id.contains('/')
+            || access_key_id.contains('\\')
+        {
             return Err(CrabCakesError::other(&"Invalid access key ID"));
         }
 
@@ -206,7 +225,10 @@ impl CredentialStore {
         {
             let credentials = self.credentials.read().await;
             if !credentials.contains_key(access_key_id) {
-                return Err(CrabCakesError::other(&format!("Credential '{}' not found", access_key_id)));
+                return Err(CrabCakesError::other(&format!(
+                    "Credential '{}' not found",
+                    access_key_id
+                )));
             }
         }
 
