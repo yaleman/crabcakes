@@ -26,8 +26,9 @@ fn hash_request(request: &IAMRequest) -> String {
 }
 
 pub struct PolicyStore {
-    policies: HashMap<String, IAMPolicy>,
+    policies: Arc<RwLock<HashMap<String, IAMPolicy>>>,
     result_cache: Arc<RwLock<HashMap<String, Decision>>>,
+    policy_dir: PathBuf,
 }
 
 impl PolicyStore {
@@ -77,8 +78,9 @@ impl PolicyStore {
 
         info!(count = policies.len(), "Loaded IAM policies");
         Ok(Self {
-            policies,
+            policies: Arc::new(RwLock::new(policies)),
             result_cache: Arc::new(RwLock::new(Default::default())),
+            policy_dir: policy_dir.clone(),
         })
     }
 
@@ -105,7 +107,8 @@ impl PolicyStore {
             debug!("Handling wildcard/anonymous request");
 
             // Look for policies that allow wildcard principals
-            for policy in self.policies.values() {
+            let policies = self.policies.read().await;
+            for policy in policies.values() {
                 // Check each statement in the policy
                 for statement in &policy.statement {
                     // Check if this statement allows the action and resource
@@ -165,7 +168,8 @@ impl PolicyStore {
                 cached_result.clone()
             } else {
                 drop(cache);
-                let res = evaluate_policies(&self.policies(), request)
+                let policies = self.policies().await;
+                let res = evaluate_policies(&policies, request)
                     .inspect_err(|e| error!(error = %e, "Error evaluating policies"))?;
                 // store the result in the cache
                 {
@@ -193,23 +197,149 @@ impl PolicyStore {
     }
 
     /// Get the number of loaded policies
-    pub fn policy_count(&self) -> usize {
-        self.policies.len()
+    pub async fn policy_count(&self) -> usize {
+        self.policies.read().await.len()
     }
 
-    pub fn policies(&self) -> Vec<IAMPolicy> {
-        self.policies.values().cloned().collect::<Vec<_>>()
+    pub async fn policies(&self) -> Vec<IAMPolicy> {
+        self.policies
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
     }
 
     /// Get all policy names
-    pub fn get_policy_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.policies.keys().cloned().collect();
+    pub async fn get_policy_names(&self) -> Vec<String> {
+        let policies = self.policies.read().await;
+        let mut names: Vec<String> = policies.keys().cloned().collect();
         names.sort();
         names
     }
 
     /// Get a policy by name
-    pub fn get_policy(&self, name: &str) -> Option<&IAMPolicy> {
-        self.policies.get(name)
+    pub async fn get_policy(&self, name: &str) -> Option<IAMPolicy> {
+        self.policies.read().await.get(name).cloned()
+    }
+
+    /// Add a new policy
+    pub async fn add_policy(&self, name: String, policy: IAMPolicy) -> Result<(), CrabCakesError> {
+        // Validate policy name (no path traversal)
+        if name.contains("..") || name.contains('/') || name.contains('\\') {
+            return Err(CrabCakesError::other(&"Invalid policy name"));
+        }
+
+        // Check if policy already exists
+        {
+            let policies = self.policies.read().await;
+            if policies.contains_key(&name) {
+                return Err(CrabCakesError::other(&format!(
+                    "Policy '{}' already exists",
+                    name
+                )));
+            }
+        }
+
+        // Write to file
+        let policy_path = self.policy_dir.join(format!("{}.json", name));
+        let policy_json = serde_json::to_string_pretty(&policy)?;
+        fs::write(&policy_path, policy_json)?;
+
+        // Update in-memory store
+        {
+            let mut policies = self.policies.write().await;
+            policies.insert(name.clone(), policy);
+        }
+
+        // Clear cache
+        {
+            let mut cache = self.result_cache.write().await;
+            cache.clear();
+        }
+
+        info!(policy_name = %name, "Added policy");
+        Ok(())
+    }
+
+    /// Update an existing policy
+    pub async fn update_policy(
+        &self,
+        name: String,
+        policy: IAMPolicy,
+    ) -> Result<(), CrabCakesError> {
+        // Validate policy name (no path traversal)
+        if name.contains("..") || name.contains('/') || name.contains('\\') {
+            return Err(CrabCakesError::other(&"Invalid policy name"));
+        }
+
+        // Check if policy exists
+        {
+            let policies = self.policies.read().await;
+            if !policies.contains_key(&name) {
+                return Err(CrabCakesError::other(&format!(
+                    "Policy '{}' not found",
+                    name
+                )));
+            }
+        }
+
+        // Write to file
+        let policy_path = self.policy_dir.join(format!("{}.json", name));
+        let policy_json = serde_json::to_string_pretty(&policy)?;
+        fs::write(&policy_path, policy_json)?;
+
+        // Update in-memory store
+        {
+            let mut policies = self.policies.write().await;
+            policies.insert(name.clone(), policy);
+        }
+
+        // Clear cache
+        {
+            let mut cache = self.result_cache.write().await;
+            cache.clear();
+        }
+
+        info!(policy_name = %name, "Updated policy");
+        Ok(())
+    }
+
+    /// Delete a policy
+    pub async fn delete_policy(&self, name: &str) -> Result<(), CrabCakesError> {
+        // Validate policy name (no path traversal)
+        if name.contains("..") || name.contains('/') || name.contains('\\') {
+            return Err(CrabCakesError::other(&"Invalid policy name"));
+        }
+
+        // Check if policy exists
+        {
+            let policies = self.policies.read().await;
+            if !policies.contains_key(name) {
+                return Err(CrabCakesError::other(&format!(
+                    "Policy '{}' not found",
+                    name
+                )));
+            }
+        }
+
+        // Delete file
+        let policy_path = self.policy_dir.join(format!("{}.json", name));
+        fs::remove_file(&policy_path)?;
+
+        // Remove from in-memory store
+        {
+            let mut policies = self.policies.write().await;
+            policies.remove(name);
+        }
+
+        // Clear cache
+        {
+            let mut cache = self.result_cache.write().await;
+            cache.clear();
+        }
+
+        info!(policy_name = %name, "Deleted policy");
+        Ok(())
     }
 }

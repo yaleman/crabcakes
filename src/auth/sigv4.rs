@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use http::HeaderValue;
 use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
 use scratchstack_aws_principal;
@@ -15,7 +16,7 @@ use scratchstack_aws_signature::{
     SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
 use tower::BoxError;
-use tracing::{debug, warn};
+use tracing::{debug, trace};
 
 use crate::credentials::CredentialStore;
 use crate::error::CrabCakesError;
@@ -41,19 +42,11 @@ pub async fn verify_sigv4(
     req: http::Request<Vec<u8>>,
     credentials_store: Arc<CredentialStore>,
     region: &str,
-    require_signature: bool,
 ) -> Result<VerifiedRequest, CrabCakesError> {
     // Check if Authorization header exists
-    let has_auth = req.headers().get(AUTHORIZATION).is_some();
+    let auth_header = req.headers().get(AUTHORIZATION);
 
-    if !has_auth && !require_signature {
-        // Allow anonymous requests if signature not required
-        warn!("No authorization header found, but signature not required - allowing anonymous");
-        // TODO: be more explicit about this
-        return Err(CrabCakesError::NoAuthenticationSupplied(
-            "No authorization header".to_string(),
-        ));
-    } else if !has_auth {
+    if auth_header.is_none() || auth_header == Some(&HeaderValue::from_static("")) {
         return Err(CrabCakesError::NoAuthenticationSupplied(
             "Missing authorization header".to_string(),
         ));
@@ -71,10 +64,11 @@ pub async fn verify_sigv4(
                 // Get the credential from the store
                 let secret_access_key = cred_store
                     .get_credential(&access_key)
+                    .await
                     .ok_or(CrabCakesError::InvalidCredential)?;
 
                 // Convert secret key to KSecretKey
-                let secret_key = KSecretKey::from_str(secret_access_key).map_err(|err| {
+                let secret_key = KSecretKey::from_str(&secret_access_key).map_err(|err| {
                     debug!(
                         access_key_id = access_key,
                         "Failed to parse secret key: {}", err
@@ -110,7 +104,7 @@ pub async fn verify_sigv4(
     // S3-specific signature options
     let signature_options = SignatureOptions::S3;
 
-    debug!("Signature options: {:?}", signature_options);
+    trace!("Signature options: {:?}", signature_options);
 
     // Validate the request
     let (_parts, _body, auth) = sigv4_validate_request(
@@ -504,10 +498,11 @@ pub async fn verify_streaming_sigv4(
     // Get secret key from credential store
     let secret_access_key = credentials_store
         .get_credential(&access_key_id)
+        .await
         .ok_or(CrabCakesError::InvalidCredential)?;
 
     // Derive signing key
-    let secret_key = KSecretKey::from_str(secret_access_key)
+    let secret_key = KSecretKey::from_str(&secret_access_key)
         .map_err(|e| CrabCakesError::Sigv4Verification(format!("Invalid secret key: {}", e)))?;
 
     let signing_key = secret_key.to_ksigning(timestamp.date_naive(), region, "s3");
@@ -639,7 +634,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature required - should fail
-        let result = verify_sigv4(request, cred_store, "crabcakes", true).await;
+        let result = verify_sigv4(request, cred_store, "crabcakes").await;
 
         assert!(
             result.is_err(),
@@ -664,7 +659,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature not required - should return error indicating no auth
-        let result = verify_sigv4(request, cred_store, "crabcakes", false).await;
+        let result = verify_sigv4(request, cred_store, "crabcakes").await;
 
         assert!(
             result.is_err(),
@@ -690,7 +685,7 @@ mod tests {
             .unwrap();
 
         // Verify - should fail
-        let result = verify_sigv4(request, cred_store, "crabcakes", true).await;
+        let result = verify_sigv4(request, cred_store, "crabcakes").await;
 
         assert!(
             result.is_err(),

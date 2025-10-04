@@ -40,7 +40,6 @@ pub struct S3Handler {
     multipart_manager: Arc<MultipartManager>,
     db_service: Arc<DBService>,
     region: String,
-    require_signature: bool,
 }
 
 impl S3Handler {
@@ -51,7 +50,6 @@ impl S3Handler {
         multipart_manager: Arc<MultipartManager>,
         db_service: Arc<DBService>,
         region: String,
-        require_signature: bool,
         server_addr: String,
     ) -> Self {
         Self {
@@ -61,7 +59,6 @@ impl S3Handler {
             multipart_manager,
             db_service,
             region,
-            require_signature,
             server_addr,
         }
     }
@@ -107,13 +104,6 @@ impl S3Handler {
             }
         };
 
-        // If signature verification is not required, allow the request
-        if !self.require_signature {
-            debug!("Signature verification not required, allowing request");
-            // Recreate BufferedBody from vec for later use
-            return Ok((None, buffered_body, parts));
-        }
-
         // Check if this is a streaming/chunked request
         let is_streaming = if let Some(content_sha256) = parts.headers.get("x-amz-content-sha256") {
             if let Ok(sha_str) = content_sha256.to_str() {
@@ -147,14 +137,7 @@ impl S3Handler {
             // Reconstruct the request with the buffered body for verification
             let http_request = http::Request::from_parts(parts.clone(), body_vec.clone());
 
-            match verify_sigv4(
-                http_request,
-                self.credentials_store.clone(),
-                &self.region,
-                self.require_signature,
-            )
-            .await
-            {
+            match verify_sigv4(http_request, self.credentials_store.clone(), &self.region).await {
                 Ok(v) => v,
                 Err(e) => {
                     warn!(error = %e, "Signature verification failed");

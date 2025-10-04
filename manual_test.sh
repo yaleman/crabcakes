@@ -635,7 +635,7 @@ if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACC
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
     echo "Multipart upload completed successfully"
 else
-    echo "Failed to complete multipart upload"
+    echo "Failed to finish full multipart upload"
     exit 1
 fi
 

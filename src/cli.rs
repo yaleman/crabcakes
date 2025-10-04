@@ -28,9 +28,6 @@ pub struct Cli {
     #[clap(short, long, default_value = "./config", env = "CRABCAKES_CONFIG_DIR")]
     pub config_dir: PathBuf,
 
-    #[clap(long, default_value = "true", env = "CRABCAKES_REQUIRE_SIGNATURE")]
-    pub require_signature: bool,
-
     #[clap(long, default_value = "crabcakes", env = "CRABCAKES_REGION")]
     pub region: String,
 

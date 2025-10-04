@@ -47,7 +47,6 @@ pub struct Server {
     port: NonZeroU16,
     root_dir: PathBuf,
     config_dir: PathBuf,
-    require_signature: bool,
     region: String,
     tls_cert: Option<PathBuf>,
     tls_key: Option<PathBuf>,
@@ -67,7 +66,6 @@ impl Server {
             port: cli.port,
             root_dir: cli.root_dir,
             config_dir: cli.config_dir,
-            require_signature: cli.require_signature,
             region: cli.region,
             tls_cert: cli.tls_cert,
             tls_key: cli.tls_key,
@@ -97,13 +95,12 @@ impl Server {
                 })?,
                 root_dir,
                 config_dir,
-                require_signature: false, // Don't require signatures in test mode
                 region: "crabcakes".to_string(), // Use default region for tests
-                tls_cert: None,           // No TLS cert in test mode
-                tls_key: None,            // No TLS key in test mode
-                disable_api: true,        // Disable API in test mode
-                oidc_client_id: None,     // No OIDC in test mode
-                oidc_discovery_url: None, // No OIDC in test mode
+                tls_cert: None,                  // No TLS cert in test mode
+                tls_key: None,                   // No TLS key in test mode
+                disable_api: true,               // Disable API in test mode
+                oidc_client_id: None,            // No OIDC in test mode
+                oidc_discovery_url: None,        // No OIDC in test mode
             });
             return Ok((server, port));
         }
@@ -227,7 +224,6 @@ impl Server {
             multipart_manager,
             db_service.clone(),
             self.region.clone(),
-            self.require_signature,
             addr.to_string(),
         ));
 
@@ -237,7 +233,6 @@ impl Server {
             policy_dir = ?policy_dir,
             credentials_dir = ?credentials_dir,
             region = %self.region,
-            require_signature = %self.require_signature,
             address = %addr,
             "Starting crabcakes..."
         );

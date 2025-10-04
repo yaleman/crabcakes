@@ -455,16 +455,16 @@ impl WebHandler {
             }
         };
 
-        let policy_names = self.policy_store.get_policy_names();
-        let policies: Vec<PolicyInfo> = policy_names
-            .iter()
-            .filter_map(|name| {
-                self.policy_store.get_policy(name).map(|policy| PolicyInfo {
+        let policy_names = self.policy_store.get_policy_names().await;
+        let mut policies: Vec<PolicyInfo> = Vec::new();
+        for name in policy_names.iter() {
+            if let Some(policy) = self.policy_store.get_policy(name).await {
+                policies.push(PolicyInfo {
                     name: name.clone(),
                     statement_count: policy.statement.len(),
-                })
-            })
-            .collect();
+                });
+            }
+        }
 
         let template = PoliciesTemplate {
             page: "policies".to_string(),
@@ -498,6 +498,7 @@ impl WebHandler {
         let policy = self
             .policy_store
             .get_policy(policy_name)
+            .await
             .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
 
         let policy_json = serde_json::to_string_pretty(&policy)
@@ -532,7 +533,7 @@ impl WebHandler {
             }
         };
 
-        let credentials = self.credentials_store.get_access_key_ids();
+        let credentials = self.credentials_store.get_access_key_ids().await;
 
         let template = CredentialsTemplate {
             page: "credentials".to_string(),
