@@ -183,7 +183,61 @@ async function deleteBatchObjects() {
     }
 }
 
-// Make functions available globally
+// Initialize event handlers when the page loads
+function initializeBucketOperations() {
+    // Bind download button events
+    document.querySelectorAll('.download-object-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const bucket = btn.dataset.bucket;
+            const key = btn.dataset.key;
+            downloadObject(bucket, key);
+        });
+    });
+
+    // Bind delete button events
+    document.querySelectorAll('.delete-object-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const bucket = btn.dataset.bucket;
+            const key = btn.dataset.key;
+            deleteObject(bucket, key);
+        });
+    });
+
+    // Bind bulk delete button
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    if (bulkDeleteBtn) {
+        bulkDeleteBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            deleteBatchObjects();
+        });
+    }
+
+    // Bind select all checkbox
+    const selectAllCheckbox = document.getElementById('select-all');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', (e) => {
+            toggleSelectAll(e.target);
+        });
+    }
+
+    // Bind individual object checkboxes
+    document.querySelectorAll('.object-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            toggleObjectSelection(e.target);
+        });
+    });
+}
+
+// Initialize when DOM is loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeBucketOperations);
+} else {
+    initializeBucketOperations();
+}
+
+// Keep functions available globally for backwards compatibility
 window.downloadObject = downloadObject;
 window.deleteObject = deleteObject;
 window.toggleObjectSelection = toggleObjectSelection;
