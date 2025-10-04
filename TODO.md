@@ -2,19 +2,20 @@
 
 ## Web Admin UI Implementation (In Progress)
 
-### Phase 4: OIDC/OAuth2 with PKCE Authentication
+### Phase 4: OIDC/OAuth2 with PKCE Authentication (Partial)
 - [x] Add Rust dependencies: openidconnect, rand, tower-sessions, tower-sessions-sqlx-store
-- [ ] Create src/auth/ module structure
-- [ ] Create src/auth/oauth.rs for OIDC client and PKCE flow
+- [x] Create src/auth/ module structure (reorganized with sigv4.rs + oauth.rs)
+- [x] Create src/auth/oauth.rs with placeholder for OIDC client and PKCE flow
+- [x] Implement temporary AWS credential generation
+- [ ] Complete OIDC/OAuth2 implementation (openidconnect 4.x API)
 - [ ] Implement GET /login - Generate PKCE challenge, redirect to OIDC provider
 - [ ] Implement GET /oauth2/callback - Exchange code for tokens, create session
 - [ ] Implement POST /logout - Delete session and temp credentials
 - [ ] Create session cookie (HTTP-only, Secure, SameSite)
-- [ ] Generate temporary AWS credentials on successful login
 - [ ] Extract user info from ID token (email, sub)
 
-### Phase 5: Web UI API Endpoints
-- [ ] Create src/web_handlers.rs for web UI routes
+### Phase 5: Web UI API Endpoints (Partial)
+- [x] Create src/web_handlers.rs for web UI routes with placeholder handlers
 - [ ] Session validation middleware for /api/* and /admin/* routes
 - [ ] GET /api/credentials - List all permanent credentials
 - [ ] POST /api/credentials - Create new permanent credential

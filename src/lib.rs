@@ -27,6 +27,7 @@ pub mod multipart;
 pub mod policy;
 pub mod s3_handlers;
 pub mod server;
+pub mod web_handlers;
 pub mod xml_responses;
 
 #[cfg(test)]
