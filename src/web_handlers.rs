@@ -5,6 +5,7 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use form_urlencoded;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response, StatusCode};
@@ -47,7 +48,7 @@ impl WebHandler {
     pub async fn handle_request(
         &self,
         req: Request<hyper::body::Incoming>,
-        _session: Session,
+        session: Session,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let method = req.method().clone();
         let path = req.uri().path();
@@ -55,10 +56,10 @@ impl WebHandler {
         let result = match (method.as_str(), path) {
             ("GET", "/login") => self.handle_login().await,
             ("GET", path) if path.starts_with("/oauth2/callback") => {
-                self.handle_oauth_callback(req).await
+                self.handle_oauth_callback(req, session.clone()).await
             }
-            ("POST", "/logout") => self.handle_logout().await,
-            ("GET", "/api/session") => self.handle_get_session().await,
+            ("POST", "/logout") => self.handle_logout(session.clone()).await,
+            ("GET", "/api/session") => self.handle_get_session(session.clone()).await,
             _ => self.not_found().await,
         };
 
@@ -82,36 +83,153 @@ impl WebHandler {
     /// GET /oauth2/callback - Handle OAuth callback
     async fn handle_oauth_callback(
         &self,
-        _req: Request<hyper::body::Incoming>,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        // TODO: Extract code and state from query params
-        // TODO: Exchange code for tokens
-        // TODO: Create session
-        // TODO: Generate temp credentials
-        Err(CrabCakesError::other(
-            &"OAuth callback not yet implemented".to_string(),
-        ))
+        // Extract query parameters
+        let query = req.uri().query().ok_or_else(|| {
+            CrabCakesError::other(&"Missing query parameters in OAuth callback".to_string())
+        })?;
+
+        // Parse query string for code and state
+        let params: std::collections::HashMap<String, String> = form_urlencoded::parse(query.as_bytes())
+            .into_owned()
+            .collect();
+
+        let code = params.get("code").ok_or_else(|| {
+            CrabCakesError::other(&"Missing 'code' parameter in OAuth callback".to_string())
+        })?;
+
+        let state = params.get("state").ok_or_else(|| {
+            CrabCakesError::other(&"Missing 'state' parameter in OAuth callback".to_string())
+        })?;
+
+        // Exchange code for tokens and get user info
+        let (user_email, user_id) = self.oauth_client.exchange_code(code, state).await?;
+
+        // Generate temporary AWS credentials
+        let (access_key_id, secret_access_key) = self.oauth_client.generate_temp_credentials();
+
+        // Set credentials to expire in 8 hours
+        let expires_at = chrono::Utc::now().naive_utc()
+            + chrono::Duration::try_hours(8).ok_or_else(|| {
+                CrabCakesError::other(&"Failed to create credential expiry duration".to_string())
+            })?;
+
+        // Store session data
+        session
+            .insert("user_email", user_email.clone())
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to store user_email in session: {}", e)))?;
+        session
+            .insert("user_id", user_id.clone())
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to store user_id in session: {}", e)))?;
+        session
+            .insert("access_key_id", access_key_id.clone())
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to store access_key_id in session: {}", e)))?;
+
+        // Get session ID
+        let session_id = session.id().map(|id| id.to_string()).ok_or_else(|| {
+            CrabCakesError::other(&"Failed to get session ID".to_string())
+        })?;
+
+        // Store temporary credentials in database
+        self.db
+            .store_temporary_credentials(
+                &access_key_id,
+                &secret_access_key,
+                &session_id,
+                &user_email,
+                &user_id,
+                expires_at,
+            )
+            .await?;
+
+        // Redirect to admin UI
+        Response::builder()
+            .status(StatusCode::FOUND)
+            .header("Location", "/admin/")
+            .body(Full::new(Bytes::new()))
+            .map_err(CrabCakesError::from)
     }
 
     /// POST /logout - Delete session and credentials
-    async fn handle_logout(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        // TODO: Get session ID from cookie
-        // TODO: Delete temp credentials
-        // TODO: Delete session
+    async fn handle_logout(&self, session: Session) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Get session ID before destroying session
+        if let Some(session_id) = session.id() {
+            let session_id_str = session_id.to_string();
+
+            // Delete all temporary credentials for this session
+            self.db
+                .delete_credentials_by_session(&session_id_str)
+                .await?;
+        }
+
+        // Delete the session (clears cookie and session data)
+        session
+            .delete()
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to delete session: {}", e)))?;
+
+        // Redirect to login page
         Response::builder()
-            .status(StatusCode::NO_CONTENT)
+            .status(StatusCode::FOUND)
+            .header("Location", "/login")
             .body(Full::new(Bytes::new()))
             .map_err(CrabCakesError::from)
     }
 
     /// GET /api/session - Return session info with temp credentials
-    async fn handle_get_session(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        // TODO: Get session from cookie
-        // TODO: Look up temp credentials
-        // TODO: Return session info as JSON
-        Err(CrabCakesError::other(
-            &"Session endpoint not yet implemented".to_string(),
-        ))
+    async fn handle_get_session(&self, session: Session) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Get user info from session
+        let user_email: String = session
+            .get("user_email")
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to get user_email from session: {}", e)))?
+            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
+
+        let user_id: String = session
+            .get("user_id")
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to get user_id from session: {}", e)))?
+            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
+
+        let access_key_id: String = session
+            .get("access_key_id")
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to get access_key_id from session: {}", e)))?
+            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
+
+        // Look up credentials in database to get secret key and expiry
+        let creds = self
+            .db
+            .get_temporary_credentials(&access_key_id)
+            .await?
+            .ok_or_else(|| CrabCakesError::other(&"Credentials not found or expired".to_string()))?;
+
+        // Check if credentials are expired
+        if creds.expires_at < chrono::Utc::now().naive_utc() {
+            return Err(CrabCakesError::other(&"Credentials expired".to_string()));
+        }
+
+        // Build session info response
+        let session_info = SessionInfo {
+            user_email,
+            user_id,
+            access_key_id: creds.access_key_id,
+            secret_access_key: creds.secret_access_key,
+            expires_at: creds.expires_at.to_string(),
+        };
+
+        // Return JSON response
+        let json = serde_json::to_string(&session_info)?;
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
     }
 
     /// 404 Not Found response
