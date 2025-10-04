@@ -2,25 +2,6 @@
 
 ## Web Admin UI Implementation (In Progress)
 
-### Phase 1: Reserved Path Blocklist ✅ COMPLETE
-- [x] Create RESERVED_BUCKET_NAMES constant with: admin, api, login, logout, oauth2, .well-known, config, oidc, crabcakes, docs, help
-- [x] Add validation in filesystem.rs::create_bucket() to reject reserved names
-- [x] Add early check in s3_handlers.rs::handle_request() to reject requests to reserved paths
-- [x] Return 400 Bad Request with InvalidBucketName error
-
-### Phase 2: API Configuration ✅ COMPLETE
-- [x] Add CRABCAKES_DISABLE_API flag (default: false) to allow disabling admin UI
-- [x] Add CRABCAKES_OIDC_CLIENT_ID environment variable
-- [x] Add CRABCAKES_OIDC_DISCOVERY_URL environment variable
-- [x] Update Server struct to store API and OIDC configuration
-
-### Phase 3: Database Schema for Sessions & Temp Credentials ✅ COMPLETE
-- [x] Migration for oauth_pkce_state table (state, code_verifier, nonce, pkce_challenge, redirect_uri, expires_at)
-- [x] Migration for temporary_credentials table (access_key_id, secret_access_key, session_id, user_email, user_id, expires_at, created_at)
-- [x] Create SeaORM entities for new tables
-- [x] Extend DBService with PKCE state & temp credential methods
-- Note: Sessions managed by tower-sessions with SQLite store (auto-creates table)
-
 ### Phase 4: OIDC/OAuth2 with PKCE Authentication
 - [x] Add Rust dependencies: openidconnect, rand, tower-sessions, tower-sessions-sqlx-store
 - [ ] Create src/auth/ module structure
