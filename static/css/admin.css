@@ -305,3 +305,43 @@ textarea#policy-json {
 .back-link-container {
     margin-top: 20px;
 }
+
+/* Bulk actions toolbar */
+.bulk-actions-toolbar {
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.selection-counter {
+    color: #666;
+    font-size: var(--font-size-normal);
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+}
+
+input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* Disabled button state */
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Action buttons in table rows */
+table td button {
+    margin-right: 5px;
+}
+
+table td button:last-child {
+    margin-right: 0;
+}

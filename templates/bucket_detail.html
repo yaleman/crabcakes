@@ -7,20 +7,51 @@
     <h1><a href="/admin/buckets">Buckets</a> / {{ bucket_name }}</h1>
 </div>
 
+{% if !objects.is_empty() %}
+<div class="bulk-actions-toolbar">
+    <button id="bulk-delete-btn" class="btn btn-danger" disabled onclick="deleteBatchObjects()">
+        Delete Selected
+    </button>
+    <span id="selection-counter" class="selection-counter">0 items selected</span>
+</div>
+{% endif %}
+
 <table>
     <thead>
         <tr>
+            {% if !objects.is_empty() %}
+            <th style="width: 40px;">
+                <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)">
+            </th>
+            {% endif %}
             <th>Key</th>
             <th>Size</th>
             <th>Last Modified</th>
+            <th style="width: 180px;">Actions</th>
         </tr>
     </thead>
     <tbody>
         {% for object in objects %}
         <tr>
+            <td>
+                <input type="checkbox" class="object-checkbox"
+                       data-bucket="{{ bucket_name }}"
+                       data-key="{{ object.key }}"
+                       onchange="toggleObjectSelection(this)">
+            </td>
             <td>{{ object.key }}</td>
             <td>{{ object.size_formatted }}</td>
             <td>{{ object.last_modified }}</td>
+            <td>
+                <button class="btn btn-small btn-primary"
+                        onclick="downloadObject('{{ bucket_name }}', '{{ object.key }}')">
+                    Download
+                </button>
+                <button class="btn btn-small btn-danger"
+                        onclick="deleteObject('{{ bucket_name }}', '{{ object.key }}')">
+                    Delete
+                </button>
+            </td>
         </tr>
         {% endfor %}
     </tbody>
@@ -35,4 +66,8 @@
 <div class="back-link-container">
     <a href="/admin/buckets" class="btn btn-primary">← Back to Buckets</a>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script type="module" src="/admin/static/js/bucket-operations.js"></script>
 {% endblock %}

@@ -1,0 +1,10 @@
+.git
+.github
+.claude
+config/
+data/
+node_modules/
+notes/
+target/
+testfiles/
+test_config/

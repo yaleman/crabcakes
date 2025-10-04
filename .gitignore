@@ -11,4 +11,3 @@ test_config/*.sqlite3
 
 # Node.js
 node_modules/
-pnpm-lock.yaml

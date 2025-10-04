@@ -1,51 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Crabcakes Admin{% endblock %}</title>
-    <link rel="stylesheet" href="/admin/static/css/admin.css">
-    {% block extra_styles %}{% endblock %}
-</head>
-<body>
-    <nav class="sidebar">
-        <div class="logo">🦀 Crabcakes</div>
-        <ul class="nav-menu">
-            <li class="nav-item">
-                <a href="/admin/profile" class="nav-link {% if page == "profile" %}active{% endif %}">
-                    Profile
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="/admin/policies" class="nav-link {% if page == "policies" %}active{% endif %}">
-                    Policies
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="/admin/credentials" class="nav-link {% if page == "credentials" %}active{% endif %}">
-                    Credentials
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="/admin/buckets" class="nav-link {% if page == "buckets" %}active{% endif %}">
-                    Buckets
-                </a>
-            </li>
-            <li class="nav-item logout-item">
-                <form method="POST" action="/logout" class="logout-form">
-                    <button type="submit" class="nav-link logout-link">
-                        Sign Out
-                    </button>
-                </form>
-            </li>
-        </ul>
-    </nav>
-    <main class="main-content">
-        <div class="container">
-            {% block content %}{% endblock %}
-        </div>
-    </main>
-    <script src="/admin/static/js/logout.js"></script>
-    {% block extra_scripts %}{% endblock %}
-</body>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{% block title %}Crabcakes Admin{% endblock %}</title>
+        <link rel="stylesheet" href="/admin/static/css/admin.css">
+        {% block extra_styles %}{% endblock %}
+    </head>
+    <body>
+        <nav class="sidebar">
+            <div class="logo">🦀 Crabcakes</div>
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="/admin/buckets"
+                        class="nav-link {% if page == "buckets" %}active{% endif
+                        %}">
+                        Buckets
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/admin/credentials"
+                        class="nav-link {% if page == "credentials" %}active{%
+                        endif %}">
+                        Credentials
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/admin/policies"
+                        class="nav-link {% if page == "policies" %}active{%
+                        endif %}">
+                        Policies
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/admin/profile"
+                        class="nav-link {% if page == "profile" %}active{% endif
+                        %}">
+                        Profile
+                    </a>
+                </li>
+                <li class="nav-item logout-item">
+                    <form method="POST" action="/logout" class="logout-form">
+                        <button type="submit" class="nav-link logout-link">
+                            Sign Out
+                        </button>
+                    </form>
+                </li>
+            </ul>
+        </nav>
+        <main class="main-content">
+            <div class="container">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+        <script src="/admin/static/js/logout.js"></script>
+        {% block extra_scripts %}{% endblock %}
+    </body>
 </html>
