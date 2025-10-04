@@ -147,9 +147,12 @@ impl WebHandler {
                 self.handle_api_delete_policy(req, session.clone(), policy_name)
                     .await
             }
-            ("GET", "/admin/api/credentials") => self.handle_api_list_credentials(session.clone()).await,
+            ("GET", "/admin/api/credentials") => {
+                self.handle_api_list_credentials(session.clone()).await
+            }
             ("POST", "/admin/api/credentials") => {
-                self.handle_api_create_credential(req, session.clone()).await
+                self.handle_api_create_credential(req, session.clone())
+                    .await
             }
             ("PUT", path) if path.starts_with("/admin/api/credentials/") => {
                 let access_key_id = path.strip_prefix("/admin/api/credentials/").unwrap_or("");
@@ -911,9 +914,11 @@ impl WebHandler {
         // Build response with just access key IDs
         let credentials: Vec<serde_json::Value> = access_key_ids
             .into_iter()
-            .map(|id| serde_json::json!({
-                "access_key_id": id
-            }))
+            .map(|id| {
+                serde_json::json!({
+                    "access_key_id": id
+                })
+            })
             .collect();
 
         let json = serde_json::to_string(&credentials)?;
@@ -1038,7 +1043,9 @@ impl WebHandler {
         self.validate_csrf_token(&session, &parts.headers).await?;
 
         // Delete credential
-        self.credentials_store.delete_credential(access_key_id).await?;
+        self.credentials_store
+            .delete_credential(access_key_id)
+            .await?;
 
         // Return success
         let json = serde_json::to_string(&serde_json::json!({
