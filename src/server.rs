@@ -18,6 +18,8 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_sessions::cookie::time::Duration;
 use tower_sessions::{Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::SqliteStore;
@@ -34,9 +36,10 @@ use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
-use crate::router::route_request;
+use crate::router::{WebServiceWithSession, route_request};
 use crate::s3_handlers::S3Handler;
 use crate::web_handlers::WebHandler;
+use crate::web_service::WebService;
 
 pub struct Server {
     hostname: String,
@@ -156,8 +159,8 @@ impl Server {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         }
 
-        // Create session store and web handler if OIDC is configured and API not disabled
-        let (session_layer, web_handler) = if !self.disable_api {
+        // Create web service with session layer if OIDC is configured and API not disabled
+        let web_service: Option<WebServiceWithSession> = if !self.disable_api {
             if let (Some(client_id), Some(discovery_url)) =
                 (&self.oidc_client_id, &self.oidc_discovery_url)
             {
@@ -199,14 +202,20 @@ impl Server {
                     policy_store.clone(),
                 ));
 
-                (Some(session_layer), Some(web_handler))
+                // Create the web service and wrap it with the session layer
+                let web_svc = WebService::new(web_handler);
+                let service_with_sessions =
+                    ServiceBuilder::new().layer(session_layer).service(web_svc);
+
+                // Box and clone the service for use in connection handlers
+                Some(ServiceExt::boxed_clone(service_with_sessions))
             } else {
                 info!("Web UI disabled: OIDC not configured");
-                (None, None)
+                None
             }
         } else {
             info!("Web UI disabled via --disable-api flag");
-            (None, None)
+            None
         };
 
         // Create S3 handler
@@ -274,8 +283,7 @@ impl Server {
                     debug!(remote_addr = %remote_addr, "Accepted new connection");
 
                     let s3_handler = s3_handler.clone();
-                    let web_handler = web_handler.clone();
-                    let session_layer = session_layer.clone();
+                    let web_service = web_service.clone();
 
                     tokio::task::spawn(async move {
                         let tls_stream = match tls_acceptor.accept(stream).await {
@@ -290,17 +298,10 @@ impl Server {
                                 TokioIo::new(tls_stream),
                                 service_fn(move |req| {
                                     let s3_handler = Arc::clone(&s3_handler);
-                                    let web_handler = web_handler.clone();
-                                    let session_layer = session_layer.clone();
+                                    let web_service = web_service.clone();
                                     async move {
-                                        route_request(
-                                            req,
-                                            remote_addr,
-                                            s3_handler,
-                                            web_handler,
-                                            session_layer,
-                                        )
-                                        .await
+                                        route_request(req, remote_addr, s3_handler, web_service)
+                                            .await
                                     }
                                 }),
                             )
@@ -317,8 +318,7 @@ impl Server {
 
                 let io = TokioIo::new(stream);
                 let s3_handler = s3_handler.clone();
-                let web_handler = web_handler.clone();
-                let session_layer = session_layer.clone();
+                let web_service = web_service.clone();
 
                 tokio::task::spawn(async move {
                     if let Err(err) = http1::Builder::new()
@@ -326,17 +326,9 @@ impl Server {
                             io,
                             service_fn(move |req| {
                                 let s3_handler = Arc::clone(&s3_handler);
-                                let web_handler = web_handler.clone();
-                                let session_layer = session_layer.clone();
+                                let web_service = web_service.clone();
                                 async move {
-                                    route_request(
-                                        req,
-                                        remote_addr,
-                                        s3_handler,
-                                        web_handler,
-                                        session_layer,
-                                    )
-                                    .await
+                                    route_request(req, remote_addr, s3_handler, web_service).await
                                 }
                             }),
                         )

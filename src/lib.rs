@@ -30,6 +30,7 @@ pub mod router;
 pub mod s3_handlers;
 pub mod server;
 pub mod web_handlers;
+pub mod web_service;
 pub mod xml_responses;
 
 #[cfg(test)]
