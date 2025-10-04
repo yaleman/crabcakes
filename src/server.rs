@@ -18,8 +18,12 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
+use tower_sessions::cookie::time::Duration;
+use tower_sessions::{Expiry, SessionManagerLayer};
+use tower_sessions_sqlx_store::SqliteStore;
 use tracing::{debug, error, info};
 
+use crate::auth::OAuthClient;
 use crate::cleanup::CleanupTask;
 use crate::cli::Cli;
 use crate::credentials::CredentialStore;
@@ -30,7 +34,9 @@ use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
+use crate::router::route_request;
 use crate::s3_handlers::S3Handler;
+use crate::web_handlers::WebHandler;
 
 pub struct Server {
     hostname: String,
@@ -152,13 +158,66 @@ impl Server {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         }
 
+        // Create session store and web handler if OIDC is configured and API not disabled
+        let (session_layer, web_handler) = if !self.disable_api {
+            if let (Some(client_id), Some(discovery_url)) =
+                (&self.oidc_client_id, &self.oidc_discovery_url)
+            {
+                let redirect_uri = format!(
+                    "http{}://{}:{}/oauth2/callback",
+                    if self.tls_cert.is_some() { "s" } else { "" },
+                    self.hostname,
+                    self.port
+                );
+                let oauth_client = Arc::new(
+                    OAuthClient::new(discovery_url, client_id, &redirect_uri, db_service.clone())
+                        .await?,
+                );
+
+                // Create session store using the same SQLite database
+                let db_path = self.config_dir.join("crabcakes.sqlite3");
+                let session_store = SqliteStore::new(
+                    sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
+                        .await
+                        .map_err(|e| {
+                            CrabCakesError::other(&format!(
+                                "Failed to connect to session database: {}",
+                                e
+                            ))
+                        })?,
+                );
+                session_store.migrate().await.map_err(|e| {
+                    CrabCakesError::other(&format!("Failed to migrate session store: {}", e))
+                })?;
+
+                let session_layer = SessionManagerLayer::new(session_store)
+                    .with_secure(self.tls_cert.is_some())
+                    .with_expiry(Expiry::OnInactivity(Duration::seconds(8 * 3600))); // 8 hours
+
+                let web_handler = Arc::new(WebHandler::new(
+                    oauth_client,
+                    db_service.clone(),
+                    credentials_store.clone(),
+                    policy_store.clone(),
+                ));
+
+                (Some(session_layer), Some(web_handler))
+            } else {
+                info!("Web UI disabled: OIDC not configured");
+                (None, None)
+            }
+        } else {
+            info!("Web UI disabled via --disable-api flag");
+            (None, None)
+        };
+
         // Create S3 handler
         let s3_handler: Arc<S3Handler> = Arc::new(S3Handler::new(
             filesystem,
-            policy_store,
-            credentials_store,
+            policy_store.clone(),
+            credentials_store.clone(),
             multipart_manager,
-            db_service,
+            db_service.clone(),
             self.region.clone(),
             self.require_signature,
             addr.to_string(),
@@ -216,7 +275,10 @@ impl Server {
                     let tls_acceptor = tls_acceptor.clone();
                     debug!(remote_addr = %remote_addr, "Accepted new connection");
 
-                    let handler = s3_handler.clone();
+                    let s3_handler = s3_handler.clone();
+                    let web_handler = web_handler.clone();
+                    let session_layer = session_layer.clone();
+
                     tokio::task::spawn(async move {
                         let tls_stream = match tls_acceptor.accept(stream).await {
                             Ok(s) => s,
@@ -229,8 +291,19 @@ impl Server {
                             .serve_connection(
                                 TokioIo::new(tls_stream),
                                 service_fn(move |req| {
-                                    let handler = Arc::clone(&handler);
-                                    async move { handler.handle_request(req, remote_addr).await }
+                                    let s3_handler = Arc::clone(&s3_handler);
+                                    let web_handler = web_handler.clone();
+                                    let session_layer = session_layer.clone();
+                                    async move {
+                                        route_request(
+                                            req,
+                                            remote_addr,
+                                            s3_handler,
+                                            web_handler,
+                                            session_layer,
+                                        )
+                                        .await
+                                    }
                                 }),
                             )
                             .await
@@ -245,15 +318,28 @@ impl Server {
                 debug!(remote_addr = %remote_addr, "Accepted new connection");
 
                 let io = TokioIo::new(stream);
-                let handler = s3_handler.clone();
+                let s3_handler = s3_handler.clone();
+                let web_handler = web_handler.clone();
+                let session_layer = session_layer.clone();
 
                 tokio::task::spawn(async move {
                     if let Err(err) = http1::Builder::new()
                         .serve_connection(
                             io,
                             service_fn(move |req| {
-                                let handler = Arc::clone(&handler);
-                                async move { handler.handle_request(req, remote_addr).await }
+                                let s3_handler = Arc::clone(&s3_handler);
+                                let web_handler = web_handler.clone();
+                                let session_layer = session_layer.clone();
+                                async move {
+                                    route_request(
+                                        req,
+                                        remote_addr,
+                                        s3_handler,
+                                        web_handler,
+                                        session_layer,
+                                    )
+                                    .await
+                                }
                             }),
                         )
                         .await
