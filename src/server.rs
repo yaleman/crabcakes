@@ -17,6 +17,7 @@ use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -38,8 +39,8 @@ use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::router::{WebServiceWithSession, route_request};
 use crate::s3_handlers::S3Handler;
-use crate::web_handlers::WebHandler;
-use crate::web_service::WebService;
+use crate::web::handlers::WebHandler;
+use crate::web::service::WebService;
 
 pub struct Server {
     hostname: String,
@@ -115,20 +116,20 @@ impl Server {
         let addr: SocketAddr = addr.parse()?;
 
         // Create filesystem service
-        let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone()));
+        let filesystem = Arc::new(RwLock::new(FilesystemService::new(self.root_dir.clone())));
 
         // Derive policy and credential paths from config_dir
         let policy_dir = self.config_dir.join("policies");
         let credentials_dir = self.config_dir.join("credentials");
 
         // Load IAM policies
-        let policy_store = Arc::new(PolicyStore::new(&policy_dir)?);
+        let policy_store = Arc::new(RwLock::new(PolicyStore::new(&policy_dir)?));
 
         // Load credentials
-        let credentials_store = Arc::new(CredentialStore::new(&credentials_dir)?);
+        let credentials_store = Arc::new(RwLock::new(CredentialStore::new(&credentials_dir)?));
 
         // Create multipart manager
-        let multipart_manager = Arc::new(MultipartManager::new(&self.root_dir));
+        let multipart_manager = Arc::new(RwLock::new(MultipartManager::new(&self.root_dir)));
 
         // Initialize database and create DBService
         let db = if use_in_memory_db {

@@ -1,28 +1,11 @@
 # Crabcakes S3 API Implementation TODO
 
-## Web Admin UI Implementation (In Progress)
-
-### Phase 4: OIDC/OAuth2 with PKCE Authentication (Complete)
-- [x] Add Rust dependencies: openidconnect, rand, tower-sessions, tower-sessions-sqlx-store, reqwest
-- [x] Create src/auth/ module structure (reorganized with sigv4.rs + oauth.rs)
-- [x] Create src/auth/oauth.rs with OAuthClient implementation
-- [x] Implement temporary AWS credential generation
-- [x] Complete OIDC/OAuth2 implementation (openidconnect 4.x API with async HTTP)
-- [x] Implement PKCE flow (SHA256 challenge/verifier)
-- [x] Implement OIDC discovery with async reqwest client
-- [x] Implement authorization URL generation with state/nonce
-- [x] Implement token exchange with code verifier
-- [x] Implement ID token validation with nonce verification
-- [x] Extract user info from ID token (email, sub)
-- [x] Add CrabCakesError::OidcStateParameterExpired variant
-- [x] Background cleanup task for expired PKCE states and temporary credentials (5-minute interval)
-- [ ] Wire up OAuth handlers in web_handlers.rs (GET /login, GET /oauth2/callback, POST /logout)
-- [ ] Create session cookie (HTTP-only, Secure, SameSite)
-- [ ] Store temporary credentials in database after successful login
+## Phases to complete
 
 ### Phase 5: Web UI API Endpoints with CSRF Protection (In Progress)
+
 - [x] Create src/web_handlers.rs for web UI routes with placeholder handlers
-- [ ] Session validation middleware for /api/* and /admin/* routes
+- [ ] Session validation middleware for `/api/*` and `/admin/*` routes
 - [ ] **CSRF Protection Implementation**
   - [ ] Add CSRF token generation (using session storage)
   - [ ] Add CSRF token validation on all POST/PUT/DELETE requests
@@ -64,6 +47,7 @@
   - [ ] Update templates/credentials.html - Add Create and Delete buttons
 
 ### Phase 6: Routing & Request Dispatch
+
 - [ ] Update server.rs::run() to dispatch based on disable_api flag
 - [ ] Route /admin/* to SPA (index.html from web/dist/)
 - [ ] Route /api/* to API handlers with session auth
@@ -72,6 +56,7 @@
 - [ ] Fallback /admin/* to index.html (SPA routing)
 
 ### Phase 7: TypeScript Frontend Setup
+
 - [ ] Create web/ directory with pnpm create vite
 - [ ] Configure Vite for /admin/ base path
 - [ ] Setup Tailwind CSS
@@ -81,6 +66,7 @@
 - [ ] Add AWS SDK for JavaScript (@aws-sdk/client-s3)
 
 ### Phase 8: React Admin UI Implementation
+
 - [ ] Setup routes: /, /credentials, /policies, /policies/:name
 - [ ] Create TypeScript types for API responses
 - [ ] Implement auth flow (login redirect, session fetch, credential storage)
@@ -91,17 +77,20 @@
 - [ ] Ensure all navigation updates URL for deep linking
 
 ### Phase 9: Build System Integration
+
 - [ ] Update justfile with frontend-install, frontend-lint, frontend-build
 - [ ] Update check recipe to include frontend linting
 - [ ] Add .gitignore entries for web/node_modules/, web/dist/
 - [ ] Update CLAUDE.md with frontend dev instructions
 
 ## Environment Variables (Admin UI)
+
 - `CRABCAKES_DISABLE_API` - Disable admin UI and API (default: false, API enabled by default)
 - `CRABCAKES_OIDC_CLIENT_ID` - OAuth client ID (required if API enabled)
 - `CRABCAKES_OIDC_DISCOVERY_URL` - OIDC discovery URL (required if API enabled)
 
 ## URL Structure (when API is enabled, i.e., CRABCAKES_DISABLE_API=false)
+
 - `/admin/*` - Admin UI (SPA)
 - `/api/*` - API endpoints (JSON)
 - `/login` - OIDC login
@@ -114,14 +103,17 @@
 ## Future Work
 
 ### Phase 5: ACL Operations (Optional)
+
 **Status:** Not Started
 
 #### Infrastructure
+
 - [ ] Design ACL storage (similar to tags, use sidecar files)
 - [ ] Implement ACL validation and defaults
 - [ ] Support canned ACLs (private, public-read, etc.)
 
 #### 16-19. ACL Operations
+
 - [ ] GetObjectAcl - `GET /key?acl`
 - [ ] PutObjectAcl - `PUT /key?acl`
 - [ ] GetBucketAcl - `GET /bucket?acl`
@@ -135,11 +127,12 @@
 ## Future Enhancements
 
 ### Server Infrastructure
+
 - [ ] Investigate using shellflip crate for graceful server restarts - example implementation here <https://github.com/cloudflare/shellflip/blob/main/examples/restarter.rs>
 - [ ] Enable dual-stack (IPv4/IPv6) listening support
 - [ ] policy troubleshooter - input the bucket/key/action/user and see what the result will be
 - [ ] policy suggester - enable the mode, take some actions, and get suggestions as to what's missing from policy
-  - [ ] this stores all actions while it's running (maybe in the database?) for later reference 
+  - [ ] this stores all actions while it's running (maybe in the database?) for later reference
 - [ ] regular database vacuum with a record of when it was last done, so if it's overdue or really needs it, then just run the task
 - [ ] turn on consistency features for sqlite to handle crashes better if there are some
 - [ ] possibly look at offering postgresql as a database backend
@@ -159,14 +152,3 @@
 - ❌ Legal Hold
 
 ---
-
-## Completed Phases (24 Operations)
-
-All phases 0-4 are complete:
-- ✅ Phase 0: Configuration Enhancement (region support)
-- ✅ Phase 1: Core Operations (DeleteObjects, CopyObject, GetBucketLocation, ListObjectsV1)
-- ✅ Phase 2: Multipart Upload Foundation (CreateMultipartUpload, UploadPart, AbortMultipartUpload, ListMultipartUploads, ListParts)
-- ✅ Phase 3: Multipart Upload Completion (CompleteMultipartUpload, UploadPartCopy)
-- ✅ Phase 4: Object Tagging (PutObjectTagging, GetObjectTagging, DeleteObjectTagging, GetObjectAttributes)
-
-See git history for implementation details.

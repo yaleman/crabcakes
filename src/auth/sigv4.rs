@@ -15,6 +15,7 @@ use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
     SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
+use tokio::sync::RwLock;
 use tower::BoxError;
 use tracing::{debug, trace};
 
@@ -41,7 +42,7 @@ pub struct VerifiedRequest {
 /// Verify AWS Signature V4 for a request
 pub async fn verify_sigv4(
     req: http::Request<Vec<u8>>,
-    credentials_store: Arc<CredentialStore>,
+    credentials_store: Arc<RwLock<CredentialStore>>,
     db: Arc<DBService>,
     region: &str,
 ) -> Result<VerifiedRequest, CrabCakesError> {
@@ -67,7 +68,7 @@ pub async fn verify_sigv4(
 
                 // Try to get the credential from the permanent store first
                 let secret_access_key = if let Some(secret) =
-                    cred_store.get_credential(&access_key).await
+                    cred_store.read().await.get_credential(&access_key).await
                 {
                     debug!(access_key = %access_key, "Found credential in permanent store");
                     secret
@@ -483,7 +484,7 @@ fn compute_string_to_sign(
 /// Verify streaming signature for AWS SigV4
 pub async fn verify_streaming_sigv4(
     parts: http::request::Parts,
-    credentials_store: Arc<CredentialStore>,
+    credentials_store: Arc<RwLock<CredentialStore>>,
     region: &str,
 ) -> Result<VerifiedRequest, CrabCakesError> {
     // Get Authorization header
@@ -546,6 +547,8 @@ pub async fn verify_streaming_sigv4(
 
     // Get secret key from credential store
     let secret_access_key = credentials_store
+        .read()
+        .await
         .get_credential(&access_key_id)
         .await
         .ok_or(CrabCakesError::InvalidCredential)?;
@@ -673,7 +676,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_required() {
-        let cred_store = Arc::new(CredentialStore::new_empty());
+        let cred_store = Arc::new(RwLock::new(CredentialStore::new_empty()));
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
@@ -700,7 +703,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_not_required() {
-        let cred_store = Arc::new(CredentialStore::new_empty());
+        let cred_store = Arc::new(RwLock::new(CredentialStore::new_empty()));
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
@@ -727,7 +730,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_with_malformed_auth_header() {
-        let cred_store = Arc::new(CredentialStore::new_empty());
+        let cred_store = Arc::new(RwLock::new(CredentialStore::new_empty()));
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 

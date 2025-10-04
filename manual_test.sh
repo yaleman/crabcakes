@@ -554,8 +554,8 @@ if [ "$ORIGINAL_MD5" = "$DOWNLOADED_MD5" ]; then
     echo "Multipart upload successful - checksums match"
 else
     echo "Multipart upload failed - checksum mismatch"
-    echo "Original: $ORIGINAL_MD5 size: $(ls -l "$MULTIPART_FILE" | awk '{print $5}')"
-    echo "Downloaded: $DOWNLOADED_MD5 size: $(ls -l "$DOWNLOADED_FILE" | awk '{print $5}')"
+    echo "Original: $ORIGINAL_MD5 size: $(find "$(pwd)" -name "$MULTIPART_FILE"  -exec ls -l "{}" \; | awk '{print $5}')"
+    echo "Downloaded: $DOWNLOADED_MD5 size: $(find "$(pwd)" -name "$DOWNLOADED_FILE"  -exec ls -l "{}" \; | awk '{print $5}')"
     exit 1
 fi
 

@@ -136,6 +136,7 @@ impl ListBucketsResponse {
         }
     }
 
+    /// Serialize to XML string
     pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
