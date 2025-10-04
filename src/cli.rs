@@ -43,9 +43,17 @@ pub struct Cli {
     #[clap(long, default_value = "false", env = "CRABCAKES_DISABLE_API")]
     pub disable_api: bool,
 
-    #[clap(long, env = "CRABCAKES_OIDC_CLIENT_ID")]
+    #[clap(
+        long,
+        env = "CRABCAKES_OIDC_CLIENT_ID",
+        help = "OIDC client ID for OAuth2 authentication"
+    )]
     pub oidc_client_id: Option<String>,
 
-    #[clap(long, env = "CRABCAKES_OIDC_DISCOVERY_URL")]
+    #[clap(
+        long,
+        env = "CRABCAKES_OIDC_DISCOVERY_URL",
+        help = "OIDC issuer URL (e.g., https://accounts.google.com). The .well-known/openid-configuration path is automatically appended during discovery."
+    )]
     pub oidc_discovery_url: Option<String>,
 }
