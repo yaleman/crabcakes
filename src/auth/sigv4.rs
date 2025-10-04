@@ -64,10 +64,11 @@ pub async fn verify_sigv4(
                 // Get the credential from the store
                 let secret_access_key = cred_store
                     .get_credential(&access_key)
+                    .await
                     .ok_or(CrabCakesError::InvalidCredential)?;
 
                 // Convert secret key to KSecretKey
-                let secret_key = KSecretKey::from_str(secret_access_key).map_err(|err| {
+                let secret_key = KSecretKey::from_str(&secret_access_key).map_err(|err| {
                     debug!(
                         access_key_id = access_key,
                         "Failed to parse secret key: {}", err
@@ -497,10 +498,11 @@ pub async fn verify_streaming_sigv4(
     // Get secret key from credential store
     let secret_access_key = credentials_store
         .get_credential(&access_key_id)
+        .await
         .ok_or(CrabCakesError::InvalidCredential)?;
 
     // Derive signing key
-    let secret_key = KSecretKey::from_str(secret_access_key)
+    let secret_key = KSecretKey::from_str(&secret_access_key)
         .map_err(|e| CrabCakesError::Sigv4Verification(format!("Invalid secret key: {}", e)))?;
 
     let signing_key = secret_key.to_ksigning(timestamp.date_naive(), region, "s3");
