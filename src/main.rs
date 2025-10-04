@@ -25,7 +25,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "crabcakes=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "crabcakes=info,tower_http=info,h2=info,sqlx=warn".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
