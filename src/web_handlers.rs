@@ -5,6 +5,7 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use askama::Template;
 use form_urlencoded;
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -17,6 +18,17 @@ use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::policy::PolicyStore;
+
+/// Admin UI template
+#[derive(Template)]
+#[template(path = "admin.html")]
+struct AdminTemplate {
+    user_email: String,
+    user_id: String,
+    access_key_id: String,
+    secret_key_preview: String,
+    expires_at: String,
+}
 
 /// Web handler for admin UI and API endpoints
 pub struct WebHandler {
@@ -60,6 +72,9 @@ impl WebHandler {
             }
             ("POST", "/logout") => self.handle_logout(session.clone()).await,
             ("GET", "/api/session") => self.handle_get_session(session.clone()).await,
+            ("GET", path) if path.starts_with("/admin") => {
+                self.handle_admin_ui(session.clone()).await
+            }
             _ => self.not_found().await,
         };
 
@@ -189,6 +204,75 @@ impl WebHandler {
             .status(StatusCode::FOUND)
             .header("Location", "/login")
             .body(Full::new(Bytes::new()))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/* - Serve admin UI
+    async fn handle_admin_ui(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check if user is authenticated
+        let user_email: Option<String> = session.get("user_email").await.map_err(|e| {
+            CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
+        })?;
+
+        if user_email.is_none() {
+            // Not authenticated - redirect to login
+            return Response::builder()
+                .status(StatusCode::FOUND)
+                .header("Location", "/login")
+                .body(Full::new(Bytes::new()))
+                .map_err(CrabCakesError::from);
+        }
+
+        let user_email = user_email
+            .ok_or_else(|| CrabCakesError::other(&"User email not found in session".to_string()))?;
+
+        let user_id: String = session
+            .get("user_id")
+            .await
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
+            })?
+            .ok_or_else(|| CrabCakesError::other(&"User ID not found in session".to_string()))?;
+
+        let access_key_id: String = session
+            .get("access_key_id")
+            .await
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to get access_key_id from session: {}", e))
+            })?
+            .ok_or_else(|| {
+                CrabCakesError::other(&"Access key ID not found in session".to_string())
+            })?;
+
+        // Get credentials to show expiry
+        let creds = self
+            .db
+            .get_temporary_credentials(&access_key_id)
+            .await?
+            .ok_or_else(|| {
+                CrabCakesError::other(&"Credentials not found or expired".to_string())
+            })?;
+
+        // Render template
+        let template = AdminTemplate {
+            user_email,
+            user_id,
+            access_key_id: creds.access_key_id,
+            secret_key_preview: creds.secret_access_key.chars().take(8).collect(),
+            expires_at: creds.expires_at.to_string(),
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from(html)))
             .map_err(CrabCakesError::from)
     }
 
