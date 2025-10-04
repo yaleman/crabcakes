@@ -8,6 +8,10 @@ check:
     cargo fmt
     pnpm run lint
 
+# build JavaScript bundles
+build-js:
+    pnpm run build
+
 # lint JavaScript and CSS files
 lint-web:
     pnpm run lint

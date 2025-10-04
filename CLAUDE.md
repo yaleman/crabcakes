@@ -404,6 +404,21 @@ The project includes:
 - Policy evaluation tests in `src/tests/policy_tests.rs`
 - Manual test script using AWS CLI
 
+### Building JavaScript
+
+The project bundles AWS SDK v3 for local hosting (no CDN dependencies):
+
+```bash
+pnpm run build                          # Build JavaScript bundles (AWS SDK)
+just build-js                           # Same as above
+```
+
+**Build process:**
+- Source: `static/js/bucket-operations-src.js` (imports from `@aws-sdk/client-s3`)
+- Output: `static/js/bucket-operations.js` (bundled, minified, ~217KB)
+- Tool: esbuild (configured in `build-aws-sdk.js`)
+- The bundled file is git-ignored and must be built before deployment
+
 ### Code Quality
 
 ```bash
@@ -418,8 +433,10 @@ just lint-web                           # Lint JavaScript and CSS only
 
 The project uses:
 - **ESLint** for JavaScript linting (configured in `.eslintrc.json`)
+  - Bundled files (`bucket-operations.js`) are excluded from linting
 - **Stylelint** for CSS linting (configured in `.stylelintrc.json`)
 - **pnpm** for Node.js package management (never use npm)
+- **esbuild** for bundling JavaScript with dependencies
 - Third-party CSS files like `prism.css` are excluded from linting
 
 ## Dependencies

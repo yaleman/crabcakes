@@ -2,14 +2,20 @@
   "name": "crabcakes",
   "version": "1.0.0",
   "description": "S3-compatible server written in Rust",
+  "type": "module",
   "scripts": {
-    "lint:js": "eslint 'static/js/**/*.js'",
+    "build": "node build-aws-sdk.js",
+    "lint:js": "eslint 'static/js/**/*.js' --ignore-pattern 'static/js/bucket-operations.js'",
     "lint:css": "stylelint 'static/css/**/*.css'",
     "lint": "pnpm run lint:js && pnpm run lint:css"
   },
   "devDependencies": {
+    "esbuild": "^0.25.10",
     "eslint": "^8.57.0",
     "stylelint": "^16.2.1",
     "stylelint-config-standard": "^36.0.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.901.0"
   }
 }

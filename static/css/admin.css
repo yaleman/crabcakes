@@ -345,3 +345,7 @@ table td button {
 table td button:last-child {
     margin-right: 0;
 }
+
+th .select-column {
+    width: 1.0em;
+}
