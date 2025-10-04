@@ -1,0 +1,15 @@
+{
+  "name": "crabcakes",
+  "version": "1.0.0",
+  "description": "S3-compatible server written in Rust",
+  "scripts": {
+    "lint:js": "eslint 'static/js/**/*.js'",
+    "lint:css": "stylelint 'static/css/**/*.css'",
+    "lint": "pnpm run lint:js && pnpm run lint:css"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "stylelint": "^16.2.1",
+    "stylelint-config-standard": "^36.0.0"
+  }
+}

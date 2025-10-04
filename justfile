@@ -6,6 +6,19 @@ check:
     cargo clippy --all-targets --quiet
     cargo test --quiet
     cargo fmt
+    pnpm run lint
+
+# lint JavaScript and CSS files
+lint-web:
+    pnpm run lint
+
+# lint JavaScript only
+lint-js:
+    pnpm run lint:js
+
+# lint CSS only
+lint-css:
+    pnpm run lint:css
 
 # run coverage checks
 coverage:

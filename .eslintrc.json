@@ -1,0 +1,20 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "script"
+  },
+  "rules": {
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^(authenticatedFetch|getCsrfToken)$" }],
+    "no-undef": "error",
+    "no-redeclare": ["error", { "builtinGlobals": false }]
+  },
+  "globals": {
+    "authenticatedFetch": "writable",
+    "getCsrfToken": "writable"
+  }
+}

@@ -8,3 +8,7 @@ tarpaulin-report.html
 # Test artifacts
 test_config/*.sqlite3
 .DS_Store
+
+# Node.js
+node_modules/
+pnpm-lock.yaml

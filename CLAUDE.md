@@ -407,10 +407,20 @@ The project includes:
 ### Code Quality
 
 ```bash
-cargo clippy --all-targets --quiet      # Lint the code (must pass with no warnings)
-cargo fmt                               # Format the code
-just check                              # Run comprehensive checks
+cargo clippy --all-targets --quiet      # Lint Rust code (must pass with no warnings)
+cargo fmt                               # Format Rust code
+pnpm run lint                           # Lint JavaScript and CSS
+pnpm run lint:js                        # Lint JavaScript only
+pnpm run lint:css                       # Lint CSS only
+just check                              # Run comprehensive checks (Rust + JS/CSS)
+just lint-web                           # Lint JavaScript and CSS only
 ```
+
+The project uses:
+- **ESLint** for JavaScript linting (configured in `.eslintrc.json`)
+- **Stylelint** for CSS linting (configured in `.stylelintrc.json`)
+- **pnpm** for Node.js package management (never use npm)
+- Third-party CSS files like `prism.css` are excluded from linting
 
 ## Dependencies
 
@@ -486,3 +496,4 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - Status badge: Green (#28a745) when authenticated
 - Sign out button: Red (#dc3545) background with hover effects
 - Maintain cohesive purple vibe throughout all UI elements
+- never use npm, use pnpm instead
