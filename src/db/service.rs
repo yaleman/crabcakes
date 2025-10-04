@@ -4,7 +4,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use std::sync::Arc;
 use tracing::debug;
 
-use super::entities::object_tags;
+use super::entities::{object_tags, oauth_pkce_state, temporary_credentials};
 use crate::error::CrabCakesError;
 
 const MAX_TAGS: usize = 10;
@@ -111,6 +111,155 @@ impl DBService {
             "Tags deleted"
         );
         Ok(())
+    }
+
+    // ===== OAuth PKCE State Operations =====
+
+    pub async fn store_pkce_state(
+        &self,
+        state: &str,
+        code_verifier: &str,
+        nonce: &str,
+        pkce_challenge: &str,
+        redirect_uri: &str,
+        expires_at: chrono::NaiveDateTime,
+    ) -> Result<(), CrabCakesError> {
+        let now = chrono::Utc::now().naive_utc();
+        let pkce_state = oauth_pkce_state::ActiveModel {
+            state: Set(state.to_string()),
+            code_verifier: Set(code_verifier.to_string()),
+            nonce: Set(nonce.to_string()),
+            pkce_challenge: Set(pkce_challenge.to_string()),
+            redirect_uri: Set(redirect_uri.to_string()),
+            expires_at: Set(expires_at),
+            created_at: Set(now),
+        };
+        pkce_state.insert(&*self.db).await?;
+        debug!(state = %state, "PKCE state stored successfully");
+        Ok(())
+    }
+
+    pub async fn get_pkce_state(
+        &self,
+        state: &str,
+    ) -> Result<Option<oauth_pkce_state::Model>, CrabCakesError> {
+        let pkce_state = oauth_pkce_state::Entity::find_by_id(state)
+            .one(&*self.db)
+            .await?;
+        Ok(pkce_state)
+    }
+
+    pub async fn delete_pkce_state(&self, state: &str) -> Result<(), CrabCakesError> {
+        let result = oauth_pkce_state::Entity::delete_by_id(state)
+            .exec(&*self.db)
+            .await?;
+        debug!(
+            state = %state,
+            rows_deleted = result.rows_affected,
+            "PKCE state deleted"
+        );
+        Ok(())
+    }
+
+    pub async fn cleanup_expired_pkce_states(&self) -> Result<u64, CrabCakesError> {
+        let now = chrono::Utc::now().naive_utc();
+        let result = oauth_pkce_state::Entity::delete_many()
+            .filter(oauth_pkce_state::Column::ExpiresAt.lt(now))
+            .exec(&*self.db)
+            .await?;
+        debug!(
+            rows_deleted = result.rows_affected,
+            "Expired PKCE states cleaned up"
+        );
+        Ok(result.rows_affected)
+    }
+
+    // ===== Temporary Credentials Operations =====
+
+    pub async fn store_temporary_credentials(
+        &self,
+        access_key_id: &str,
+        secret_access_key: &str,
+        session_id: &str,
+        user_email: &str,
+        user_id: &str,
+        expires_at: chrono::NaiveDateTime,
+    ) -> Result<(), CrabCakesError> {
+        let now = chrono::Utc::now().naive_utc();
+        let creds = temporary_credentials::ActiveModel {
+            access_key_id: Set(access_key_id.to_string()),
+            secret_access_key: Set(secret_access_key.to_string()),
+            session_id: Set(session_id.to_string()),
+            user_email: Set(user_email.to_string()),
+            user_id: Set(user_id.to_string()),
+            expires_at: Set(expires_at),
+            created_at: Set(now),
+        };
+        creds.insert(&*self.db).await?;
+        debug!(access_key_id = %access_key_id, "Temporary credentials stored successfully");
+        Ok(())
+    }
+
+    pub async fn get_temporary_credentials(
+        &self,
+        access_key_id: &str,
+    ) -> Result<Option<temporary_credentials::Model>, CrabCakesError> {
+        let creds = temporary_credentials::Entity::find_by_id(access_key_id)
+            .one(&*self.db)
+            .await?;
+        Ok(creds)
+    }
+
+    pub async fn get_credentials_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<temporary_credentials::Model>, CrabCakesError> {
+        let creds = temporary_credentials::Entity::find()
+            .filter(temporary_credentials::Column::SessionId.eq(session_id))
+            .all(&*self.db)
+            .await?;
+        Ok(creds)
+    }
+
+    pub async fn delete_temporary_credentials(
+        &self,
+        access_key_id: &str,
+    ) -> Result<(), CrabCakesError> {
+        let result = temporary_credentials::Entity::delete_by_id(access_key_id)
+            .exec(&*self.db)
+            .await?;
+        debug!(
+            access_key_id = %access_key_id,
+            rows_deleted = result.rows_affected,
+            "Temporary credentials deleted"
+        );
+        Ok(())
+    }
+
+    pub async fn delete_credentials_by_session(&self, session_id: &str) -> Result<(), CrabCakesError> {
+        let result = temporary_credentials::Entity::delete_many()
+            .filter(temporary_credentials::Column::SessionId.eq(session_id))
+            .exec(&*self.db)
+            .await?;
+        debug!(
+            session_id = %session_id,
+            rows_deleted = result.rows_affected,
+            "Session credentials deleted"
+        );
+        Ok(())
+    }
+
+    pub async fn cleanup_expired_credentials(&self) -> Result<u64, CrabCakesError> {
+        let now = chrono::Utc::now().naive_utc();
+        let result = temporary_credentials::Entity::delete_many()
+            .filter(temporary_credentials::Column::ExpiresAt.lt(now))
+            .exec(&*self.db)
+            .await?;
+        debug!(
+            rows_deleted = result.rows_affected,
+            "Expired credentials cleaned up"
+        );
+        Ok(result.rows_affected)
     }
 
     // ===== Future: Object Metadata Operations =====

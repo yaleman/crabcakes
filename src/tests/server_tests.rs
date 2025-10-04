@@ -97,7 +97,7 @@ async fn create_s3_client(port: u16) -> Client {
         .await;
 
     let s3_config = aws_sdk_s3::config::Builder::from(&config)
-        .endpoint_url(format!("http://127.0.0.1:{}", port))
+        .endpoint_url(format!("http://localhost:{}", port))
         .force_path_style(true)
         .build();
 

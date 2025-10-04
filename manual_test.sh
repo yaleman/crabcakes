@@ -3,7 +3,7 @@
 # set -e
 
 SERVER_PORT=18090
-SERVER_ADDRESS="${CRABCAKES_HOSTNAME:-127.0.0.1}:$SERVER_PORT"
+SERVER_ADDRESS="${CRABCAKES_HOSTNAME:-localhost}:$SERVER_PORT"
 
 if [ -n "${CRABCAKES_TLS_CERT}" ]; then
     echo "Running tests with TLS enabled"

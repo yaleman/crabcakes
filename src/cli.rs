@@ -16,7 +16,7 @@ pub struct Cli {
     pub host: String,
     #[clap(
         long,
-        default_value = "127.0.0.1",
+        default_value = "localhost",
         env = "CRABCAKES_HOSTNAME",
         help = "Hostname for TLS certificate verification"
     )]
@@ -40,8 +40,8 @@ pub struct Cli {
     #[clap(long, env = "CRABCAKES_TLS_KEY")]
     pub tls_key: Option<PathBuf>,
 
-    #[clap(long, default_value = "false", env = "CRABCAKES_ENABLE_API")]
-    pub enable_api: bool,
+    #[clap(long, default_value = "false", env = "CRABCAKES_DISABLE_API")]
+    pub disable_api: bool,
 
     #[clap(long, env = "CRABCAKES_OIDC_CLIENT_ID")]
     pub oidc_client_id: Option<String>,

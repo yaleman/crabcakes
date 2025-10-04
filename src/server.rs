@@ -42,7 +42,7 @@ pub struct Server {
     tls_cert: Option<PathBuf>,
     tls_key: Option<PathBuf>,
     #[allow(dead_code)] // Will be used when web UI is implemented
-    enable_api: bool,
+    disable_api: bool,
     #[allow(dead_code)] // Will be used when OIDC is implemented
     oidc_client_id: Option<String>,
     #[allow(dead_code)] // Will be used when OIDC is implemented
@@ -61,7 +61,7 @@ impl Server {
             region: cli.region,
             tls_cert: cli.tls_cert,
             tls_key: cli.tls_key,
-            enable_api: cli.enable_api,
+            disable_api: cli.disable_api,
             oidc_client_id: cli.oidc_client_id,
             oidc_discovery_url: cli.oidc_discovery_url,
         }
@@ -94,7 +94,7 @@ impl Server {
                 region: "crabcakes".to_string(), // Use default region for tests
                 tls_cert: None,           // No TLS cert in test mode
                 tls_key: None,            // No TLS key in test mode
-                enable_api: false,        // No API in test mode
+                disable_api: true,        // Disable API in test mode
                 oidc_client_id: None,     // No OIDC in test mode
                 oidc_discovery_url: None, // No OIDC in test mode
             });
@@ -107,7 +107,10 @@ impl Server {
     }
 
     pub async fn run(self, use_in_memory_db: bool) -> Result<(), CrabCakesError> {
-        let addr: SocketAddr = format!("{}:{}", self.host, self.port).parse()?;
+        #[cfg(debug_assertions)]
+        let addr = format!("{}:{}", self.host, self.port);
+        eprintln!("Starting server on {addr}");
+        let addr: SocketAddr = addr.parse()?;
 
         // Create filesystem service
         let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone()));

@@ -14,7 +14,7 @@ A lightweight S3-compatible server that serves files from your filesystem.
 ## Quick Start
 
 ```bash
-# Start server (default: http://127.0.0.1:8090, serving ./data)
+# Start server (default: http://localhost:8090, serving ./data)
 cargo run --quiet
 
 # Custom configuration
@@ -28,22 +28,22 @@ RUST_LOG=debug cargo run --quiet
 
 ```bash
 # List buckets
-aws s3 ls --endpoint-url http://127.0.0.1:8090
+aws s3 ls --endpoint-url http://localhost:8090
 
 # Create bucket
-aws s3 mb s3://mybucket --endpoint-url http://127.0.0.1:8090
+aws s3 mb s3://mybucket --endpoint-url http://localhost:8090
 
 # Upload object
-aws s3 cp file.txt s3://mybucket/ --endpoint-url http://127.0.0.1:8090
+aws s3 cp file.txt s3://mybucket/ --endpoint-url http://localhost:8090
 
 # Download object
-aws s3 cp s3://mybucket/file.txt . --endpoint-url http://127.0.0.1:8090
+aws s3 cp s3://mybucket/file.txt . --endpoint-url http://localhost:8090
 
 # Delete multiple objects
-aws s3api delete-objects --bucket mybucket --delete '{"Objects":[{"Key":"file1.txt"},{"Key":"file2.txt"}]}' --endpoint-url http://127.0.0.1:8090
+aws s3api delete-objects --bucket mybucket --delete '{"Objects":[{"Key":"file1.txt"},{"Key":"file2.txt"}]}' --endpoint-url http://localhost:8090
 
 # Copy object (server-side)
-aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/source.txt --endpoint-url http://127.0.0.1:8090
+aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/source.txt --endpoint-url http://localhost:8090
 ```
 
 ## Testing

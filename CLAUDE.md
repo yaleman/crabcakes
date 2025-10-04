@@ -290,7 +290,7 @@ See `test_config/policies/` directory for examples:
 
 ```bash
 cargo build --quiet                                     # Build the project
-cargo run --quiet                                       # Run with defaults (127.0.0.1:8090, ./data, ./config, require_signature=true)
+cargo run --quiet                                       # Run with defaults 127.0.0.1:8090, ./data, ./config, require_signature=true)
 cargo run --quiet -- --port 3000                        # Run on custom port
 cargo run --quiet -- --host 0.0.0.0 --port 8080         # Run on all interfaces
 cargo run --quiet -- --root-dir /path/to/data           # Serve from custom directory

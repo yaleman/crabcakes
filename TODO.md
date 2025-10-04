@@ -9,20 +9,21 @@
 - [x] Return 400 Bad Request with InvalidBucketName error
 
 ### Phase 2: API Configuration ✅ COMPLETE
-- [x] Add CRABCAKES_ENABLE_API flag (default: false) to enable admin UI
+- [x] Add CRABCAKES_DISABLE_API flag (default: false) to allow disabling admin UI
 - [x] Add CRABCAKES_OIDC_CLIENT_ID environment variable
 - [x] Add CRABCAKES_OIDC_DISCOVERY_URL environment variable
 - [x] Update Server struct to store API and OIDC configuration
 
-### Phase 3: Database Schema for Sessions & Temp Credentials
-- [ ] Migration for sessions table (session_id, user_email, user_id, expires_at, created_at)
-- [ ] Migration for oauth_pkce_state table (state, code_verifier, nonce, pkce_challenge, redirect_uri, expires_at)
-- [ ] Migration for temporary_credentials table (access_key_id, secret_access_key, session_id, expires_at, created_at)
-- [ ] Create SeaORM entities for new tables
-- [ ] Extend DBService with session & temp credential methods
+### Phase 3: Database Schema for Sessions & Temp Credentials ✅ COMPLETE
+- [x] Migration for oauth_pkce_state table (state, code_verifier, nonce, pkce_challenge, redirect_uri, expires_at)
+- [x] Migration for temporary_credentials table (access_key_id, secret_access_key, session_id, user_email, user_id, expires_at, created_at)
+- [x] Create SeaORM entities for new tables
+- [x] Extend DBService with PKCE state & temp credential methods
+- Note: Sessions managed by tower-sessions with SQLite store (auto-creates table)
 
 ### Phase 4: OIDC/OAuth2 with PKCE Authentication
-- [ ] Add Rust dependencies: openidconnect, cookie, rand
+- [x] Add Rust dependencies: openidconnect, rand, tower-sessions, tower-sessions-sqlx-store
+- [ ] Create src/auth/ module structure
 - [ ] Create src/auth/oauth.rs for OIDC client and PKCE flow
 - [ ] Implement GET /login - Generate PKCE challenge, redirect to OIDC provider
 - [ ] Implement GET /oauth2/callback - Exchange code for tokens, create session
@@ -44,7 +45,7 @@
 - [ ] GET /api/session - Get current session with temp credentials
 
 ### Phase 6: Routing & Request Dispatch
-- [ ] Update server.rs::run() to dispatch based on enable_api flag
+- [ ] Update server.rs::run() to dispatch based on disable_api flag
 - [ ] Route /admin/* to SPA (index.html from web/dist/)
 - [ ] Route /api/* to API handlers with session auth
 - [ ] Route /login, /logout, /oauth2/* to OAuth handlers
@@ -77,11 +78,11 @@
 - [ ] Update CLAUDE.md with frontend dev instructions
 
 ## Environment Variables (Admin UI)
-- `CRABCAKES_ENABLE_API` - Enable admin UI and API (default: false)
+- `CRABCAKES_DISABLE_API` - Disable admin UI and API (default: false, API enabled by default)
 - `CRABCAKES_OIDC_CLIENT_ID` - OAuth client ID (required if API enabled)
 - `CRABCAKES_OIDC_DISCOVERY_URL` - OIDC discovery URL (required if API enabled)
 
-## URL Structure (when CRABCAKES_ENABLE_API=true)
+## URL Structure (when API is enabled, i.e., CRABCAKES_DISABLE_API=false)
 - `/admin/*` - Admin UI (SPA)
 - `/api/*` - API endpoints (JSON)
 - `/login` - OIDC login
@@ -115,7 +116,8 @@
 ## Future Enhancements
 
 ### Server Infrastructure
-- [ ] Investigate using shellflip crate for graceful server restarts
+- [ ] Investigate using shellflip crate for graceful server restarts - example implementation here <https://github.com/cloudflare/shellflip/blob/main/examples/restarter.rs>
+- [ ] Enable dual-stack (IPv4/IPv6) listening support
 
 ---
 
