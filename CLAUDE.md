@@ -450,3 +450,14 @@ The server accepts configuration via:
 - Integration tests must be added to `manual_test.sh` for signed request validation
 - all tests that might involve the database should be against an in-memory database where possible, or if it's testing disk functionality then the config dir should be a temporary directory for that test
 - Ensure CLAUDE.md is kept up to date with the current design
+
+## UI Design
+
+The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
+- Background: Purple gradient (135deg)
+- Primary elements: Purple gradient accents with transparency
+- Info section: Light purple gradient background with purple borders
+- Labels: Purple color (#5a67d8)
+- Status badge: Green (#28a745) when authenticated
+- Sign out button: Red (#dc3545) with hover effects
+- Maintain cohesive purple vibe throughout all UI elements

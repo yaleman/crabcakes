@@ -2,7 +2,7 @@
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, error};
 
 use super::entities::{oauth_pkce_state, object_tags, temporary_credentials};
 use crate::error::CrabCakesError;
@@ -243,7 +243,7 @@ impl DBService {
         let result = temporary_credentials::Entity::delete_many()
             .filter(temporary_credentials::Column::SessionId.eq(session_id))
             .exec(&*self.db)
-            .await?;
+            .await.inspect_err(|err| error!(error=%err, session_id=%session_id, "Failed to delete temporary creds from database!"))?;
         debug!(
             session_id = %session_id,
             rows_deleted = result.rows_affected,

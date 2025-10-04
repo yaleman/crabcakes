@@ -66,15 +66,14 @@ impl WebHandler {
         let path = req.uri().path();
 
         let result = match (method.as_str(), path) {
+            ("GET", "/") => self.handle_root().await,
             ("GET", "/login") => self.handle_login().await,
             ("GET", path) if path.starts_with("/oauth2/callback") => {
                 self.handle_oauth_callback(req, session.clone()).await
             }
             ("POST", "/logout") => self.handle_logout(session.clone()).await,
             ("GET", "/api/session") => self.handle_get_session(session.clone()).await,
-            ("GET", path) if path.starts_with("/admin") => {
-                self.handle_admin_ui(session.clone()).await
-            }
+            ("GET", "/admin") | ("GET", "/admin/") => self.handle_admin_ui(session.clone()).await,
             _ => self.not_found().await,
         };
 
@@ -82,6 +81,15 @@ impl WebHandler {
             Ok(resp) => Ok(resp),
             Err(e) => Ok(self.error_response(&e)),
         }
+    }
+
+    /// GET / - Redirect to admin UI
+    async fn handle_root(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header("Location", "/admin/")
+            .body(Full::new(Bytes::new()))
+            .map_err(CrabCakesError::from)
     }
 
     /// GET /login - Redirect to OIDC provider
@@ -152,13 +160,13 @@ impl WebHandler {
                 CrabCakesError::other(&format!("Failed to store access_key_id in session: {}", e))
             })?;
 
-        // Cycle the session to ensure it gets an ID
+        // Save the session to persist changes and generate session ID
         session
-            .cycle_id()
+            .save()
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to cycle session ID: {}", e)))?;
+            .map_err(|e| CrabCakesError::other(&format!("Failed to save session: {}", e)))?;
 
-        // Get session ID
+        // Get session ID - should now be available after save()
         let session_id = session
             .id()
             .map(|id| id.to_string())
@@ -218,12 +226,12 @@ impl WebHandler {
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        // Check if user is authenticated
-        let user_email: Option<String> = session.get("user_email").await.map_err(|e| {
-            CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
+        // Check if user is authenticated by checking for user_id (subject from OIDC claim)
+        let user_id: Option<String> = session.get("user_id").await.map_err(|e| {
+            CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
         })?;
 
-        if user_email.is_none() {
+        if user_id.is_none() {
             // Not authenticated - redirect to login
             return Response::builder()
                 .status(StatusCode::FOUND)
@@ -232,16 +240,16 @@ impl WebHandler {
                 .map_err(CrabCakesError::from);
         }
 
-        let user_email = user_email
-            .ok_or_else(|| CrabCakesError::other(&"User email not found in session".to_string()))?;
+        let user_id = user_id
+            .ok_or_else(|| CrabCakesError::other(&"User ID not found in session".to_string()))?;
 
-        let user_id: String = session
-            .get("user_id")
+        let user_email: String = session
+            .get("user_email")
             .await
             .map_err(|e| {
-                CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
+                CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
             })?
-            .ok_or_else(|| CrabCakesError::other(&"User ID not found in session".to_string()))?;
+            .ok_or_else(|| CrabCakesError::other(&"User email not found in session".to_string()))?;
 
         let access_key_id: String = session
             .get("access_key_id")
@@ -287,20 +295,20 @@ impl WebHandler {
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        // Get user info from session
-        let user_email: String = session
-            .get("user_email")
-            .await
-            .map_err(|e| {
-                CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
-            })?
-            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
-
+        // Check authentication using user_id (subject from OIDC claim)
         let user_id: String = session
             .get("user_id")
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
+            })?
+            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
+
+        let user_email: String = session
+            .get("user_email")
+            .await
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
             })?
             .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
 
@@ -354,10 +362,73 @@ impl WebHandler {
 
     /// Error response
     fn error_response(&self, error: &CrabCakesError) -> Response<Full<Bytes>> {
-        let error_body = Full::new(Bytes::from(format!("Error: {}", error)));
-        let mut response = Response::new(error_body);
-        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-        response
+        let error_html = format!(
+            r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Error</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }}
+        .error-container {{
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 600px;
+            text-align: center;
+        }}
+        h1 {{
+            color: #e53e3e;
+            margin: 0 0 20px 0;
+        }}
+        p {{
+            color: #4a5568;
+            line-height: 1.6;
+            margin: 0 0 30px 0;
+        }}
+        a {{
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: transform 0.2s;
+        }}
+        a:hover {{
+            transform: translateY(-2px);
+        }}
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <h1>Error</h1>
+        <p>{}</p>
+        <a href="/login">Restart Authentication</a>
+    </div>
+</body>
+</html>"#,
+            error
+        );
+        Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from(error_html)))
+            .unwrap_or_else(|_| {
+                let mut r = Response::new(Full::new(Bytes::from(format!("Error: {}", error))));
+                *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                r
+            })
     }
 }
 

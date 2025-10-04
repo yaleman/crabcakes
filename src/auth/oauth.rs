@@ -190,10 +190,10 @@ impl OAuthClient {
                         let body = response.bytes().await?.to_vec();
                         debug!("Token response body length: {} bytes", body.len());
 
-                        if !status.is_success() {
-                            if let Ok(body_str) = String::from_utf8(body.clone()) {
-                                error!("Token endpoint error response: {}", body_str);
-                            }
+                        if !status.is_success()
+                            && let Ok(body_str) = String::from_utf8(body.clone())
+                        {
+                            error!("Token endpoint error response: {}", body_str);
                         }
 
                         // This should never fail as we're providing valid status and body

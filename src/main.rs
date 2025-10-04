@@ -22,11 +22,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing subscriber
+    let log_level = std::env::var("RUST_LOG").unwrap_or("info".to_string());
+    let log_level_sqlx = std::env::var("RUST_LOG_SQLX").unwrap_or("warn".to_string());
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "crabcakes=info,tower_http=info,h2=info,sqlx=warn".into()),
-        )
+        .with(tracing_subscriber::EnvFilter::new(format!(
+            "crabcakes={log_level},tower_http=info,h2=warn,sqlx={log_level_sqlx}",
+        )))
         .with(tracing_subscriber::fmt::layer())
         .init();
 

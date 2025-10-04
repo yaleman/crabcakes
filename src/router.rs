@@ -25,11 +25,12 @@ pub async fn route_request(
     let path = req.uri().path();
 
     // Check if this is a web UI path
-    let is_web_path = path.starts_with("/login")
+    let is_web_path = path == "/"
+        || path.starts_with("/login")
         || path.starts_with("/logout")
         || path.starts_with("/oauth2/")
         || path.starts_with("/api/")
-        || path.starts_with("/admin/");
+        || path.starts_with("/admin");
 
     // Only route to web handler if it's configured AND this is a web path
     if is_web_path && web_service.is_some() {
