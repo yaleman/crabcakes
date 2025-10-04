@@ -17,12 +17,14 @@ use crate::auth::OAuthClient;
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
+use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 
-/// Admin UI template
+/// Profile page template
 #[derive(Template)]
-#[template(path = "admin.html")]
-struct AdminTemplate {
+#[template(path = "profile.html")]
+struct ProfileTemplate {
+    page: String,
     user_email: String,
     user_id: String,
     access_key_id: String,
@@ -30,15 +32,70 @@ struct AdminTemplate {
     expires_at: String,
 }
 
+/// Policies list template
+#[derive(Template)]
+#[template(path = "policies.html")]
+struct PoliciesTemplate {
+    page: String,
+    policies: Vec<PolicyInfo>,
+}
+
+/// Policy detail template
+#[derive(Template)]
+#[template(path = "policy_detail.html")]
+struct PolicyDetailTemplate {
+    page: String,
+    policy_name: String,
+    policy_json: String,
+}
+
+/// Credentials list template
+#[derive(Template)]
+#[template(path = "credentials.html")]
+struct CredentialsTemplate {
+    page: String,
+    credentials: Vec<String>,
+}
+
+/// Buckets list template
+#[derive(Template)]
+#[template(path = "buckets.html")]
+struct BucketsTemplate {
+    page: String,
+    buckets: Vec<String>,
+}
+
+/// Bucket detail template
+#[derive(Template)]
+#[template(path = "bucket_detail.html")]
+struct BucketDetailTemplate {
+    page: String,
+    bucket_name: String,
+    objects: Vec<ObjectInfo>,
+}
+
+/// Policy info for listing
+#[derive(Debug)]
+struct PolicyInfo {
+    name: String,
+    statement_count: usize,
+}
+
+/// Object info for bucket listing
+#[derive(Debug)]
+struct ObjectInfo {
+    key: String,
+    size_formatted: String,
+    last_modified: String,
+}
+
 /// Web handler for admin UI and API endpoints
 pub struct WebHandler {
     oauth_client: Arc<OAuthClient>,
-    #[allow(dead_code)] // Will be used for session/credential lookups
     db: Arc<DBService>,
-    #[allow(dead_code)] // Will be used for API endpoints
     credentials_store: Arc<CredentialStore>,
-    #[allow(dead_code)] // Will be used for API endpoints
     policy_store: Arc<PolicyStore>,
+    filesystem: Arc<FilesystemService>,
 }
 
 impl WebHandler {
@@ -47,12 +104,14 @@ impl WebHandler {
         db: Arc<DBService>,
         credentials_store: Arc<CredentialStore>,
         policy_store: Arc<PolicyStore>,
+        filesystem: Arc<FilesystemService>,
     ) -> Self {
         Self {
             oauth_client,
             db,
             credentials_store,
             policy_store,
+            filesystem,
         }
     }
 
@@ -73,7 +132,19 @@ impl WebHandler {
             }
             ("POST", "/logout") => self.handle_logout(session.clone()).await,
             ("GET", "/api/session") => self.handle_get_session(session.clone()).await,
-            ("GET", "/admin") | ("GET", "/admin/") => self.handle_admin_ui(session.clone()).await,
+            ("GET", "/admin") | ("GET", "/admin/") => self.handle_root().await,
+            ("GET", "/admin/profile") => self.handle_profile(session.clone()).await,
+            ("GET", "/admin/policies") => self.handle_policies(session.clone()).await,
+            ("GET", path) if path.starts_with("/admin/policies/") => {
+                let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
+                self.handle_policy_detail(session.clone(), policy_name).await
+            }
+            ("GET", "/admin/credentials") => self.handle_credentials(session.clone()).await,
+            ("GET", "/admin/buckets") => self.handle_buckets(session.clone()).await,
+            ("GET", path) if path.starts_with("/admin/buckets/") => {
+                let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
+                self.handle_bucket_detail(session.clone(), bucket_path).await
+            }
             _ => self.not_found().await,
         };
 
@@ -83,11 +154,11 @@ impl WebHandler {
         }
     }
 
-    /// GET / - Redirect to admin UI
+    /// GET / - Redirect to profile page
     async fn handle_root(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         Response::builder()
             .status(StatusCode::TEMPORARY_REDIRECT)
-            .header("Location", "/admin/")
+            .header("Location", "/admin/profile")
             .body(Full::new(Bytes::new()))
             .map_err(CrabCakesError::from)
     }
@@ -221,35 +292,43 @@ impl WebHandler {
             .map_err(CrabCakesError::from)
     }
 
-    /// GET /admin/* - Serve admin UI
-    async fn handle_admin_ui(
-        &self,
-        session: Session,
-    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        // Check if user is authenticated by checking for user_id (subject from OIDC claim)
+    /// Helper: Check if user is authenticated
+    async fn check_auth(&self, session: &Session) -> Result<(String, String), CrabCakesError> {
         let user_id: Option<String> = session.get("user_id").await.map_err(|e| {
             CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
         })?;
 
         if user_id.is_none() {
-            // Not authenticated - redirect to login
-            return Response::builder()
-                .status(StatusCode::FOUND)
-                .header("Location", "/login")
-                .body(Full::new(Bytes::new()))
-                .map_err(CrabCakesError::from);
+            return Err(CrabCakesError::other(&"Not authenticated"));
         }
 
-        let user_id = user_id
-            .ok_or_else(|| CrabCakesError::other(&"User ID not found in session".to_string()))?;
-
+        let user_id = user_id.ok_or_else(|| CrabCakesError::other(&"User ID not found"))?;
         let user_email: String = session
             .get("user_email")
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
             })?
-            .ok_or_else(|| CrabCakesError::other(&"User email not found in session".to_string()))?;
+            .ok_or_else(|| CrabCakesError::other(&"User email not found"))?;
+
+        Ok((user_id, user_email))
+    }
+
+    /// GET /admin/profile - User profile page
+    async fn handle_profile(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        let (user_id, user_email) = match self.check_auth(&session).await {
+            Ok(auth) => auth,
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
 
         let access_key_id: String = session
             .get("access_key_id")
@@ -271,12 +350,218 @@ impl WebHandler {
             })?;
 
         // Render template
-        let template = AdminTemplate {
+        let template = ProfileTemplate {
+            page: "profile".to_string(),
             user_email,
             user_id,
             access_key_id: creds.access_key_id,
             secret_key_preview: creds.secret_access_key.chars().take(8).collect(),
             expires_at: creds.expires_at.to_string(),
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from(html)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/policies - List all policies
+    async fn handle_policies(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        let policy_names = self.policy_store.get_policy_names();
+        let policies: Vec<PolicyInfo> = policy_names
+            .iter()
+            .filter_map(|name| {
+                self.policy_store.get_policy(name).map(|policy| PolicyInfo {
+                    name: name.clone(),
+                    statement_count: policy.statement.len(),
+                })
+            })
+            .collect();
+
+        let template = PoliciesTemplate {
+            page: "policies".to_string(),
+            policies,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from(html)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/policies/{name} - View policy details
+    async fn handle_policy_detail(
+        &self,
+        session: Session,
+        policy_name: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        let policy = self
+            .policy_store
+            .get_policy(policy_name)
+            .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
+
+        let policy_json = serde_json::to_string_pretty(&policy)
+            .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
+
+        let template = PolicyDetailTemplate {
+            page: "policies".to_string(),
+            policy_name: policy_name.to_string(),
+            policy_json,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from(html)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/credentials - List all credentials
+    async fn handle_credentials(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        let credentials = self.credentials_store.get_access_key_ids();
+
+        let template = CredentialsTemplate {
+            page: "credentials".to_string(),
+            credentials,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from(html)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/buckets - List all buckets
+    async fn handle_buckets(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        let buckets = self.filesystem.list_buckets().map_err(CrabCakesError::from)?;
+
+        let template = BucketsTemplate {
+            page: "buckets".to_string(),
+            buckets,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from(html)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/buckets/{bucket} - View bucket contents
+    async fn handle_bucket_detail(
+        &self,
+        session: Session,
+        bucket_path: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        // Extract bucket name from path
+        let bucket_name = bucket_path.split('/').next().unwrap_or(bucket_path);
+
+        // List objects in bucket with prefix
+        let (entries, _) = self
+            .filesystem
+            .list_directory(Some(&format!("{}/", bucket_name)), 1000, None)
+            .map_err(CrabCakesError::from)?;
+
+        let objects: Vec<ObjectInfo> = entries
+            .iter()
+            .map(|entry| ObjectInfo {
+                key: entry.key.clone(),
+                size_formatted: format_size(entry.size),
+                last_modified: entry.last_modified.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            })
+            .collect();
+
+        let template = BucketDetailTemplate {
+            page: "buckets".to_string(),
+            bucket_name: bucket_name.to_string(),
+            objects,
         };
 
         let html = template
@@ -440,4 +725,22 @@ pub struct SessionInfo {
     pub access_key_id: String,
     pub secret_access_key: String,
     pub expires_at: String,
+}
+
+/// Format file size in human-readable format
+fn format_size(size: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut size = size as f64;
+    let mut unit_idx = 0;
+
+    while size >= 1024.0 && unit_idx < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_idx += 1;
+    }
+
+    if unit_idx == 0 {
+        format!("{} {}", size as u64, UNITS[unit_idx])
+    } else {
+        format!("{:.2} {}", size, UNITS[unit_idx])
+    }
 }

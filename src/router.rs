@@ -30,7 +30,8 @@ pub async fn route_request(
         || path.starts_with("/logout")
         || path.starts_with("/oauth2/")
         || path.starts_with("/api/")
-        || path.starts_with("/admin");
+        || path.starts_with("/admin/")
+        || path == "/admin";
 
     // Only route to web handler if it's configured AND this is a web path
     if is_web_path && web_service.is_some() {

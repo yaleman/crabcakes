@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+
+{% block title %}Buckets - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<h1>S3 Buckets</h1>
+<p class="subtitle">Browse your S3-compatible storage buckets</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Bucket Name</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for bucket in buckets %}
+        <tr>
+            <td>
+                <a href="/admin/buckets/{{ bucket }}" style="color: #667eea; text-decoration: none; font-weight: 500;">
+                    📦 {{ bucket }}
+                </a>
+            </td>
+            <td>
+                <a href="/admin/buckets/{{ bucket }}" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
+                    Browse Objects
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if buckets.is_empty() %}
+<div class="info-section" style="text-align: center; padding: 40px;">
+    <p style="color: #666;">No buckets found</p>
+</div>
+{% endif %}
+{% endblock %}

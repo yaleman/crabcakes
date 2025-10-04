@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ policy_name }} - Policies - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/admin/policies">Policies</a> / {{ policy_name }}
+</div>
+
+<h1>Policy: {{ policy_name }}</h1>
+<p class="subtitle">IAM policy document</p>
+
+<div class="code-block">{{ policy_json }}</div>
+
+<div style="margin-top: 20px;">
+    <a href="/admin/policies" class="btn btn-primary">← Back to Policies</a>
+</div>
+{% endblock %}

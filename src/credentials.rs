@@ -92,6 +92,13 @@ impl CredentialStore {
         self.credentials.len()
     }
 
+    /// Get all access key IDs (NOT secret keys - for display purposes only)
+    pub fn get_access_key_ids(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.credentials.keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
     /// Create an empty credential store (for testing)
     #[cfg(test)]
     pub fn new_empty() -> Self {

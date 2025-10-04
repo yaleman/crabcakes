@@ -200,6 +200,7 @@ impl Server {
                     db_service.clone(),
                     credentials_store.clone(),
                     policy_store.clone(),
+                    filesystem.clone(),
                 ));
 
                 // Create the web service and wrap it with the session layer

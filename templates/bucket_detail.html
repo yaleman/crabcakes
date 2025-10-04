@@ -1,0 +1,45 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ bucket_name }} - Buckets - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/admin/buckets">Buckets</a> / {{ bucket_name }}
+</div>
+
+<h1>Bucket: {{ bucket_name }}</h1>
+<p class="subtitle">Objects in this bucket</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Key</th>
+            <th>Size</th>
+            <th>Last Modified</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for object in objects %}
+        <tr>
+            <td>
+                <code style="background: rgba(102, 126, 234, 0.1); padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+                    {{ object.key }}
+                </code>
+            </td>
+            <td>{{ object.size_formatted }}</td>
+            <td>{{ object.last_modified }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if objects.is_empty() %}
+<div class="info-section" style="text-align: center; padding: 40px;">
+    <p style="color: #666;">No objects in this bucket</p>
+</div>
+{% endif %}
+
+<div style="margin-top: 20px;">
+    <a href="/admin/buckets" class="btn btn-primary">← Back to Buckets</a>
+</div>
+{% endblock %}

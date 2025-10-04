@@ -200,4 +200,16 @@ impl PolicyStore {
     pub fn policies(&self) -> Vec<IAMPolicy> {
         self.policies.values().cloned().collect::<Vec<_>>()
     }
+
+    /// Get all policy names
+    pub fn get_policy_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.policies.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    /// Get a policy by name
+    pub fn get_policy(&self, name: &str) -> Option<&IAMPolicy> {
+        self.policies.get(name)
+    }
 }

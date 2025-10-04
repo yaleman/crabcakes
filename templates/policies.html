@@ -1,0 +1,41 @@
+{% extends "layout.html" %}
+
+{% block title %}Policies - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<h1>IAM Policies</h1>
+<p class="subtitle">View loaded IAM policy documents</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Policy Name</th>
+            <th>Statements</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for policy in policies %}
+        <tr>
+            <td>
+                <a href="/admin/policies/{{ policy.name }}" style="color: #667eea; text-decoration: none; font-weight: 500;">
+                    {{ policy.name }}
+                </a>
+            </td>
+            <td>{{ policy.statement_count }}</td>
+            <td>
+                <a href="/admin/policies/{{ policy.name }}" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
+                    View Details
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if policies.is_empty() %}
+<div class="info-section" style="text-align: center; padding: 40px;">
+    <p style="color: #666;">No policies loaded</p>
+</div>
+{% endif %}
+{% endblock %}
