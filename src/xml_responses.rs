@@ -210,6 +210,24 @@ impl CopyObjectResponse {
     }
 }
 
+// UploadPartCopy response structure (same fields as CopyObjectResponse but different root element)
+#[derive(Serialize)]
+#[serde(rename = "CopyPartResult")]
+pub struct CopyPartResponse {
+    #[serde(rename = "LastModified")]
+    pub last_modified: String,
+    #[serde(rename = "ETag")]
+    pub etag: String,
+}
+
+impl CopyPartResponse {
+    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+        Ok(xml)
+    }
+}
+
 // GetBucketLocation response structure
 #[derive(Serialize)]
 #[serde(rename = "LocationConstraint")]

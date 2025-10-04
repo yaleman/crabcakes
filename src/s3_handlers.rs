@@ -6,7 +6,10 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use http::header::HOST;
+use http::header::{
+    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HOST, LAST_MODIFIED, LOCATION,
+    WWW_AUTHENTICATE,
+};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
@@ -26,10 +29,11 @@ use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::xml_responses::{
     CompleteMultipartUploadRequest, CompleteMultipartUploadResponse, CopyObjectResponse,
-    DeleteError, DeleteRequest, DeleteResponse, DeletedObject, GetBucketLocationResponse,
-    GetObjectAttributesResponse, GetObjectTaggingResponse, InitiateMultipartUploadResponse,
-    ListBucketResponse, ListBucketV1Response, ListBucketsResponse, ListMultipartUploadsResponse,
-    ListPartsResponse, MultipartUploadItem, PartItem, Tag, TagSet, TaggingRequest,
+    CopyPartResponse, DeleteError, DeleteRequest, DeleteResponse, DeletedObject,
+    GetBucketLocationResponse, GetObjectAttributesResponse, GetObjectTaggingResponse,
+    InitiateMultipartUploadResponse, ListBucketResponse, ListBucketV1Response, ListBucketsResponse,
+    ListMultipartUploadsResponse, ListPartsResponse, MultipartUploadItem, PartItem, Tag, TagSet,
+    TaggingRequest,
 };
 
 pub struct S3Handler {
@@ -189,6 +193,14 @@ impl S3Handler {
         req: Request<hyper::body::Incoming>,
         remote_addr: std::net::SocketAddr,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
+        debug!(
+            method = %req.method(),
+            uri = %req.uri(),
+            remote_addr = %remote_addr,
+            has_range_header = req.headers().contains_key("range"),
+            "Incoming S3 request"
+        );
+
         // Verify signature and buffer body (or return error response)
         let (authenticated_username, mut buffered_body, parts) =
             match self.verify_and_buffer_request(req).await {
@@ -547,7 +559,7 @@ impl S3Handler {
             // GET /key or GET /bucket/key - GetObject
             (&Method::GET, false, false, key, _) if !key.is_empty() => {
                 debug!(key = %key, "Handling GetObject request");
-                self.handle_get_object(key).await
+                self.handle_get_object(key, &parts).await
             }
             // PUT /bucket - CreateBucket
             (&Method::PUT, false, true, "", _) if copy_source.is_none() => {
@@ -750,8 +762,8 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
-                            .header("Content-Length", xml.len())
+                            .header(CONTENT_TYPE, "application/xml")
+                            .header(CONTENT_LENGTH, xml.len())
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate a ListBucketV1 response")
                     }
@@ -863,8 +875,8 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
-                            .header("Content-Length", xml.len())
+                            .header(CONTENT_TYPE, "application/xml")
+                            .header(CONTENT_LENGTH, xml.len())
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate a ListBucketV1 response")
                     }
@@ -894,8 +906,8 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
-                            .header("Content-Length", xml.len())
+                            .header(CONTENT_TYPE, "application/xml")
+                            .header(CONTENT_LENGTH, xml.len())
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate a ListBuckets response")
                     }
@@ -920,10 +932,10 @@ impl S3Handler {
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
-                    .header("Content-Type", metadata.content_type)
-                    .header("Content-Length", metadata.size)
+                    .header(CONTENT_TYPE, metadata.content_type)
+                    .header(CONTENT_LENGTH, metadata.size)
                     .header(
-                        "Last-Modified",
+                        LAST_MODIFIED,
                         metadata
                             .last_modified
                             .format("%a, %d %b %Y %H:%M:%S GMT")
@@ -940,42 +952,130 @@ impl S3Handler {
         }
     }
 
-    async fn handle_get_object(&self, key: &str) -> Response<Full<Bytes>> {
-        match self.filesystem.get_file_metadata(key) {
-            Ok(metadata) => match File::open(&metadata.path).await {
-                Ok(mut file) => {
-                    let mut contents = Vec::new();
-                    match file.read_to_end(&mut contents).await {
-                        Ok(bytes_read) => {
-                            debug!(key = %key, size = bytes_read, "GetObject success");
+    async fn handle_get_object(
+        &self,
+        key: &str,
+        parts: &http::request::Parts,
+    ) -> Response<Full<Bytes>> {
+        let range_header = parts.headers.get("range").and_then(|h| h.to_str().ok());
+        self.handle_get_object_with_range(key, range_header).await
+    }
 
-                            #[allow(clippy::expect_used)]
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .header("Content-Type", metadata.content_type)
-                                .header("Content-Length", metadata.size)
+    async fn handle_get_object_with_range(
+        &self,
+        key: &str,
+        range_header: Option<&str>,
+    ) -> Response<Full<Bytes>> {
+        match self.filesystem.get_file_metadata(key) {
+            Ok(metadata) => {
+                // Parse range header if present
+                let (start, end, is_range_request) = if let Some(range_str) = range_header {
+                    // Range header format: "bytes=start-end"
+                    if let Some(bytes_range) = range_str.strip_prefix("bytes=") {
+                        let parts: Vec<&str> = bytes_range.split('-').collect();
+                        if parts.len() == 2 {
+                            let start = parts[0].parse::<u64>().unwrap_or(0);
+                            let end = if parts[1].is_empty() {
+                                metadata.size - 1
+                            } else {
+                                parts[1]
+                                    .parse::<u64>()
+                                    .unwrap_or(metadata.size - 1)
+                                    .min(metadata.size - 1)
+                            };
+                            (start, end, true)
+                        } else {
+                            (0, metadata.size - 1, false)
+                        }
+                    } else {
+                        (0, metadata.size - 1, false)
+                    }
+                } else {
+                    (0, metadata.size - 1, false)
+                };
+
+                match File::open(&metadata.path).await {
+                    Ok(mut file) => {
+                        let contents = if is_range_request {
+                            // Seek to start position
+                            use tokio::io::AsyncSeekExt;
+                            if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+                                error!(key = %key, error = %e, "Failed to seek to range start");
+                                return self.internal_error_response();
+                            }
+
+                            // Read the requested range
+                            let range_len = (end - start + 1) as usize;
+                            let mut buffer = vec![0u8; range_len];
+                            use tokio::io::AsyncReadExt;
+                            match file.read_exact(&mut buffer).await {
+                                Ok(_) => buffer,
+                                Err(e) => {
+                                    error!(key = %key, error = %e, "Failed to read range");
+                                    return self.internal_error_response();
+                                }
+                            }
+                        } else {
+                            // Read entire file
+                            let mut buffer = Vec::new();
+                            use tokio::io::AsyncReadExt;
+                            match file.read_to_end(&mut buffer).await {
+                                Ok(_) => buffer,
+                                Err(e) => {
+                                    error!(key = %key, error = %e, "Failed to read file");
+                                    return self.internal_error_response();
+                                }
+                            }
+                        };
+
+                        debug!(
+                            key = %key,
+                            is_range = is_range_request,
+                            start = start,
+                            end = end,
+                            bytes_read = contents.len(),
+                            metadata_size = metadata.size,
+                            path = %metadata.path.display(),
+                            "GetObject success"
+                        );
+
+                        let mut response = Response::builder()
+                            .header(CONTENT_TYPE, metadata.content_type)
+                            .header(
+                                "Last-Modified",
+                                metadata
+                                    .last_modified
+                                    .format("%a, %d %b %Y %H:%M:%S GMT")
+                                    .to_string(),
+                            )
+                            .header("ETag", metadata.etag)
+                            .header(ACCEPT_RANGES, "bytes");
+
+                        if is_range_request {
+                            response = response
+                                .status(StatusCode::PARTIAL_CONTENT)
+                                .header(CONTENT_LENGTH, contents.len())
                                 .header(
-                                    "Last-Modified",
-                                    metadata
-                                        .last_modified
-                                        .format("%a, %d %b %Y %H:%M:%S GMT")
-                                        .to_string(),
-                                )
-                                .header("ETag", metadata.etag)
-                                .body(Full::new(Bytes::from(contents)))
-                                .expect("Failed to generate a GetObject response")
+                                    CONTENT_RANGE,
+                                    format!("bytes {}-{}/{}", start, end, metadata.size),
+                                );
+                        } else {
+                            response = response
+                                .status(StatusCode::OK)
+                                .header(CONTENT_LENGTH, metadata.size);
                         }
-                        Err(e) => {
-                            error!(key = %key, error = %e, "Failed to read file contents");
-                            self.internal_error_response()
-                        }
+
+                        #[allow(clippy::expect_used)]
+                        response
+                            .body(Full::new(Bytes::from(contents)))
+                            .expect("Failed to generate GetObject response")
+                    }
+                    Err(e) => {
+                        error!(key = %key, error = %e, "Failed to open file");
+                        self.internal_error_response()
                     }
                 }
-                Err(e) => {
-                    error!(key = %key, error = %e, "Failed to open file");
-                    self.not_found_response()
-                }
-            },
+            }
             Err(e) => {
                 warn!(key = %key, error = %e, "GetObject failed: file not found");
                 self.not_found_response()
@@ -1026,7 +1126,7 @@ impl S3Handler {
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
-                    .header("Location", format!("/{}", bucket))
+                    .header(LOCATION, format!("/{}", bucket))
                     .body(Full::new(Bytes::new()))
                     .expect("Failed to build CreateBucket response")
             }
@@ -1155,7 +1255,7 @@ impl S3Handler {
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
-                    .header("Content-Type", "application/xml")
+                    .header(CONTENT_TYPE, "application/xml")
                     .body(Full::new(Bytes::from(xml)))
                     .expect("Failed to generate a DeleteObjects response")
             }
@@ -1236,7 +1336,7 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
+                            .header(CONTENT_TYPE, "application/xml")
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate a CopyObject response")
                     }
@@ -1278,7 +1378,7 @@ impl S3Handler {
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
-                    .header("Content-Type", "application/xml")
+                    .header(CONTENT_TYPE, "application/xml")
                     .body(Full::new(Bytes::from(xml)))
                     .expect("Failed to generate a GetBucketLocation response")
             }
@@ -1342,7 +1442,7 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
+                            .header(CONTENT_TYPE, "application/xml")
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate CreateMultipartUpload response")
                     }
@@ -1586,11 +1686,28 @@ impl S3Handler {
                     "UploadPartCopy success"
                 );
 
+                // Create CopyPartResult XML response
+                let response = CopyPartResponse {
+                    last_modified: part_info
+                        .last_modified
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    etag: part_info.etag.clone(),
+                };
+
+                let xml_body = match response.to_xml() {
+                    Ok(xml) => xml,
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize CopyPartResult XML");
+                        return self.internal_error_response();
+                    }
+                };
+
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
+                    .header("Content-Type", "application/xml")
                     .header("ETag", part_info.etag)
-                    .body(Full::new(Bytes::new()))
+                    .body(Full::new(Bytes::from(xml_body)))
                     .expect("Failed to generate UploadPartCopy response")
             }
             Err(e) => {
@@ -1668,7 +1785,7 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
+                            .header(CONTENT_TYPE, "application/xml")
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate ListMultipartUploads response")
                     }
@@ -1728,7 +1845,7 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
+                            .header(CONTENT_TYPE, "application/xml")
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate ListParts response")
                     }
@@ -1818,7 +1935,7 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
+                            .header(CONTENT_TYPE, "application/xml")
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate CompleteMultipartUpload response")
                     }
@@ -1904,7 +2021,7 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
+                            .header(CONTENT_TYPE, "application/xml")
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate GetObjectTagging response")
                     }
@@ -1982,7 +2099,7 @@ impl S3Handler {
                         #[allow(clippy::expect_used)]
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/xml")
+                            .header(CONTENT_TYPE, "application/xml")
                             .body(Full::new(Bytes::from(xml)))
                             .expect("Failed to generate GetObjectAttributes response")
                     }
@@ -2007,7 +2124,7 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::NOT_FOUND)
-            .header("Content-Type", "application/xml")
+            .header(CONTENT_TYPE, "application/xml")
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>",
             )))
@@ -2018,7 +2135,7 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::FORBIDDEN)
-            .header("Content-Type", "application/xml")
+            .header(CONTENT_TYPE, "application/xml")
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
             )))
@@ -2029,8 +2146,8 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::UNAUTHORIZED)
-            .header("Content-Type", "application/xml")
-            .header("WWW-Authenticate", "AWS4-HMAC-SHA256")
+            .header(CONTENT_TYPE, "application/xml")
+            .header(WWW_AUTHENTICATE, "AWS4-HMAC-SHA256")
             .body(Full::new(Bytes::from(format!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidAccessKeyId</Code><Message>{}</Message></Error>",
                 reason
@@ -2042,7 +2159,7 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .header("Content-Type", "application/xml")
+            .header(CONTENT_TYPE, "application/xml")
             .body(Full::new(Bytes::from(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>",
             )))
@@ -2053,7 +2170,7 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::CONFLICT)
-            .header("Content-Type", "application/xml")
+            .header(CONTENT_TYPE, "application/xml")
             .body(Full::new(Bytes::from(format!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketAlreadyExists</Code><Message>The requested bucket name '{}' is not available.</Message></Error>",
                 bucket
@@ -2065,7 +2182,7 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::CONFLICT)
-            .header("Content-Type", "application/xml")
+            .header(CONTENT_TYPE, "application/xml")
             .body(Full::new(Bytes::from(format!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketNotEmpty</Code><Message>The bucket '{}' you tried to delete is not empty.</Message></Error>",
                 bucket
@@ -2077,7 +2194,7 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::NOT_FOUND)
-            .header("Content-Type", "application/xml")
+            .header(CONTENT_TYPE, "application/xml")
             .body(Full::new(Bytes::from(format!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchBucket</Code><Message>The specified bucket '{}' does not exist.</Message></Error>",
                 bucket
@@ -2089,7 +2206,7 @@ impl S3Handler {
         #[allow(clippy::expect_used)]
         Response::builder()
             .status(StatusCode::BAD_REQUEST)
-            .header("Content-Type", "application/xml")
+            .header(CONTENT_TYPE, "application/xml")
             .body(Full::new(Bytes::from(format!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidBucketName</Code><Message>{}</Message></Error>",
                 reason

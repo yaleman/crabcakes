@@ -432,8 +432,12 @@ fn build_canonical_request(
     canonical.push_str(parts.uri.path());
     canonical.push('\n');
 
-    // Canonical query string (already normalized by AWS SDK)
-    canonical.push_str(parts.uri.query().unwrap_or(""));
+    // Canonical query string (must be sorted by parameter name)
+    if let Some(query) = parts.uri.query() {
+        let mut params: Vec<&str> = query.split('&').collect();
+        params.sort_unstable();
+        canonical.push_str(&params.join("&"));
+    }
     canonical.push('\n');
 
     // Canonical headers (only signed headers, sorted)
@@ -449,7 +453,7 @@ fn build_canonical_request(
     }
     canonical.push('\n');
 
-    // Signed headers list
+    // Signed headers list (must match what client sent in Authorization header)
     canonical.push_str(&signed_headers.join(";"));
     canonical.push('\n');
 
@@ -495,7 +499,11 @@ pub async fn verify_streaming_sigv4(
     let (access_key_id, _date_str, signed_headers, provided_signature) =
         parse_authorization_header(auth_header)?;
 
-    debug!(access_key = %access_key_id, "Verifying streaming signature");
+    debug!(
+        access_key = %access_key_id,
+        signed_headers = ?signed_headers,
+        "Verifying streaming signature"
+    );
 
     // Get x-amz-content-sha256 header value (literal string to use in canonical request)
     let body_hash = parts

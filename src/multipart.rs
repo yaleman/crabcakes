@@ -322,8 +322,11 @@ impl MultipartManager {
                 error!(part_path=%part_path.display(), "Failed to read part {}: {}", part_number, e)
             })?;
 
-            let actual_etag = format!("\"{:x}\"", md5::compute(&data));
-            if &actual_etag != expected_etag {
+            let actual_etag = format!("{:x}", md5::compute(&data));
+            // Normalize ETags by removing quotes for comparison
+            let expected_normalized = expected_etag.trim_matches('"');
+            let actual_normalized = actual_etag.trim_matches('"');
+            if expected_normalized != actual_normalized {
                 return Err(CrabCakesError::other(&format!(
                     "ETag mismatch for part {}: expected {}, got {}",
                     part_number, expected_etag, actual_etag
@@ -338,11 +341,20 @@ impl MultipartManager {
 
         let mut all_data = Vec::new();
 
+        // debug!(parts = ?parts, "Processing parts for multipart completion");
+
         for (part_number, _) in parts {
             let part_path = self.part_path(bucket, upload_id, *part_number);
             let data = fs::read(&part_path).await.inspect_err(|e| {
                 error!(part_path=%part_path.display(), "Failed to read part {}: {}", part_number, e)
             })?;
+
+            // debug!(
+            //     part_number = %part_number,
+            //     part_size = data.len(),
+            //     total_written = all_data.len(),
+            //     "Writing part to destination file"
+            // );
 
             dest_file.write_all(&data).await.inspect_err(
                 |e| error!(part_number=%part_number, "Failed to write part {}: {}", part_number, e),
