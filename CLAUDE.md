@@ -24,7 +24,6 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
   - `src/db/mod.rs` - Database initialization and migration runner
   - `src/db/service.rs` - DBService for metadata, PKCE state, and temp credential operations
   - `src/db/entities/` - SeaORM entity models (object_tags, oauth_pkce_state, temporary_credentials)
-  - `src/db/migration/` - Database migrations (SeaORM migration framework)
 - `src/error.rs` - Centralized error handling
 - `src/lib.rs` - Library module declarations
 - `src/tests/` - Test modules (server_tests.rs, policy_tests.rs)
@@ -36,8 +35,7 @@ The server:
 - Loads IAM policies and credentials from a configurable config directory (defaults: ./config)
   - Policies loaded from `config_dir/policies/`
   - Credentials loaded from `config_dir/credentials/`
-  - SQLite database at `config_dir/crabcakes.sqlite3` for metadata storage
-- Verifies AWS Signature V4 signatures on all requests (configurable via --require-signature)
+- Verifies AWS Signature V4 signatures on all requests
 - Uses Tokio for async operations and connection handling
 - Implements AWS S3-compatible API with XML responses
 - Enforces IAM policy-based authorization on all S3 operations
@@ -56,13 +54,17 @@ The server implements the following S3 operations:
 ### Bucket Operations
 
 #### ListBuckets (GET /)
+
 Returns a list of all top-level directories as "buckets"
 
 #### HeadBucket (HEAD /bucket)
+
 Checks if a bucket exists. Returns 200 OK if it exists, 404 Not Found otherwise.
 
 #### CreateBucket (PUT /bucket)
+
 Creates a new bucket (top-level directory). Validates bucket name according to S3 rules:
+
 - 1-63 characters
 - Lowercase letters, numbers, and hyphens only
 - Cannot start or end with hyphen
@@ -136,6 +138,7 @@ The server supports AWS CLI path-style requests where the bucket name appears in
 #### PutObjectTagging (PUT /key?tagging)
 
 Adds or replaces tags on an object. Accepts XML request body with tag set. Tags are stored in SQLite database. Validates:
+
 - Maximum 10 tags per object
 - Tag keys: maximum 128 characters
 - Tag values: maximum 256 characters
@@ -166,6 +169,7 @@ The server uses SQLite for storing object metadata, OAuth PKCE state, and tempor
 ### Schema
 
 **`object_tags` table:**
+
 - `id` INTEGER PRIMARY KEY
 - `bucket` TEXT NOT NULL
 - `key` TEXT NOT NULL
@@ -176,6 +180,7 @@ The server uses SQLite for storing object metadata, OAuth PKCE state, and tempor
 - Lookup index on `(bucket, key)`
 
 **`oauth_pkce_state` table:**
+
 - `state` TEXT PRIMARY KEY (OAuth state parameter)
 - `code_verifier` TEXT NOT NULL (PKCE code verifier)
 - `nonce` TEXT NOT NULL (OIDC nonce)
@@ -186,6 +191,7 @@ The server uses SQLite for storing object metadata, OAuth PKCE state, and tempor
 - Index on `expires_at` for cleanup
 
 **`temporary_credentials` table:**
+
 - `access_key_id` TEXT PRIMARY KEY
 - `secret_access_key` TEXT NOT NULL
 - `session_id` TEXT NOT NULL (links to tower-sessions)
@@ -199,6 +205,7 @@ The server uses SQLite for storing object metadata, OAuth PKCE state, and tempor
 ### Migrations
 
 New database migrations should be added to `src/db/migration/`:
+
 1. Create new migration file: `src/db/migration/mYYYYMMDD_HHMMSS_description.rs`
 2. Implement `up()` and `down()` methods using SeaORM schema builder
 3. Add to migration list in `src/db/migration/mod.rs`
@@ -209,17 +216,20 @@ New database migrations should be added to `src/db/migration/`:
 The `DBService` struct in `src/db/service.rs` provides database operations:
 
 **Tag Operations:**
+
 - `put_tags(bucket, key, tags)` - Store/replace tags with validation
 - `get_tags(bucket, key)` - Retrieve all tags for an object
 - `delete_tags(bucket, key)` - Remove all tags for an object
 
 **OAuth PKCE State Operations:**
+
 - `store_pkce_state(...)` - Store PKCE state for OAuth flow
 - `get_pkce_state(state)` - Retrieve PKCE state by state parameter
 - `delete_pkce_state(state)` - Delete PKCE state after use
 - `cleanup_expired_pkce_states()` - Remove expired PKCE states
 
 **Temporary Credentials Operations:**
+
 - `store_temporary_credentials(...)` - Store temp AWS credentials for session
 - `get_temporary_credentials(access_key_id)` - Get credentials by access key
 - `get_credentials_by_session(session_id)` - Get all credentials for a session
@@ -230,6 +240,7 @@ The `DBService` struct in `src/db/service.rs` provides database operations:
 ### Background Cleanup Task
 
 The server spawns a background cleanup task (`CleanupTask` in `src/cleanup.rs`) on startup:
+
 - Runs every 5 minutes (configurable interval)
 - Calls `cleanup_expired_pkce_states()` to remove expired OAuth PKCE states
 - Calls `cleanup_expired_credentials()` to remove expired temporary credentials
@@ -250,18 +261,22 @@ The server implements full AWS Signature V4 (SigV4) authentication for productio
 The server supports two types of AWS credentials:
 
 **Permanent Credentials** (for S3 operations):
+
 - Stored in JSON files in `config_dir/credentials/` (default: `./config/credentials/`)
 - Each credential file contains:
+
   ```json
   {
     "access_key_id": "alice",
     "secret_access_key": "alicesecret123"
   }
   ```
+
 - CredentialStore loads all JSON files at startup
 - Credentials mapped by access_key_id for fast lookup during signature verification
 
 **Temporary Credentials** (for admin UI users):
+
 - Generated on successful OIDC login
 - Stored in SQLite `temporary_credentials` table
 - Linked to user session via `session_id`
@@ -288,7 +303,6 @@ The server supports two types of AWS credentials:
 - `--config-dir <path>` or `CRABCAKES_CONFIG_DIR`: Base configuration directory (default: `./config`)
   - Policies loaded from `config_dir/policies/`
   - Credentials loaded from `config_dir/credentials/`
-- `--require-signature <bool>` or `CRABCAKES_REQUIRE_SIGNATURE`: Whether to require signature verification (default: `true`)
 - `--region <name>` or `CRABCAKES_REGION`: AWS region name (default: `crabcakes`)
 - `--disable-api` or `CRABCAKES_DISABLE_API`: Disable admin UI and API (default: `false`, API enabled)
 - `--oidc-client-id <id>` or `CRABCAKES_OIDC_CLIENT_ID`: OAuth client ID (required if API enabled)
@@ -296,13 +310,13 @@ The server supports two types of AWS credentials:
 
 ### Test Mode
 
-- `Server::test_mode()` disables signature verification (`require_signature=false`)
 - Allows integration tests to run without signing requests
 - Uses wildcard principal with allow-all policy for authorization
 
 ### Request Body Buffering
 
 The `BufferedBody` enum handles smart body buffering:
+
 - **Memory variant**: Holds `Vec<u8>` for small requests
 - **Disk variant**: Holds `NamedTempFile` and size for large requests
 - **Threshold**: 50MB (configurable via `MEMORY_THRESHOLD` constant)
@@ -310,6 +324,7 @@ The `BufferedBody` enum handles smart body buffering:
 - **Async I/O**: Uses tokio for async file operations
 
 ### Security Considerations
+
 - Test credentials in `test_config/credentials/` directory are for testing only
 - Production credentials should never be committed to git (add `config/` to `.gitignore`)
 - Signature verification ensures request integrity and authenticity
@@ -320,11 +335,14 @@ The `BufferedBody` enum handles smart body buffering:
 The server implements AWS IAM-compatible policy-based authorization:
 
 ### Authentication Context
+
 After signature verification (or if signatures not required), authentication context is built:
+
 - **Authenticated requests**: Principal set to `arn:aws:iam:::user/{username}` from verified access_key_id
 - **Anonymous requests**: Principal set to `Principal::Wildcard` (requires policy with `"Principal": "*"`)
 
 ### Authorization Flow
+
 1. Extract authentication context from request
 2. Determine S3 action from HTTP method and path (e.g., `s3:GetObject`, `s3:PutObject`, `s3:ListBucket`)
 3. Extract bucket and key from request path
@@ -333,6 +351,7 @@ After signature verification (or if signatures not required), authentication con
 6. Return 403 Forbidden if denied, proceed if allowed
 
 ### Policy Evaluation
+
 - Follows AWS IAM evaluation logic:
   - Default deny
   - Explicit deny wins over allow
@@ -346,7 +365,9 @@ After signature verification (or if signatures not required), authentication con
   - Context-based conditions (e.g., `${aws:username}` variable interpolation)
 
 ### Policy Examples
+
 See `test_config/policies/` directory for examples:
+
 - `allow-all.json` - Allows all S3 operations for all principals
 - `alice.json` - Allows Alice to access only her own prefix (`/bucket/alice/*`)
 
@@ -376,6 +397,7 @@ bash manual_test.sh                     # Run manual AWS CLI tests
 ```
 
 The project includes:
+
 - 5 unit tests in `src/filesystem.rs`
 - Unit tests in `src/auth.rs` for authentication parsing and resource extraction
 - 33 integration tests in `src/tests/server_tests.rs`
@@ -393,6 +415,7 @@ just check                              # Run comprehensive checks
 ## Dependencies
 
 Key dependencies:
+
 - `clap` - Command-line argument parsing with derive features
 - `hyper` + `hyper-util` - HTTP server implementation
 - `tokio` - Async runtime with full features
@@ -416,21 +439,22 @@ Key dependencies:
 - `rand` - Random generation for credentials and PKCE
 
 Dev dependencies:
+
 - `aws-sdk-s3` + `aws-config` - AWS CLI compatibility testing
 - `reqwest` - HTTP client for integration tests
 
-## Configuration
+## Runtime Configuration
 
 The server accepts configuration via:
+
 - CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url`
-- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REQUIRE_SIGNATURE`, `CRABCAKES_REGION`, `CRABCAKES_DISABLE_API`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`
+- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REGION`, `CRABCAKES_DISABLE_API`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
 - Config directory defaults to `./config` (if it doesn't exist, server starts with no policies/credentials)
   - Policies loaded from `config_dir/policies/`
   - Credentials loaded from `config_dir/credentials/`
   - SQLite database at `config_dir/crabcakes.sqlite3`
-- Signature verification defaults to `true` (set to `false` to disable)
 - Region defaults to `"crabcakes"` and is returned by GetBucketLocation
 - Admin UI enabled by default (set `--disable-api` to disable)
 - Reserved bucket names cannot be created: admin, api, login, logout, oauth2, .well-known, config, oidc, crabcakes, docs, help
@@ -454,11 +478,11 @@ The server accepts configuration via:
 ## UI Design
 
 The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
+
 - Background: Purple gradient (135deg)
 - Primary elements: Purple gradient accents with transparency
 - Info section: Light purple gradient background with purple borders
 - Labels: Purple color (#5a67d8)
 - Status badge: Green (#28a745) when authenticated
-- Sign out button: Red (#dc3545) with hover effects
+- Sign out button: Red (#dc3545) background with hover effects
 - Maintain cohesive purple vibe throughout all UI elements
-- all sign out buttons should be red

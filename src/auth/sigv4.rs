@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use http::HeaderValue;
 use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
 use scratchstack_aws_principal;
@@ -15,7 +16,7 @@ use scratchstack_aws_signature::{
     SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
 use tower::BoxError;
-use tracing::{debug, warn};
+use tracing::{debug, trace};
 
 use crate::credentials::CredentialStore;
 use crate::error::CrabCakesError;
@@ -41,19 +42,11 @@ pub async fn verify_sigv4(
     req: http::Request<Vec<u8>>,
     credentials_store: Arc<CredentialStore>,
     region: &str,
-    require_signature: bool,
 ) -> Result<VerifiedRequest, CrabCakesError> {
     // Check if Authorization header exists
-    let has_auth = req.headers().get(AUTHORIZATION).is_some();
+    let auth_header = req.headers().get(AUTHORIZATION);
 
-    if !has_auth && !require_signature {
-        // Allow anonymous requests if signature not required
-        warn!("No authorization header found, but signature not required - allowing anonymous");
-        // TODO: be more explicit about this
-        return Err(CrabCakesError::NoAuthenticationSupplied(
-            "No authorization header".to_string(),
-        ));
-    } else if !has_auth {
+    if auth_header.is_none() || auth_header == Some(&HeaderValue::from_static("")) {
         return Err(CrabCakesError::NoAuthenticationSupplied(
             "Missing authorization header".to_string(),
         ));
@@ -110,7 +103,7 @@ pub async fn verify_sigv4(
     // S3-specific signature options
     let signature_options = SignatureOptions::S3;
 
-    debug!("Signature options: {:?}", signature_options);
+    trace!("Signature options: {:?}", signature_options);
 
     // Validate the request
     let (_parts, _body, auth) = sigv4_validate_request(
@@ -639,7 +632,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature required - should fail
-        let result = verify_sigv4(request, cred_store, "crabcakes", true).await;
+        let result = verify_sigv4(request, cred_store, "crabcakes").await;
 
         assert!(
             result.is_err(),
@@ -664,7 +657,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature not required - should return error indicating no auth
-        let result = verify_sigv4(request, cred_store, "crabcakes", false).await;
+        let result = verify_sigv4(request, cred_store, "crabcakes").await;
 
         assert!(
             result.is_err(),
@@ -690,7 +683,7 @@ mod tests {
             .unwrap();
 
         // Verify - should fail
-        let result = verify_sigv4(request, cred_store, "crabcakes", true).await;
+        let result = verify_sigv4(request, cred_store, "crabcakes").await;
 
         assert!(
             result.is_err(),
