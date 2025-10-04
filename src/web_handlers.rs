@@ -49,6 +49,15 @@ struct PolicyDetailTemplate {
     policy_json: String,
 }
 
+/// Policy form template (for creating/editing)
+#[derive(Template)]
+#[template(path = "policy_form.html")]
+struct PolicyFormTemplate {
+    page: String,
+    policy_name: String,
+    policy_json: String,
+}
+
 /// Credentials list template
 #[derive(Template)]
 #[template(path = "credentials.html")]
@@ -167,6 +176,15 @@ impl WebHandler {
             ("GET", "/admin") | ("GET", "/admin/") => self.handle_root().await,
             ("GET", "/admin/profile") => self.handle_profile(session.clone()).await,
             ("GET", "/admin/policies") => self.handle_policies(session.clone()).await,
+            ("GET", "/admin/policies/new") => self.handle_policy_new_form(session.clone()).await,
+            ("GET", path) if path.starts_with("/admin/policies/") && path.ends_with("/edit") => {
+                let policy_name = path
+                    .strip_prefix("/admin/policies/")
+                    .and_then(|s| s.strip_suffix("/edit"))
+                    .unwrap_or("");
+                self.handle_policy_edit_form(session.clone(), policy_name)
+                    .await
+            }
             ("GET", path) if path.starts_with("/admin/policies/") => {
                 let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
                 self.handle_policy_detail(session.clone(), policy_name)
@@ -535,6 +553,74 @@ impl WebHandler {
             .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
 
         let template = PolicyDetailTemplate {
+            page: "policies".to_string(),
+            policy_name: policy_name.to_string(),
+            policy_json,
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// GET /admin/policies/new - Show form for creating a new policy
+    async fn handle_policy_new_form(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        let template = PolicyFormTemplate {
+            page: "policies".to_string(),
+            policy_name: String::new(),
+            policy_json: String::new(),
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// GET /admin/policies/{name}/edit - Show form for editing a policy
+    async fn handle_policy_edit_form(
+        &self,
+        session: Session,
+        policy_name: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match self.check_auth(&session).await {
+            Ok(_) => {}
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header("Location", "/login")
+                    .body(Full::new(Bytes::new()))
+                    .map_err(CrabCakesError::from);
+            }
+        };
+
+        let policy = self
+            .policy_store
+            .get_policy(policy_name)
+            .await
+            .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
+
+        let policy_json = serde_json::to_string_pretty(&policy)
+            .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
+
+        let template = PolicyFormTemplate {
             page: "policies".to_string(),
             policy_name: policy_name.to_string(),
             policy_json,

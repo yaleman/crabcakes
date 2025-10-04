@@ -11,6 +11,13 @@
     <h1><a href="/admin/policies">Policies</a> / {{ policy_name }}</h1>
 </div>
 
+<div>
+    <a href="/admin/policies/{{ policy_name }}/edit"
+        class="btn btn-primary">Edit Policy</a>
+    <button id="delete-policy-btn" data-policy-name="{{ policy_name }}"
+        class="btn btn-danger">Delete Policy</button>
+</div>
+
 <pre><code class="language-json">{{ policy_json }}</code></pre>
 
 <div class="back-link-container">
@@ -20,4 +27,6 @@
 
 {% block extra_scripts %}
 <script src="/admin/static/prism.js"></script>
+<script src="/admin/static/js/csrf.js"></script>
+<script src="/admin/static/js/policy-crud.js"></script>
 {% endblock %}

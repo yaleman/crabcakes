@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+
+{% block title %}{% if !policy_name.is_empty() %}Edit{% else %}Create{% endif %}
+Policy - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <h1><a href="/admin/policies">Policies</a> / {% if !policy_name.is_empty()
+        %}Edit {{ policy_name }}{% else %}Create New{% endif %}</h1>
+</div>
+
+<form id="policy-form">
+    <div class="form-group">
+
+        <p><label for="policy-name">Policy Name:</label>{{policy_name}}</p>
+        <input type="hidden" id="policy-name" name="policy-name"
+            value="{{ policy_name }}" {% if !policy_name.is_empty() %}readonly{%
+            endif %} required>
+        {% if !policy_name.is_empty() %}
+        <p class="help-text">Policy name cannot be changed after creation</p>
+        {% endif %}
+    </div>
+
+    <div class="form-group">
+        <label for="policy-json">Policy JSON</label><br />
+        <textarea id="policy-json" name="policy-json" rows="20"
+            required>{{ policy_json }}</textarea>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Policy</button>
+        <a
+            href="{% if !policy_name.is_empty() %}/admin/policies/{{ policy_name }}{% else %}/admin/policies{% endif %}"
+            class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/js/csrf.js"></script>
+<script src="/admin/static/js/policy-crud.js"></script>
+{% endblock %}
