@@ -9,7 +9,7 @@ use openidconnect::{
 };
 use rand::Rng;
 use reqwest;
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::db::DBService;
 use crate::error::CrabCakesError;
@@ -158,6 +158,10 @@ impl OAuthClient {
         .set_redirect_uri(self.redirect_uri.clone());
 
         let pkce_verifier = PkceCodeVerifier::new(pkce_state.code_verifier.clone());
+
+        debug!("Exchanging authorization code for tokens");
+        debug!("Redirect URI: {}", self.redirect_uri.as_str());
+
         let token_response = client
             .exchange_code(AuthorizationCode::new(code.to_string()))
             .map_err(|e| CrabCakesError::other(&format!("Exchange code failed: {}", e)))?
@@ -167,6 +171,9 @@ impl OAuthClient {
                     let http_client = self.http_client.clone();
                     async move {
                         let uri = http_request.uri().to_string();
+                        debug!("Token request to: {}", uri);
+                        debug!("Token request headers: {:?}", http_request.headers());
+
                         let response = http_client
                             .request(http_request.method().clone(), &uri)
                             .headers(http_request.headers().clone())
@@ -175,7 +182,15 @@ impl OAuthClient {
                             .await?;
 
                         let status = response.status();
+                        debug!("Token response status: {}", status);
                         let body = response.bytes().await?.to_vec();
+                        debug!("Token response body length: {} bytes", body.len());
+
+                        if !status.is_success() {
+                            if let Ok(body_str) = String::from_utf8(body.clone()) {
+                                error!("Token endpoint error response: {}", body_str);
+                            }
+                        }
 
                         // This should never fail as we're providing valid status and body
                         Ok(http::Response::builder()
@@ -197,6 +212,11 @@ impl OAuthClient {
                         openidconnect::core::CoreErrorResponseType,
                     >,
                 >| {
+                    error!("Token exchange error: {:?}", e);
+                    error!("This usually means:");
+                    error!("  1. Redirect URI mismatch - check that {} matches your OIDC provider configuration", self.redirect_uri.as_str());
+                    error!("  2. Authorization code already used or expired");
+                    error!("  3. OIDC provider requires client authentication (client_secret) - crabcakes only supports PKCE");
                     CrabCakesError::other(&format!("Token exchange failed: {}", e))
                 },
             )?;

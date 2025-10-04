@@ -18,6 +18,7 @@ pub enum CrabCakesError {
     Sigv4Verification(String),
     NoUserIdInPrincipal,
     OidcStateParameterExpired,
+    OidcDiscovery(String),
     HttpResponseError(String),
     BucketNotFound(String),
     Configuration(String),
@@ -62,6 +63,9 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::Reqwest(msg) => {
                 write!(f, "Reqwest HTTP Error: {}", msg)
+            }
+            CrabCakesError::OidcDiscovery(msg) => {
+                write!(f, "OIDC Discovery Error: {}", msg)
             }
         }
     }
