@@ -7,6 +7,9 @@ use std::sync::Arc;
 
 use askama::Template;
 use form_urlencoded;
+use http::header::{
+    CACHE_CONTROL, CONTENT_TYPE, LOCATION, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Request, Response, StatusCode};
@@ -213,7 +216,7 @@ impl WebHandler {
     async fn handle_root(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         Response::builder()
             .status(StatusCode::TEMPORARY_REDIRECT)
-            .header("Location", "/admin/profile")
+            .header(LOCATION, "/admin/profile")
             .body(Full::new(Bytes::new()))
             .map_err(CrabCakesError::from)
     }
@@ -224,7 +227,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::FOUND)
-            .header("Location", auth_url)
+            .header(LOCATION, auth_url)
             .body(Full::new(Bytes::new()))
             .map_err(CrabCakesError::from)
     }
@@ -313,7 +316,7 @@ impl WebHandler {
         // Redirect to admin UI
         Response::builder()
             .status(StatusCode::FOUND)
-            .header("Location", "/admin/")
+            .header(LOCATION, "/admin/")
             .body(Full::new(Bytes::new()))
             .map_err(CrabCakesError::from)
     }
@@ -342,7 +345,7 @@ impl WebHandler {
         // Redirect to login page
         Response::builder()
             .status(StatusCode::FOUND)
-            .header("Location", "/login")
+            .header(LOCATION, "/login")
             .body(Full::new(Bytes::new()))
             .map_err(CrabCakesError::from)
     }
@@ -423,14 +426,14 @@ impl WebHandler {
     fn build_html_response(&self, html: String) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
+            .header(CONTENT_TYPE, "text/html; charset=utf-8")
             .header(
                 "Content-Security-Policy",
                 "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:;"
             )
-            .header("X-Content-Type-Options", "nosniff")
-            .header("X-Frame-Options", "DENY")
-            .header("Referrer-Policy", "strict-origin-when-cross-origin")
+            .header(X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(X_FRAME_OPTIONS, "DENY")
+            .header(REFERRER_POLICY, "strict-origin-when-cross-origin")
             .body(Full::new(Bytes::from(html)))
             .map_err(CrabCakesError::from)
     }
@@ -445,7 +448,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -497,7 +500,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -537,7 +540,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -575,7 +578,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -605,7 +608,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -643,7 +646,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -673,7 +676,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -707,7 +710,7 @@ impl WebHandler {
             Err(_) => {
                 return Response::builder()
                     .status(StatusCode::FOUND)
-                    .header("Location", "/login")
+                    .header(LOCATION, "/login")
                     .body(Full::new(Bytes::new()))
                     .map_err(CrabCakesError::from);
             }
@@ -812,7 +815,7 @@ impl WebHandler {
         let json = serde_json::to_string(&session_info)?;
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -835,7 +838,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -866,7 +869,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -914,7 +917,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::CREATED)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -957,7 +960,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -989,7 +992,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -1019,7 +1022,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -1067,7 +1070,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::CREATED)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -1115,7 +1118,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -1149,7 +1152,7 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(CrabCakesError::from)
     }
@@ -1199,8 +1202,8 @@ impl WebHandler {
 
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", content_type)
-            .header("Cache-Control", "public, max-age=3600")
+            .header(CONTENT_TYPE, content_type)
+            .header(CACHE_CONTROL, "public, max-age=3600")
             .body(Full::new(Bytes::from(content)))
             .map_err(CrabCakesError::from)
     }
@@ -1275,7 +1278,7 @@ impl WebHandler {
         );
         Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .header("Content-Type", "text/html; charset=utf-8")
+            .header(CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Full::new(Bytes::from(error_html)))
             .unwrap_or_else(|_| {
                 let mut r = Response::new(Full::new(Bytes::from(format!("Error: {}", error))));

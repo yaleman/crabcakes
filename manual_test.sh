@@ -26,6 +26,7 @@ pkill -f target/debug/crabcakes
 # Use test credentials from test_config/credentials/testuser.json
 AWS_ACCESS_KEY_ID="$(jq -r .access_key_id test_config/credentials/testuser.json)"
 AWS_SECRET_ACCESS_KEY="$(jq -r .secret_access_key test_config/credentials/testuser.json)"
+export AWS_MAX_ATTEMPTS=1
 export AWS_REGION="crabcakes"
 
 TEMPDIR="$(mktemp -d)"
@@ -93,6 +94,10 @@ else
     echo "$HEADRES"
 fi
 
+
+echo "########################################"
+echo "Testing PutObject - upload a new file"
+echo "########################################"
 # Test PutObject - upload a new file
 TEST_UPLOAD_FILE="uploaded-test.txt"
 echo "Testing file upload" > "$TEMPDIR2/$TEST_UPLOAD_FILE"
@@ -527,7 +532,10 @@ if [ $? -ne 0 ]; then
 fi
 echo "Completed multipart upload"
 
-# Download the file and verify it matches the original
+echo "#######################################"
+echo "Downloading the file to verify it matches the original"
+echo "#######################################"
+
 DOWNLOADED_FILE="$TEMPDIR2/downloaded-multipart.bin"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
     aws s3 cp "s3://$TEST_BUCKET/$MULTIPART_KEY" "$DOWNLOADED_FILE" \
@@ -546,8 +554,8 @@ if [ "$ORIGINAL_MD5" = "$DOWNLOADED_MD5" ]; then
     echo "Multipart upload successful - checksums match"
 else
     echo "Multipart upload failed - checksum mismatch"
-    echo "Original: $ORIGINAL_MD5"
-    echo "Downloaded: $DOWNLOADED_MD5"
+    echo "Original: $ORIGINAL_MD5 size: $(ls -l "$MULTIPART_FILE" | awk '{print $5}')"
+    echo "Downloaded: $DOWNLOADED_MD5 size: $(ls -l "$DOWNLOADED_FILE" | awk '{print $5}')"
     exit 1
 fi
 
@@ -555,12 +563,18 @@ fi
 rm -f "$MULTIPART_FILE" "$PART1" "$PART2" "$DOWNLOADED_FILE" "$TEMPDIR2/complete-multipart.json"
 
 # Test UploadPartCopy (copy parts from existing object)
+echo "#######################################"
 echo "Testing UploadPartCopy..."
+echo "#######################################"
 
 # Create a source object for copying (10MB)
 SOURCE_KEY="source-object.bin"
 dd if=/dev/urandom of="$TEMPDIR2/$SOURCE_KEY" bs=1M count=10 2>/dev/null
 
+
+echo "#######################################"
+echo "Uploading source object for UploadPartCopy test..."
+echo "#######################################"
 # Upload the source object
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
     aws s3 cp "$TEMPDIR2/$SOURCE_KEY" "s3://$TEST_BUCKET/$SOURCE_KEY" \
@@ -626,6 +640,9 @@ cat > "$TEMPDIR2/complete-copy.json" << EOF
   ]
 }
 EOF
+
+echo "JSON request to complete UploadPartCopy:"
+cat "$TEMPDIR2/complete-copy.json"
 
 # Complete multipart upload
 echo "Completing multipart upload for copy..."
