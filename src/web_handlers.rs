@@ -92,9 +92,10 @@ impl WebHandler {
         })?;
 
         // Parse query string for code and state
-        let params: std::collections::HashMap<String, String> = form_urlencoded::parse(query.as_bytes())
-            .into_owned()
-            .collect();
+        let params: std::collections::HashMap<String, String> =
+            form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .collect();
 
         let code = params.get("code").ok_or_else(|| {
             CrabCakesError::other(&"Missing 'code' parameter in OAuth callback".to_string())
@@ -120,20 +121,27 @@ impl WebHandler {
         session
             .insert("user_email", user_email.clone())
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to store user_email in session: {}", e)))?;
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to store user_email in session: {}", e))
+            })?;
         session
             .insert("user_id", user_id.clone())
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to store user_id in session: {}", e)))?;
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to store user_id in session: {}", e))
+            })?;
         session
             .insert("access_key_id", access_key_id.clone())
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to store access_key_id in session: {}", e)))?;
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to store access_key_id in session: {}", e))
+            })?;
 
         // Get session ID
-        let session_id = session.id().map(|id| id.to_string()).ok_or_else(|| {
-            CrabCakesError::other(&"Failed to get session ID".to_string())
-        })?;
+        let session_id = session
+            .id()
+            .map(|id| id.to_string())
+            .ok_or_else(|| CrabCakesError::other(&"Failed to get session ID".to_string()))?;
 
         // Store temporary credentials in database
         self.db
@@ -156,7 +164,10 @@ impl WebHandler {
     }
 
     /// POST /logout - Delete session and credentials
-    async fn handle_logout(&self, session: Session) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    async fn handle_logout(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Get session ID before destroying session
         if let Some(session_id) = session.id() {
             let session_id_str = session_id.to_string();
@@ -182,24 +193,33 @@ impl WebHandler {
     }
 
     /// GET /api/session - Return session info with temp credentials
-    async fn handle_get_session(&self, session: Session) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    async fn handle_get_session(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Get user info from session
         let user_email: String = session
             .get("user_email")
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to get user_email from session: {}", e)))?
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
+            })?
             .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
 
         let user_id: String = session
             .get("user_id")
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to get user_id from session: {}", e)))?
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
+            })?
             .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
 
         let access_key_id: String = session
             .get("access_key_id")
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to get access_key_id from session: {}", e)))?
+            .map_err(|e| {
+                CrabCakesError::other(&format!("Failed to get access_key_id from session: {}", e))
+            })?
             .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
 
         // Look up credentials in database to get secret key and expiry
@@ -207,7 +227,9 @@ impl WebHandler {
             .db
             .get_temporary_credentials(&access_key_id)
             .await?
-            .ok_or_else(|| CrabCakesError::other(&"Credentials not found or expired".to_string()))?;
+            .ok_or_else(|| {
+                CrabCakesError::other(&"Credentials not found or expired".to_string())
+            })?;
 
         // Check if credentials are expired
         if creds.expires_at < chrono::Utc::now().naive_utc() {
