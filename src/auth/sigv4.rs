@@ -6,7 +6,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use http::HeaderValue;
 use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
@@ -88,7 +88,7 @@ pub async fn verify_sigv4(
                         })?;
 
                     // Check if temporary credentials are expired
-                    if temp_cred.expires_at < chrono::Utc::now() {
+                    if temp_cred.expires_at < Utc::now() {
                         debug!(access_key = %access_key, "Temporary credentials have expired");
                         return Err(BoxError::from("Temporary credentials expired".to_string()));
                     }
@@ -154,7 +154,7 @@ pub async fn verify_sigv4(
         region,
         "s3",
         &mut service,
-        chrono::Utc::now(),
+        Utc::now(),
         &NO_ADDITIONAL_SIGNED_HEADERS,
         signature_options,
     )
@@ -525,9 +525,14 @@ pub async fn verify_streaming_sigv4(
         })?;
 
     let timestamp =
-        chrono::DateTime::parse_from_str(timestamp_str, "%Y%m%dT%H%M%SZ").map_err(|e| {
-            CrabCakesError::Sigv4Verification(format!("Invalid x-amz-date format: {}", e))
+        NaiveDateTime::parse_from_str(timestamp_str, "%Y%m%dT%H%M%SZ").map_err(|e| {
+            CrabCakesError::Sigv4Verification(format!(
+                "Invalid x-amz-date format: error={} input={}",
+                e, timestamp_str
+            ))
         })?;
+
+    let timestamp: DateTime<Utc> = DateTime::from_naive_utc_and_offset(timestamp, Utc);
 
     // Build canonical request using literal body hash
     let canonical_request = build_canonical_request(&parts, &signed_headers, body_hash);
