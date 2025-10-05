@@ -28,8 +28,8 @@ use crate::policy_analyzer;
 /// Error page template
 #[derive(Template)]
 #[template(path = "error.html")]
-struct ErrorTemplate {
-    error_message: String,
+pub(crate) struct ErrorTemplate {
+    pub(crate) error_message: String,
 }
 
 /// Profile page template
@@ -200,7 +200,6 @@ impl WebHandler {
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let method = req.method().clone();
         let path = req.uri().path().to_string();
-
         let result = match (method.as_str(), path.as_str()) {
             ("GET", "/") => self.handle_root().await,
             ("GET", "/login") => self.handle_login().await,
@@ -273,7 +272,19 @@ impl WebHandler {
             }
             ("GET", "/admin/identities") => self.handle_identities(session.clone()).await,
             ("GET", "/admin/identities/new") => {
-                self.handle_credential_new_form(session.clone()).await
+                let access_key_id = req
+                    .uri()
+                    .query()
+                    .filter(|query| query.contains("access_key_id"))
+                    .and_then(|query| {
+                        form_urlencoded::parse(query.as_bytes())
+                            .into_owned()
+                            .find(|(k, _)| k == "access_key_id")
+                            .map(|(_, v)| v)
+                    })
+                    .unwrap_or_default();
+                self.handle_credential_new_form(session.clone(), access_key_id)
+                    .await
             }
             ("GET", path) if path.starts_with("/admin/identities/") && path.ends_with("/edit") => {
                 let access_key_id = path
@@ -308,8 +319,8 @@ impl WebHandler {
         };
 
         match result {
-            Ok(resp) => Ok(resp),
-            Err(e) => Ok(self.error_response(&e)),
+            Ok(response) => Ok(response),
+            Err(e) => Ok(e.into()),
         }
     }
 
@@ -772,14 +783,26 @@ impl WebHandler {
     async fn handle_credential_new_form(
         &self,
         session: Session,
+        access_key_id: String,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         if self.check_auth(&session).await.is_err() {
             return login_redirect();
         };
+        // check if the akid already exists and reject the request if so
+        if self
+            .credentials_store
+            .read()
+            .await
+            .get_credential(&access_key_id)
+            .await
+            .is_some()
+        {
+            return Err(CrabCakesError::CredentialAlreadyExists);
+        }
 
         let template = CredentialFormTemplate {
             page: "identities".to_string(),
-            access_key_id: String::new(),
+            access_key_id,
             is_edit: false,
         };
 
@@ -1454,38 +1477,23 @@ impl WebHandler {
             .body(Full::new(Bytes::from(content)))
             .map_err(CrabCakesError::from)
     }
+}
 
-    /// Error response
-    fn error_response(&self, error: &CrabCakesError) -> Response<Full<Bytes>> {
-        let template = ErrorTemplate {
-            error_message: error.to_string(),
-        };
-
-        let html = template.render().unwrap_or_else(|_| {
-            format!(
-                r#"<!DOCTYPE html>
-<html>
-<head><title>Error</title></head>
-<body>
-    <h1>Error</h1>
-    <p>{}</p>
-    <a href="/login">Restart Authentication</a>
-</body>
-</html>"#,
-                error
-            )
-        });
-
-        Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .header(CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(html)))
-            .unwrap_or_else(|_| {
-                let mut r = Response::new(Full::new(Bytes::from(format!("Error: {}", error))));
-                *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                r
-            })
-    }
+#[cfg(test)]
+#[tokio::test]
+async fn test_error_response() {
+    let response: Response<Full<Bytes>> = CrabCakesError::other(&"Test error").into();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let mut body: Full<Bytes> = response.into_body();
+    let body_bytes = body
+        .frame()
+        .await
+        .expect("Couldn't get frame")
+        .expect("failed to get frame")
+        .into_data()
+        .expect("Failed to get bytes from frame");
+    let body_str = std::str::from_utf8(&body_bytes).expect("Body is not valid UTF-8");
+    assert!(body_str.contains("Test error"));
 }
 
 /// Session info returned to client

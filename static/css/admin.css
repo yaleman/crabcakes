@@ -417,3 +417,42 @@ th .select-column {
     list-style: none;
     padding-left: 0;
 }
+
+
+.error-container {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    padding: 40px;
+    margin: auto;
+    max-width: 600px;
+    text-align: center;
+}
+
+.error-container h1 {
+    color: #e53e3e;
+    margin: 0 0 20px 0;
+}
+
+.error-container p {
+    color: #4a5568;
+    line-height: 1.6;
+    margin: 0 0 30px 0;
+}
+
+.error-container button {
+    display: inline-block;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 6px;
+    border: none;
+    font-weight: 500;
+    cursor: pointer;
+    transition: transform 0.2s;
+    font-size: inherit;
+}
+
+.error-container button:hover {
+    transform: translateY(-2px);
+}

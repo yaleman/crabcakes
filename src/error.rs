@@ -2,7 +2,14 @@
 
 use std::net::AddrParseError;
 
+use askama::Template;
+use http::{HeaderValue, Response, StatusCode, header::CONTENT_TYPE};
+use http_body_util::Full;
+use hyper::body::Bytes;
 use iam_rs::EvaluationError;
+use mime_guess::mime::TEXT_HTML_UTF_8;
+
+use crate::web::handlers::ErrorTemplate;
 
 #[derive(Debug)]
 pub enum CrabCakesError {
@@ -24,6 +31,7 @@ pub enum CrabCakesError {
     Configuration(String),
     Hyper(String),
     Reqwest(String),
+    CredentialAlreadyExists,
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -66,6 +74,9 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::OidcDiscovery(msg) => {
                 write!(f, "OIDC Discovery Error: {}", msg)
+            }
+            CrabCakesError::CredentialAlreadyExists => {
+                write!(f, "Credential with the same identifier already exists")
             }
         }
     }
@@ -134,5 +145,38 @@ impl From<CrabCakesError> for Box<dyn std::error::Error + Send + Sync> {
 impl CrabCakesError {
     pub fn other(error: &impl ToString) -> Self {
         CrabCakesError::Other(error.to_string())
+    }
+}
+
+impl From<CrabCakesError> for Response<Full<Bytes>> {
+    fn from(err: CrabCakesError) -> Response<Full<Bytes>> {
+        let template = ErrorTemplate {
+            error_message: err.to_string(),
+        };
+
+        let html = match template.render() {
+            Ok(html) => html,
+            Err(e) => {
+                #[allow(clippy::panic)]
+                {
+                    #[cfg(any(test, debug_assertions))]
+                    panic!("Failed to render error template! {}", e);
+                }
+                #[cfg(not(any(test, debug_assertions)))]
+                format!(
+                    "<html><body><h1>Error</h1><p>Failed to render error template: {}</p><p>Original error: {}</p></body></html>",
+                    e, self
+                )
+            }
+        };
+
+        let mut res = Response::new(Full::new(Bytes::from(html)));
+
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        (*res.headers_mut()).append(
+            CONTENT_TYPE,
+            HeaderValue::from_static(TEXT_HTML_UTF_8.as_ref()),
+        );
+        res
     }
 }
