@@ -15,8 +15,8 @@ async function deleteCredential(accessKeyId) {
             throw new Error(`Failed to delete credential: ${error}`);
         }
 
-        // Redirect to credentials list
-        window.location.href = '/admin/credentials';
+        // Redirect to identities list
+        window.location.href = '/admin/identities';
     } catch (error) {
         console.error('Error deleting credential:', error);
         alert(`Error deleting credential: ${error.message}`);
@@ -111,7 +111,7 @@ function initCredentialForm() {
         try {
             await saveCredential(accessKeyId, secretAccessKey, isEdit);
             alert('Credential saved successfully!');
-            window.location.href = `/admin/credentials/${accessKeyId}`;
+            window.location.href = `/admin/identities/${accessKeyId}`;
         } catch (error) {
             alert(`Error: ${error.message}`);
         }

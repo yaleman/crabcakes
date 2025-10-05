@@ -75,14 +75,6 @@ struct PolicyFormTemplate {
     policy_json: String,
 }
 
-/// Credentials list template
-#[derive(Template)]
-#[template(path = "credentials.html")]
-struct CredentialsTemplate {
-    page: String,
-    credentials: Vec<String>,
-}
-
 /// Credential form template (for creating/editing)
 #[derive(Template)]
 #[template(path = "credential_form.html")]
@@ -90,14 +82,6 @@ struct CredentialFormTemplate {
     page: String,
     access_key_id: String,
     is_edit: bool,
-}
-
-/// Credential detail template
-#[derive(Template)]
-#[template(path = "credential_detail.html")]
-struct CredentialDetailTemplate {
-    page: String,
-    access_key_id: String,
 }
 
 /// Buckets list template
@@ -131,6 +115,7 @@ struct IdentitiesTemplate {
 struct IdentityDetailTemplate {
     page: String,
     identity: crate::policy_analyzer::IdentityInfo,
+    has_credential: bool,
 }
 
 /// Policy info for listing
@@ -157,6 +142,14 @@ struct ObjectInfo {
     key: String,
     size_formatted: String,
     last_modified: String,
+}
+
+fn login_redirect() -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header(LOCATION, "/login")
+        .body(Full::new(Bytes::new()))
+        .map_err(CrabCakesError::from)
 }
 
 /// Web handler for admin UI and API endpoints
@@ -208,14 +201,20 @@ impl WebHandler {
                 self.handle_api_create_policy(req, session.clone()).await
             }
             ("PUT", path) if path.starts_with("/admin/api/policies/") => {
-                let policy_name = path.strip_prefix("/admin/api/policies/").unwrap_or("");
-                self.handle_api_update_policy(req, session.clone(), policy_name)
-                    .await
+                self.handle_api_update_policy(
+                    req,
+                    session.clone(),
+                    path.strip_prefix("/admin/api/policies/").unwrap_or(""),
+                )
+                .await
             }
             ("DELETE", path) if path.starts_with("/admin/api/policies/") => {
-                let policy_name = path.strip_prefix("/admin/api/policies/").unwrap_or("");
-                self.handle_api_delete_policy(req, session.clone(), policy_name)
-                    .await
+                self.handle_api_delete_policy(
+                    req,
+                    session.clone(),
+                    path.strip_prefix("/admin/api/policies/").unwrap_or(""),
+                )
+                .await
             }
             ("GET", "/admin/api/credentials") => {
                 self.handle_api_list_credentials(session.clone()).await
@@ -225,9 +224,12 @@ impl WebHandler {
                     .await
             }
             ("PUT", path) if path.starts_with("/admin/api/credentials/") => {
-                let access_key_id = path.strip_prefix("/admin/api/credentials/").unwrap_or("");
-                self.handle_api_update_credential(req, session.clone(), access_key_id)
-                    .await
+                self.handle_api_update_credential(
+                    req,
+                    session.clone(),
+                    path.strip_prefix("/admin/api/credentials/").unwrap_or(""),
+                )
+                .await
             }
             ("DELETE", path) if path.starts_with("/admin/api/credentials/") => {
                 let access_key_id = path.strip_prefix("/admin/api/credentials/").unwrap_or("");
@@ -251,24 +253,18 @@ impl WebHandler {
                 self.handle_policy_detail(session.clone(), policy_name)
                     .await
             }
-            ("GET", "/admin/credentials") => self.handle_credentials(session.clone()).await,
-            ("GET", "/admin/credentials/new") => {
+            ("GET", "/admin/identities") => self.handle_identities(session.clone()).await,
+            ("GET", "/admin/identities/new") => {
                 self.handle_credential_new_form(session.clone()).await
             }
-            ("GET", path) if path.starts_with("/admin/credentials/") && path.ends_with("/edit") => {
+            ("GET", path) if path.starts_with("/admin/identities/") && path.ends_with("/edit") => {
                 let access_key_id = path
-                    .strip_prefix("/admin/credentials/")
+                    .strip_prefix("/admin/identities/")
                     .and_then(|s| s.strip_suffix("/edit"))
                     .unwrap_or("");
                 self.handle_credential_edit_form(session.clone(), access_key_id)
                     .await
             }
-            ("GET", path) if path.starts_with("/admin/credentials/") => {
-                let access_key_id = path.strip_prefix("/admin/credentials/").unwrap_or("");
-                self.handle_credential_detail(session.clone(), access_key_id)
-                    .await
-            }
-            ("GET", "/admin/identities") => self.handle_identities(session.clone()).await,
             ("GET", path) if path.starts_with("/admin/identities/") => {
                 let access_key_id = path.strip_prefix("/admin/identities/").unwrap_or("");
                 self.handle_identity_detail(session.clone(), access_key_id)
@@ -423,11 +419,7 @@ impl WebHandler {
             .map_err(|e| CrabCakesError::other(&format!("Failed to delete session: {}", e)))?;
 
         // Redirect to login page
-        Response::builder()
-            .status(StatusCode::FOUND)
-            .header(LOCATION, "/login")
-            .body(Full::new(Bytes::new()))
-            .map_err(CrabCakesError::from)
+        login_redirect()
     }
 
     /// Helper: Check if user is authenticated
@@ -525,13 +517,7 @@ impl WebHandler {
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         let (user_id, user_email) = match self.check_auth(&session).await {
             Ok(auth) => auth,
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+            Err(_) => return login_redirect(),
         };
 
         let access_key_id: String = session
@@ -575,15 +561,8 @@ impl WebHandler {
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
         let policy_names = self.policy_store.get_policy_names().await;
         let mut policies: Vec<PolicyInfo> = Vec::new();
@@ -614,15 +593,8 @@ impl WebHandler {
         session: Session,
         policy_name: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         let policy = self
@@ -681,10 +653,8 @@ impl WebHandler {
                 // Create a row for each principal + action + resource combination
                 for arn in principal_to_arns(principal) {
                     let display_name = crate::policy_analyzer::extract_display_name(&arn);
-                    let identity_type = format!(
-                        "{}",
-                        crate::policy_analyzer::determine_identity_type(&arn)
-                    );
+                    let identity_type =
+                        format!("{}", crate::policy_analyzer::determine_identity_type(&arn));
 
                     for action in &actions {
                         for resource in &resources {
@@ -724,15 +694,8 @@ impl WebHandler {
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         let template = PolicyFormTemplate {
@@ -754,15 +717,8 @@ impl WebHandler {
         session: Session,
         policy_name: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         let policy = self
@@ -787,59 +743,17 @@ impl WebHandler {
         self.build_html_response(html)
     }
 
-    /// GET /admin/credentials - List all credentials
-    async fn handle_credentials(
-        &self,
-        session: Session,
-    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
-        };
-
-        let credentials = self
-            .credentials_store
-            .read()
-            .await
-            .get_access_key_ids()
-            .await;
-
-        let template = CredentialsTemplate {
-            page: "credentials".to_string(),
-            credentials,
-        };
-
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
-    }
-
-    /// GET /admin/credentials/new - Show form for creating a new credential
+    /// GET /admin/identities/new - Show form for creating a new credential
     async fn handle_credential_new_form(
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         let template = CredentialFormTemplate {
-            page: "credentials".to_string(),
+            page: "identities".to_string(),
             access_key_id: String::new(),
             is_edit: false,
         };
@@ -857,15 +771,8 @@ impl WebHandler {
         session: Session,
         access_key_id: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         // Verify credential exists
@@ -881,50 +788,9 @@ impl WebHandler {
         }
 
         let template = CredentialFormTemplate {
-            page: "credentials".to_string(),
+            page: "identities".to_string(),
             access_key_id: access_key_id.to_string(),
             is_edit: true,
-        };
-
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
-    }
-
-    /// GET /admin/credentials/{id} - View credential details
-    async fn handle_credential_detail(
-        &self,
-        session: Session,
-        access_key_id: &str,
-    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
-        };
-
-        // Verify credential exists
-        if self
-            .credentials_store
-            .read()
-            .await
-            .get_credential(access_key_id)
-            .await
-            .is_none()
-        {
-            return self.not_found().await;
-        }
-
-        let template = CredentialDetailTemplate {
-            page: "credentials".to_string(),
-            access_key_id: access_key_id.to_string(),
         };
 
         let html = template
@@ -939,15 +805,8 @@ impl WebHandler {
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         // Get all credentials
@@ -998,15 +857,8 @@ impl WebHandler {
         session: Session,
         access_key_id: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         // Build ARN from access_key_id
@@ -1018,9 +870,19 @@ impl WebHandler {
         )
         .await;
 
+        // Check if credential exists
+        let has_credential = self
+            .credentials_store
+            .read()
+            .await
+            .get_credential(access_key_id)
+            .await
+            .is_some();
+
         let template = IdentityDetailTemplate {
             page: "identities".to_string(),
             identity,
+            has_credential,
         };
 
         let html = template
@@ -1035,15 +897,8 @@ impl WebHandler {
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         let buckets = self
@@ -1071,15 +926,8 @@ impl WebHandler {
         session: Session,
         bucket_path: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        match self.check_auth(&session).await {
-            Ok(_) => {}
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(LOCATION, "/login")
-                    .body(Full::new(Bytes::new()))
-                    .map_err(CrabCakesError::from);
-            }
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
         };
 
         // Extract bucket name from path

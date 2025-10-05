@@ -11,6 +11,10 @@
     View which permissions each identity has across all policies.
 </p>
 
+<div>
+    <a href="/admin/identities/new" class="btn btn-primary">Create New Identity</a>
+</div>
+
 <table>
     <thead>
         <tr>
@@ -18,7 +22,7 @@
             <th>Type</th>
             <th>Credential</th>
             <th>Policies</th>
-            <th>Actions</th>
+            <th>Unique Actions</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -52,8 +56,19 @@
             <td>
                 <a href="/admin/identities/{{ identity.principal_arn }}"
                     class="btn btn-primary btn-small">
-                    View Details
+                    View
                 </a>
+                {% if identity.has_credential %}
+                <a href="/admin/identities/{{ identity.principal_arn }}/edit"
+                    class="btn btn-secondary btn-small">
+                    Edit
+                </a>
+                {% else %}
+                <a href="/admin/identities/new?access_key_id={{ identity.principal_arn }}"
+                    class="btn btn-secondary btn-small">
+                    Create Credential
+                </a>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}

@@ -28,7 +28,44 @@ endblock %}
             <th>Principal ARN:</th>
             <td><code>{{ identity.principal_arn }}</code></td>
         </tr>
+        <tr>
+            <th>Credential Status:</th>
+            <td>
+                {% if has_credential %}
+                <span class="badge badge-green">✓ Has Credential</span>
+                {% else %}
+                <span class="badge badge-red">⚠ No Credential</span>
+                {% endif %}
+            </td>
+        </tr>
     </table>
+</div>
+
+<div>
+    <h3>Credential Management</h3>
+    <ul class="no-list-style button-list">
+        {% if has_credential %}
+        <li>
+            <a href="/admin/identities/{{ identity.display_name }}/edit"
+                class="btn btn-primary">
+                Edit Credential
+            </a>
+        </li>
+        <li>
+            <button id="delete-credential-btn" data-access-key-id="{{ identity.display_name }}"
+                class="btn btn-danger">
+                Delete Credential
+            </button>
+        </li>
+        {% else %}
+        <li>
+            <a href="/admin/identities/new?access_key_id={{ identity.display_name }}"
+                class="btn btn-primary">
+                Create Credential
+            </a>
+        </li>
+        {% endif %}
+    </ul>
 </div>
 
 <h2>Policies Granting Access</h2>
@@ -83,4 +120,11 @@ endblock %}
 <div class="back-link-container">
     <a href="/admin/identities" class="btn btn-primary">← Back to Identities</a>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+{% if has_credential %}
+<script src="/admin/static/js/csrf.js"></script>
+<script src="/admin/static/js/credential-crud.js"></script>
+{% endif %}
 {% endblock %}
