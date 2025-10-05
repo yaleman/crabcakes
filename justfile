@@ -35,7 +35,7 @@ docker_build:
 # build and run the docker image, mounting ./config as the config dir
 docker_run: docker_build
     docker run --rm -it \
-        -p 8090:8090 \
+        -p 9000:9000 \
         --mount type=bind,src=$(pwd)/config,target=/config \
         ghcr.io/yaleman/crabcakes:latest
 

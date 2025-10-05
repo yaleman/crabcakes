@@ -17,6 +17,13 @@ pub(crate) type WebServiceResponse = Response<Full<Bytes>>;
 pub(crate) type WebServiceWithSession =
     tower::util::BoxCloneService<Request<hyper::body::Incoming>, WebServiceResponse, Infallible>;
 
+/// Returns "OK"
+fn healthcheck_response() -> WebServiceResponse {
+    let mut response = Response::new(Full::new(Bytes::from("OK")));
+    *response.status_mut() = hyper::StatusCode::OK;
+    response
+}
+
 /// Routes requests to either S3 or web handlers based on path
 pub async fn route_request(
     req: Request<hyper::body::Incoming>,
@@ -25,6 +32,10 @@ pub async fn route_request(
     web_service: Option<WebServiceWithSession>,
 ) -> Result<WebServiceResponse, Infallible> {
     let path = req.uri().path();
+
+    if path == "/up" {
+        return Ok(healthcheck_response());
+    }
 
     // Check if this is a web UI path
     let is_web_path = path == "/"

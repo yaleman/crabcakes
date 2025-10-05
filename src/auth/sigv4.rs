@@ -683,7 +683,7 @@ mod tests {
         // Create request without Authorization header
         let request = http::Request::builder()
             .method("GET")
-            .uri("http://localhost:8090/bucket1/test.txt")
+            .uri("http://localhost:9000/bucket1/test.txt")
             .body(vec![])
             .unwrap();
 
@@ -710,7 +710,7 @@ mod tests {
         // Create request without Authorization header
         let request = http::Request::builder()
             .method("GET")
-            .uri("http://localhost:8090/bucket1/test.txt")
+            .uri("http://localhost:9000/bucket1/test.txt")
             .body(vec![])
             .unwrap();
 
@@ -737,7 +737,7 @@ mod tests {
         // Create request with malformed Authorization header
         let request = http::Request::builder()
             .method("GET")
-            .uri("http://localhost:8090/bucket1/test.txt")
+            .uri("http://localhost:9000/bucket1/test.txt")
             .header(AUTHORIZATION, "Not a valid signature")
             .body(vec![])
             .unwrap();

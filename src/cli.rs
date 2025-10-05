@@ -9,7 +9,7 @@ use clap::Parser;
 
 #[derive(Parser, Debug)]
 pub struct Cli {
-    #[clap(short, long, default_value = "8090", env = "CRABCAKES_PORT")]
+    #[clap(short, long, default_value = "9000", env = "CRABCAKES_PORT")]
     pub port: NonZeroU16,
 
     #[clap(long, default_value = "127.0.0.1", env = "CRABCAKES_HOST")]
@@ -37,9 +37,6 @@ pub struct Cli {
     #[clap(long, env = "CRABCAKES_TLS_KEY")]
     pub tls_key: Option<PathBuf>,
 
-    #[clap(long, default_value = "false", env = "CRABCAKES_DISABLE_API")]
-    pub disable_api: bool,
-
     #[clap(
         long,
         env = "CRABCAKES_OIDC_CLIENT_ID",
@@ -53,4 +50,7 @@ pub struct Cli {
         help = "OIDC issuer URL (e.g., https://accounts.google.com). The .well-known/openid-configuration path is automatically appended during discovery."
     )]
     pub oidc_discovery_url: Option<String>,
+
+    #[cfg(test)]
+    pub(crate) disable_api: bool,
 }

@@ -30,7 +30,7 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
 
 The server:
 
-- Binds to a configurable host/port (defaults: 127.0.0.1:8090)
+- Binds to a configurable host/port (defaults: 127.0.0.1:9000)
 - Serves files from a configurable root directory (defaults: ./data)
 - Loads IAM policies and credentials from a configurable config directory (defaults: ./config)
   - Policies loaded from `config_dir/policies/`
@@ -377,7 +377,7 @@ See `test_config/policies/` directory for examples:
 
 ```bash
 cargo build --quiet                                     # Build the project
-cargo run --quiet                                       # Run with defaults (127.0.0.1:8090, ./data, ./config)
+cargo run --quiet                                       # Run with defaults (127.0.0.1:9000, ./data, ./config)
 cargo run --quiet -- --port 3000                        # Run on custom port
 cargo run --quiet -- --host 0.0.0.0 --port 8080         # Run on all interfaces
 cargo run --quiet -- --root-dir /path/to/data           # Serve from custom directory
@@ -414,6 +414,7 @@ just build-js                           # Same as above
 ```
 
 **Build process:**
+
 - Source: `static/js/bucket-operations-src.js` (imports from `@aws-sdk/client-s3`)
 - Output: `static/js/bucket-operations.js` (bundled, minified, ~217KB)
 - Tool: esbuild (configured in `build-aws-sdk.js`)
@@ -432,6 +433,7 @@ just lint-web                           # Lint JavaScript and CSS only
 ```
 
 The project uses:
+
 - **ESLint** for JavaScript linting (configured in `.eslintrc.json`)
   - Bundled files (`bucket-operations.js`) are excluded from linting
 - **Stylelint** for CSS linting (configured in `.stylelintrc.json`)

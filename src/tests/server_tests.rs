@@ -1084,3 +1084,25 @@ async fn test_reserved_bucket_names() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_healthcheck() {
+    let (handle, port) = start_test_server(
+        tempfile::TempDir::new()
+            .expect("Failed to get tempdir")
+            .path(),
+    )
+    .await;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("http://localhost:{}/up", port))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), hyper::StatusCode::OK);
+    let body = response.text().await.unwrap();
+    assert_eq!(body, "OK");
+    handle.abort();
+}
