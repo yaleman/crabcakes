@@ -165,7 +165,7 @@ impl From<CrabCakesError> for Response<Full<Bytes>> {
                 #[cfg(not(any(test, debug_assertions)))]
                 format!(
                     "<html><body><h1>Error</h1><p>Failed to render error template: {}</p><p>Original error: {}</p></body></html>",
-                    e, self
+                    e, err
                 )
             }
         };
