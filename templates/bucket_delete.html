@@ -1,0 +1,50 @@
+{% extends "layout.html" %}
+
+{% block title %}Delete Bucket - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <h1><a href="/admin/buckets">Buckets</a> / <a href="/admin/buckets/{{ bucket_name }}">{{ bucket_name }}</a> / Delete</h1>
+</div>
+
+<div class="warning-section">
+    <h2>⚠️ Warning: This action cannot be undone</h2>
+    <p>You are about to delete the bucket <strong>{{ bucket_name }}</strong>.</p>
+    {% if object_count > 0 %}
+    <p>This bucket contains <strong>{{ object_count }} object(s)</strong>. All objects will be permanently deleted.</p>
+    {% else %}
+    <p>This bucket is currently empty.</p>
+    {% endif %}
+</div>
+
+<form id="bucket-delete-form">
+    <div class="form-group">
+        <label for="confirm-bucket-name">Type the bucket name <strong>{{ bucket_name }}</strong> to confirm:</label>
+        <input type="text" id="confirm-bucket-name" name="confirm-bucket-name"
+            autocomplete="off"
+            required>
+    </div>
+
+    {% if object_count > 0 %}
+    <div class="form-group">
+        <label>
+            <input type="checkbox" id="confirm-delete-objects" name="confirm-delete-objects" required>
+            I understand this will permanently delete all {{ object_count }} object(s) in this bucket
+        </label>
+    </div>
+    {% endif %}
+
+    <input type="hidden" id="bucket-name" value="{{ bucket_name }}">
+    <input type="hidden" id="object-count" value="{{ object_count }}">
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-danger" id="delete-btn" disabled>Delete Bucket</button>
+        <a href="/admin/buckets/{{ bucket_name }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/js/csrf.js"></script>
+<script src="/admin/static/js/bucket-crud.js"></script>
+{% endblock %}

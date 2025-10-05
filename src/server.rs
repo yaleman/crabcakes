@@ -72,7 +72,9 @@ impl Server {
             tls_key: cli.tls_key,
             oidc_client_id: cli.oidc_client_id,
             oidc_discovery_url: cli.oidc_discovery_url,
-            frontend_url: cli.frontend_url,
+            frontend_url: cli
+                .frontend_url
+                .map(|url| url.trim_end_matches('/').to_string()),
             #[cfg(test)]
             disable_api: cli.disable_api,
         }

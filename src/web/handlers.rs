@@ -99,6 +99,22 @@ struct BucketsTemplate {
     buckets: Vec<String>,
 }
 
+/// Bucket form template (for creating buckets)
+#[derive(Template)]
+#[template(path = "bucket_form.html")]
+struct BucketFormTemplate {
+    page: String,
+}
+
+/// Bucket delete confirmation template
+#[derive(Template)]
+#[template(path = "bucket_delete.html")]
+struct BucketDeleteTemplate {
+    page: String,
+    bucket_name: String,
+    object_count: usize,
+}
+
 /// Bucket detail template
 #[derive(Template)]
 #[template(path = "bucket_detail.html")]
@@ -307,6 +323,23 @@ impl WebHandler {
                     .await
             }
             ("GET", "/admin/buckets") => self.handle_buckets(session.clone()).await,
+            ("GET", "/admin/buckets/new") => self.handle_bucket_new_form(session.clone()).await,
+            ("POST", "/admin/api/buckets") => {
+                self.handle_api_create_bucket(req, session.clone()).await
+            }
+            ("GET", path) if path.starts_with("/admin/buckets/") && path.ends_with("/delete") => {
+                let bucket_name = path
+                    .strip_prefix("/admin/buckets/")
+                    .and_then(|s| s.strip_suffix("/delete"))
+                    .unwrap_or("");
+                self.handle_bucket_delete_form(session.clone(), bucket_name)
+                    .await
+            }
+            ("DELETE", path) if path.starts_with("/admin/api/buckets/") => {
+                let bucket_name = path.strip_prefix("/admin/api/buckets/").unwrap_or("");
+                self.handle_api_delete_bucket(req, session.clone(), bucket_name)
+                    .await
+            }
             ("GET", path) if path.starts_with("/admin/buckets/") => {
                 let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
                 self.handle_bucket_detail(session.clone(), bucket_path)
@@ -1020,6 +1053,168 @@ impl WebHandler {
             .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
 
         self.build_html_response(html)
+    }
+
+    /// GET /admin/buckets/new - Show form for creating a new bucket
+    async fn handle_bucket_new_form(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
+        };
+
+        let template = BucketFormTemplate {
+            page: "buckets".to_string(),
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// POST /admin/api/buckets - Create a new bucket
+    async fn handle_api_create_bucket(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts and body
+        let (parts, body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Read request body
+        let body_bytes = body.collect().await?.to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+
+        // Parse request body
+        #[derive(serde::Deserialize)]
+        struct CreateBucketRequest {
+            bucket_name: String,
+        }
+
+        let request: CreateBucketRequest = serde_json::from_str(body_str)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+
+        // Create bucket through filesystem service
+        self.filesystem
+            .write()
+            .await
+            .create_bucket(&request.bucket_name)
+            .await
+            .map_err(CrabCakesError::from)?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "bucket_name": request.bucket_name
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::CREATED)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
+    }
+
+    /// GET /admin/buckets/{name}/delete - Show bucket deletion confirmation page
+    async fn handle_bucket_delete_form(
+        &self,
+        session: Session,
+        bucket_name: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
+        };
+
+        // Get object count for the bucket
+        let (entries, _) = self
+            .filesystem
+            .read()
+            .await
+            .list_directory(Some(&format!("{}/", bucket_name)), 10000, None)
+            .map_err(CrabCakesError::from)?;
+
+        let template = BucketDeleteTemplate {
+            page: "buckets".to_string(),
+            bucket_name: bucket_name.to_string(),
+            object_count: entries.len(),
+        };
+
+        let html = template
+            .render()
+            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
+
+        self.build_html_response(html)
+    }
+
+    /// DELETE /admin/api/buckets/{name} - Delete a bucket
+    async fn handle_api_delete_bucket(
+        &self,
+        req: Request<hyper::body::Incoming>,
+        session: Session,
+        bucket_name: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts
+        let (parts, _body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Check if force parameter is provided
+        let query = parts.uri.query().unwrap_or("");
+        let force = query.contains("force=true");
+
+        if force {
+            // Delete all objects in the bucket first
+            let (entries, _) = self
+                .filesystem
+                .read()
+                .await
+                .list_directory(Some(&format!("{}/", bucket_name)), 10000, None)
+                .map_err(CrabCakesError::from)?;
+
+            // Delete each object
+            for entry in entries {
+                self.filesystem
+                    .write()
+                    .await
+                    .delete_file(&entry.key)
+                    .await
+                    .map_err(CrabCakesError::from)?;
+            }
+        }
+
+        // Delete the bucket (will fail if not empty and force=false)
+        self.filesystem
+            .write()
+            .await
+            .delete_bucket(bucket_name)
+            .await
+            .map_err(CrabCakesError::from)?;
+
+        // Return success
+        let json = serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "bucket_name": bucket_name
+        }))?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::new(Bytes::from(json)))
+            .map_err(CrabCakesError::from)
     }
 
     /// GET /api/session - Return session info with temp credentials

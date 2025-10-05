@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+
+{% block title %}Create Bucket - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <h1><a href="/admin/buckets">Buckets</a> / Create New</h1>
+</div>
+
+<form id="bucket-form">
+    <div class="form-group">
+        <label for="bucket-name">Bucket Name:</label>
+        <input type="text" id="bucket-name" name="bucket-name"
+            pattern="[a-z0-9][a-z0-9-]{0,61}[a-z0-9]"
+            title="Bucket name must be 1-63 characters, lowercase letters, numbers, and hyphens only. Cannot start or end with hyphen."
+            required>
+        <p class="help-text">
+            Bucket name must be 1-63 characters, lowercase letters, numbers, and hyphens only.
+            Cannot start or end with hyphen.
+        </p>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create Bucket</button>
+        <a href="/admin/buckets" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/js/csrf.js"></script>
+<script src="/admin/static/js/bucket-crud.js"></script>
+{% endblock %}

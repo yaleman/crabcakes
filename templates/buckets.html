@@ -3,7 +3,10 @@
 {% block title %}Buckets - Crabcakes Admin{% endblock %}
 
 {% block content %}
-<h1>S3 Buckets</h1>
+<div class="page-header">
+    <h1>Buckets</h1>
+    <a href="/admin/buckets/new" class="btn btn-primary">+ Create Bucket</a>
+</div>
 
 <table>
     <thead>
@@ -24,6 +27,10 @@
                 <a href="/admin/buckets/{{ bucket }}"
                     class="btn btn-primary btn-small">
                     Browse Objects
+                </a>
+                <a href="/admin/buckets/{{ bucket }}/delete"
+                    class="btn btn-danger btn-small">
+                    Delete
                 </a>
             </td>
         </tr>
