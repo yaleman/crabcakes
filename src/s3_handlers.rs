@@ -271,8 +271,7 @@ impl S3Handler {
         let key = key.to_string();
 
         // Determine S3 action and resource for authorization
-        let s3_action =
-            http_method_to_s3_action(method.as_str(), &path, &query, is_bucket_operation);
+        let s3_action = http_method_to_s3_action(&method, &path, &query, is_bucket_operation);
         let (bucket, extracted_key) = extract_bucket_and_key(&path);
 
         // Use extracted bucket from path for path-style requests, fall back to host header
@@ -297,6 +296,7 @@ impl S3Handler {
             "crabcakes",
             "docs",
             "help",
+            "lost+found",
         ];
 
         if !bucket_for_operation.is_empty() && RESERVED_BUCKET_NAMES.contains(&bucket_for_operation)

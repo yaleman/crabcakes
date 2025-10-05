@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use http::HeaderValue;
+use http::{HeaderValue, Method};
 use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
 use scratchstack_aws_principal;
@@ -282,47 +282,47 @@ impl AuthContext {
 
 /// Map S3 HTTP operations to IAM actions
 pub fn http_method_to_s3_action(
-    method: &str,
+    method: &Method,
     path: &str,
     query: &str,
     is_bucket_operation: bool,
 ) -> &'static str {
     match (method, path, query, is_bucket_operation) {
         // Multipart upload operations (must come before general POST cases)
-        ("POST", _, q, false) if q.contains("uploads") && !q.contains("uploadId") => {
+        (&Method::POST, _, q, false) if q.contains("uploads") && !q.contains("uploadId") => {
             "s3:PutObject" // InitiateMultipartUpload
         }
-        ("PUT", _, q, false) if q.contains("uploadId") && q.contains("partNumber") => {
+        (&Method::PUT, _, q, false) if q.contains("uploadId") && q.contains("partNumber") => {
             "s3:PutObject" // UploadPart
         }
-        ("DELETE", _, q, false) if q.contains("uploadId") => "s3:AbortMultipartUpload",
-        ("GET", _, q, true) if q.contains("uploads") => "s3:ListBucketMultipartUploads",
-        ("GET", _, q, false) if q.contains("uploadId") => "s3:ListMultipartUploadParts",
-        ("POST", _, q, false) if q.contains("uploadId") => "s3:PutObject", // CompleteMultipartUpload
+        (&Method::DELETE, _, q, false) if q.contains("uploadId") => "s3:AbortMultipartUpload",
+        (&Method::GET, _, q, true) if q.contains("uploads") => "s3:ListBucketMultipartUploads",
+        (&Method::GET, _, q, false) if q.contains("uploadId") => "s3:ListMultipartUploadParts",
+        (&Method::POST, _, q, false) if q.contains("uploadId") => "s3:PutObject", // CompleteMultipartUpload
 
         // Object tagging operations
-        ("GET", _, q, false) if q.contains("tagging") => "s3:GetObjectTagging",
-        ("PUT", _, q, false) if q.contains("tagging") => "s3:PutObjectTagging",
-        ("DELETE", _, q, false) if q.contains("tagging") => "s3:DeleteObjectTagging",
-        ("GET", _, q, false) if q.contains("attributes") => "s3:GetObjectAttributes",
+        (&Method::GET, _, q, false) if q.contains("tagging") => "s3:GetObjectTagging",
+        (&Method::PUT, _, q, false) if q.contains("tagging") => "s3:PutObjectTagging",
+        (&Method::DELETE, _, q, false) if q.contains("tagging") => "s3:DeleteObjectTagging",
+        (&Method::GET, _, q, false) if q.contains("attributes") => "s3:GetObjectAttributes",
 
         // Special cases
-        ("GET", _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
-        ("GET", _, q, _) if q.contains("location") => "s3:GetBucketLocation",
-        ("GET", "/", _, _) => "s3:ListAllMyBuckets",
-        ("POST", _, q, _) if q.contains("delete") => "s3:DeleteObject", // DeleteObjects batch
+        (&Method::GET, _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
+        (&Method::GET, _, q, _) if q.contains("location") => "s3:GetBucketLocation",
+        (&Method::GET, "/", _, _) => "s3:ListAllMyBuckets",
+        (&Method::POST, _, q, _) if q.contains("delete") => "s3:DeleteObject", // DeleteObjects batch
 
         // Bucket operations
-        ("GET", _, _, true) => "s3:ListBucket", // GET on bucket (list operation)
-        ("HEAD", _, _, true) => "s3:ListBucket", // HeadBucket uses ListBucket permission
-        ("PUT", _, _, true) => "s3:CreateBucket",
-        ("DELETE", _, _, true) => "s3:DeleteBucket",
+        (&Method::GET, _, _, true) => "s3:ListBucket", // GET on bucket (list operation)
+        (&Method::HEAD, _, _, true) => "s3:ListBucket", // HeadBucket uses ListBucket permission
+        (&Method::PUT, _, _, true) => "s3:CreateBucket",
+        (&Method::DELETE, _, _, true) => "s3:DeleteBucket",
 
         // Object operations
-        ("GET", _, _, false) => "s3:GetObject",
-        ("HEAD", _, _, false) => "s3:GetObject", // HeadObject uses GetObject permission
-        ("PUT", _, _, false) => "s3:PutObject",
-        ("DELETE", _, _, false) => "s3:DeleteObject",
+        (&Method::GET, _, _, false) => "s3:GetObject",
+        (&Method::HEAD, _, _, false) => "s3:GetObject", // HeadObject uses GetObject permission
+        (&Method::PUT, _, _, false) => "s3:PutObject",
+        (&Method::DELETE, _, _, false) => "s3:DeleteObject",
 
         _ => "s3:Unknown",
     }
@@ -635,45 +635,45 @@ mod tests {
     #[test]
     fn test_http_method_to_s3_action() {
         assert_eq!(
-            http_method_to_s3_action("GET", "/", "", false),
+            http_method_to_s3_action(&Method::GET, "/", "", false),
             "s3:ListAllMyBuckets"
         );
         assert_eq!(
-            http_method_to_s3_action("GET", "/bucket1", "list-type=2", false),
+            http_method_to_s3_action(&Method::GET, "/bucket1", "list-type=2", false),
             "s3:ListBucket"
         );
         assert_eq!(
-            http_method_to_s3_action("GET", "/bucket1/test.txt", "", false),
+            http_method_to_s3_action(&Method::GET, "/bucket1/test.txt", "", false),
             "s3:GetObject"
         );
         assert_eq!(
-            http_method_to_s3_action("HEAD", "/bucket1/test.txt", "", false),
+            http_method_to_s3_action(&Method::HEAD, "/bucket1/test.txt", "", false),
             "s3:GetObject"
         );
         assert_eq!(
-            http_method_to_s3_action("PUT", "/bucket1/test.txt", "", false),
+            http_method_to_s3_action(&Method::PUT, "/bucket1/test.txt", "", false),
             "s3:PutObject"
         );
         assert_eq!(
-            http_method_to_s3_action("DELETE", "/bucket1/test.txt", "", false),
+            http_method_to_s3_action(&Method::DELETE, "/bucket1/test.txt", "", false),
             "s3:DeleteObject"
         );
         // Bucket operations
         assert_eq!(
-            http_method_to_s3_action("HEAD", "/bucket1", "", true),
+            http_method_to_s3_action(&Method::HEAD, "/bucket1", "", true),
             "s3:ListBucket"
         );
         assert_eq!(
-            http_method_to_s3_action("PUT", "/bucket1", "", true),
+            http_method_to_s3_action(&Method::PUT, "/bucket1", "", true),
             "s3:CreateBucket"
         );
         assert_eq!(
-            http_method_to_s3_action("DELETE", "/bucket1", "", true),
+            http_method_to_s3_action(&Method::DELETE, "/bucket1", "", true),
             "s3:DeleteBucket"
         );
         // GetBucketLocation
         assert_eq!(
-            http_method_to_s3_action("GET", "/bucket1", "location", true),
+            http_method_to_s3_action(&Method::GET, "/bucket1", "location", true),
             "s3:GetBucketLocation"
         );
     }
@@ -686,7 +686,7 @@ mod tests {
 
         // Create request without Authorization header
         let request = http::Request::builder()
-            .method("GET")
+            .method(&Method::GET)
             .uri("http://localhost:9000/bucket1/test.txt")
             .body(vec![])
             .unwrap();
@@ -713,7 +713,7 @@ mod tests {
 
         // Create request without Authorization header
         let request = http::Request::builder()
-            .method("GET")
+            .method(&Method::GET)
             .uri("http://localhost:9000/bucket1/test.txt")
             .body(vec![])
             .unwrap();
@@ -740,7 +740,7 @@ mod tests {
 
         // Create request with malformed Authorization header
         let request = http::Request::builder()
-            .method("GET")
+            .method(&Method::GET)
             .uri("http://localhost:9000/bucket1/test.txt")
             .header(AUTHORIZATION, "Not a valid signature")
             .body(vec![])

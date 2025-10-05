@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use askama::Template;
 use form_urlencoded;
+use http::Method;
 use http::header::{
     CACHE_CONTROL, CONTENT_TYPE, LOCATION, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
 };
@@ -216,20 +217,22 @@ impl WebHandler {
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let method = req.method().clone();
         let path = req.uri().path().to_string();
-        let result = match (method.as_str(), path.as_str()) {
-            ("GET", "/") => self.handle_root().await,
-            ("GET", "/login") => self.handle_login().await,
-            ("GET", path) if path.starts_with("/oauth2/callback") => {
+        let result = match (method, path.as_str()) {
+            (Method::GET, "/") => self.handle_root().await,
+            (Method::GET, "/login") => self.handle_login().await,
+            (Method::GET, path) if path.starts_with("/oauth2/callback") => {
                 self.handle_oauth_callback(req, session.clone()).await
             }
-            ("POST", "/logout") => self.handle_logout(session.clone()).await,
-            ("GET", "/api/session") => self.handle_get_session(session.clone()).await,
-            ("GET", "/admin/api/csrf-token") => self.handle_csrf_token(session.clone()).await,
-            ("GET", "/admin/api/policies") => self.handle_api_list_policies(session.clone()).await,
-            ("POST", "/admin/api/policies") => {
+            (Method::POST, "/logout") => self.handle_logout(session.clone()).await,
+            (Method::GET, "/api/session") => self.handle_get_session(session.clone()).await,
+            (Method::GET, "/admin/api/csrf-token") => self.handle_csrf_token(session.clone()).await,
+            (Method::GET, "/admin/api/policies") => {
+                self.handle_api_list_policies(session.clone()).await
+            }
+            (Method::POST, "/admin/api/policies") => {
                 self.handle_api_create_policy(req, session.clone()).await
             }
-            ("PUT", path) if path.starts_with("/admin/api/policies/") => {
+            (Method::PUT, path) if path.starts_with("/admin/api/policies/") => {
                 self.handle_api_update_policy(
                     req,
                     session.clone(),
@@ -237,7 +240,7 @@ impl WebHandler {
                 )
                 .await
             }
-            ("DELETE", path) if path.starts_with("/admin/api/policies/") => {
+            (Method::DELETE, path) if path.starts_with("/admin/api/policies/") => {
                 self.handle_api_delete_policy(
                     req,
                     session.clone(),
@@ -245,14 +248,14 @@ impl WebHandler {
                 )
                 .await
             }
-            ("GET", "/admin/api/credentials") => {
+            (Method::GET, "/admin/api/credentials") => {
                 self.handle_api_list_credentials(session.clone()).await
             }
-            ("POST", "/admin/api/credentials") => {
+            (Method::POST, "/admin/api/credentials") => {
                 self.handle_api_create_credential(req, session.clone())
                     .await
             }
-            ("PUT", path) if path.starts_with("/admin/api/credentials/") => {
+            (Method::PUT, path) if path.starts_with("/admin/api/credentials/") => {
                 self.handle_api_update_credential(
                     req,
                     session.clone(),
@@ -260,7 +263,7 @@ impl WebHandler {
                 )
                 .await
             }
-            ("DELETE", path) if path.starts_with("/admin/api/credentials/") => {
+            (Method::DELETE, path) if path.starts_with("/admin/api/credentials/") => {
                 let access_key_id = path.strip_prefix("/admin/api/credentials/").unwrap_or("");
 
                 if access_key_id.is_empty() {
@@ -269,11 +272,15 @@ impl WebHandler {
                 self.handle_api_delete_credential(req, session.clone(), access_key_id)
                     .await
             }
-            ("GET", "/admin") | ("GET", "/admin/") => self.handle_root().await,
-            ("GET", "/admin/profile") => self.handle_profile(session.clone()).await,
-            ("GET", "/admin/policies") => self.handle_policies(session.clone()).await,
-            ("GET", "/admin/policies/new") => self.handle_policy_new_form(session.clone()).await,
-            ("GET", path) if path.starts_with("/admin/policies/") && path.ends_with("/edit") => {
+            (Method::GET, "/admin") | (Method::GET, "/admin/") => self.handle_root().await,
+            (Method::GET, "/admin/profile") => self.handle_profile(session.clone()).await,
+            (Method::GET, "/admin/policies") => self.handle_policies(session.clone()).await,
+            (Method::GET, "/admin/policies/new") => {
+                self.handle_policy_new_form(session.clone()).await
+            }
+            (Method::GET, path)
+                if path.starts_with("/admin/policies/") && path.ends_with("/edit") =>
+            {
                 let policy_name = path
                     .strip_prefix("/admin/policies/")
                     .and_then(|s| s.strip_suffix("/edit"))
@@ -281,13 +288,13 @@ impl WebHandler {
                 self.handle_policy_edit_form(session.clone(), policy_name)
                     .await
             }
-            ("GET", path) if path.starts_with("/admin/policies/") => {
+            (Method::GET, path) if path.starts_with("/admin/policies/") => {
                 let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
                 self.handle_policy_detail(session.clone(), policy_name)
                     .await
             }
-            ("GET", "/admin/identities") => self.handle_identities(session.clone()).await,
-            ("GET", "/admin/identities/new") => {
+            (Method::GET, "/admin/identities") => self.handle_identities(session.clone()).await,
+            (Method::GET, "/admin/identities/new") => {
                 let access_key_id = req
                     .uri()
                     .query()
@@ -302,7 +309,9 @@ impl WebHandler {
                 self.handle_credential_new_form(session.clone(), access_key_id)
                     .await
             }
-            ("GET", path) if path.starts_with("/admin/identities/") && path.ends_with("/edit") => {
+            (Method::GET, path)
+                if path.starts_with("/admin/identities/") && path.ends_with("/edit") =>
+            {
                 let access_key_id = path
                     .strip_prefix("/admin/identities/")
                     .and_then(|s| s.strip_suffix("/edit"))
@@ -314,7 +323,7 @@ impl WebHandler {
                 self.handle_credential_edit_form(session.clone(), access_key_id)
                     .await
             }
-            ("GET", path) if path.starts_with("/admin/identities/") => {
+            (Method::GET, path) if path.starts_with("/admin/identities/") => {
                 let access_key_id = path.strip_prefix("/admin/identities/").unwrap_or("");
                 if access_key_id.is_empty() {
                     return Ok(respond_404());
@@ -322,12 +331,16 @@ impl WebHandler {
                 self.handle_identity_detail(session.clone(), access_key_id)
                     .await
             }
-            ("GET", "/admin/buckets") => self.handle_buckets(session.clone()).await,
-            ("GET", "/admin/buckets/new") => self.handle_bucket_new_form(session.clone()).await,
-            ("POST", "/admin/api/buckets") => {
+            (Method::GET, "/admin/buckets") => self.handle_buckets(session.clone()).await,
+            (Method::GET, "/admin/buckets/new") => {
+                self.handle_bucket_new_form(session.clone()).await
+            }
+            (Method::POST, "/admin/api/buckets") => {
                 self.handle_api_create_bucket(req, session.clone()).await
             }
-            ("GET", path) if path.starts_with("/admin/buckets/") && path.ends_with("/delete") => {
+            (Method::GET, path)
+                if path.starts_with("/admin/buckets/") && path.ends_with("/delete") =>
+            {
                 let bucket_name = path
                     .strip_prefix("/admin/buckets/")
                     .and_then(|s| s.strip_suffix("/delete"))
@@ -335,17 +348,17 @@ impl WebHandler {
                 self.handle_bucket_delete_form(session.clone(), bucket_name)
                     .await
             }
-            ("DELETE", path) if path.starts_with("/admin/api/buckets/") => {
+            (Method::DELETE, path) if path.starts_with("/admin/api/buckets/") => {
                 let bucket_name = path.strip_prefix("/admin/api/buckets/").unwrap_or("");
                 self.handle_api_delete_bucket(req, session.clone(), bucket_name)
                     .await
             }
-            ("GET", path) if path.starts_with("/admin/buckets/") => {
+            (Method::GET, path) if path.starts_with("/admin/buckets/") => {
                 let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
                 self.handle_bucket_detail(session.clone(), bucket_path)
                     .await
             }
-            ("GET", path) if path.starts_with("/admin/static/") => {
+            (Method::GET, path) if path.starts_with("/admin/static/") => {
                 self.handle_static_file(path).await
             }
             _ => Ok(respond_404()),
