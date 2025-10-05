@@ -12,7 +12,7 @@ fetch('/api/session')
         localStorage.setItem('crabcakes_secret_access_key', data.secret_access_key);
         localStorage.setItem('crabcakes_expires_at', data.expires_at);
         localStorage.setItem('crabcakes_user_email', data.user_email);
-        console.log('Credentials stored in localStorage');
+        console.debug('Credentials stored in localStorage');
     })
     .catch(error => {
         console.error('Error fetching credentials:', error);
