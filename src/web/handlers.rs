@@ -409,7 +409,7 @@ impl WebHandler {
         let (access_key_id, secret_access_key) = self.oauth_client.generate_temp_credentials();
 
         // Set credentials to expire in 8 hours
-        let expires_at = chrono::Utc::now().naive_utc()
+        let expires_at = chrono::Utc::now()
             + chrono::Duration::try_hours(8).ok_or_else(|| {
                 CrabCakesError::other(&"Failed to create credential expiry duration".to_string())
             })?;
@@ -1257,7 +1257,7 @@ impl WebHandler {
             })?;
 
         // Check if credentials are expired
-        if creds.expires_at < chrono::Utc::now().naive_utc() {
+        if creds.expires_at < chrono::Utc::now() {
             return Err(CrabCakesError::other(&"Credentials expired".to_string()));
         }
 

@@ -10,7 +10,7 @@ COPY . /crabcakes/
 
 WORKDIR /crabcakes
 # install the dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get -q install -y \
     curl \
     clang \
     git \
@@ -30,7 +30,6 @@ FROM gcr.io/distroless/cc-debian12 AS crabcakes
 # https://github.com/GoogleContainerTools/distroless/blob/main/examples/rust/Dockerfile
 COPY --from=builder /crabcakes/target/release/crabcakes /
 COPY --from=builder /crabcakes/static /static
-COPY --from=builder /crabcakes/templates /templates
 
 WORKDIR /
 USER nonroot

@@ -50,6 +50,12 @@ body {
     font-weight: 700;
     margin-bottom: 30px;
     text-align: center;
+    text-decoration: none;
+}
+
+.logo a {
+    text-decoration: none;
+    color: var(--color-white);
 }
 
 

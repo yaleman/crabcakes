@@ -1,5 +1,6 @@
 //! Temporary credentials entity model
 
+use chrono::Utc;
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
@@ -11,8 +12,8 @@ pub struct Model {
     pub session_id: String,
     pub user_email: String,
     pub user_id: String,
-    pub expires_at: DateTime,
-    pub created_at: DateTime,
+    pub expires_at: chrono::DateTime<Utc>,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

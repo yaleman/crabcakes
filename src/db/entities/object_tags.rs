@@ -11,7 +11,7 @@ pub struct Model {
     pub key: String,
     pub tag_key: String,
     pub tag_value: String,
-    pub created_at: DateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

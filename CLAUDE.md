@@ -517,3 +517,5 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - Sign out button: Red (#dc3545) background with hover effects
 - Maintain cohesive purple vibe throughout all UI elements
 - never use npm, use pnpm instead
+- always use static files for css/js, it is NEVER acceptable for such code to be inline
+- don't use javascript alerts to show things worked, redirect to the resulting object with a notification message

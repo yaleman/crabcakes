@@ -1,5 +1,6 @@
 //! Database service providing business logic for all database operations
 
+use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
 use tracing::{debug, error};
@@ -66,7 +67,7 @@ impl DBService {
         self.delete_tags(bucket, key).await?;
 
         // Insert new tags
-        let now = chrono::Utc::now().naive_utc();
+        let now = chrono::Utc::now();
         for (tag_key, tag_value) in tags {
             let tag = object_tags::ActiveModel {
                 bucket: Set(bucket.to_string()),
@@ -122,9 +123,9 @@ impl DBService {
         nonce: &str,
         pkce_challenge: &str,
         redirect_uri: &str,
-        expires_at: chrono::NaiveDateTime,
+        expires_at: chrono::DateTime<Utc>,
     ) -> Result<(), CrabCakesError> {
-        let now = chrono::Utc::now().naive_utc();
+        let now = chrono::Utc::now();
         let pkce_state = oauth_pkce_state::ActiveModel {
             state: Set(state.to_string()),
             code_verifier: Set(code_verifier.to_string()),
@@ -162,7 +163,7 @@ impl DBService {
     }
 
     pub async fn cleanup_expired_pkce_states(&self) -> Result<u64, CrabCakesError> {
-        let now = chrono::Utc::now().naive_utc();
+        let now = chrono::Utc::now();
         let result = oauth_pkce_state::Entity::delete_many()
             .filter(oauth_pkce_state::Column::ExpiresAt.lt(now))
             .exec(&*self.db)
@@ -183,9 +184,9 @@ impl DBService {
         session_id: &str,
         user_email: &str,
         user_id: &str,
-        expires_at: chrono::NaiveDateTime,
+        expires_at: chrono::DateTime<Utc>,
     ) -> Result<(), CrabCakesError> {
-        let now = chrono::Utc::now().naive_utc();
+        let now = chrono::Utc::now();
         let creds = temporary_credentials::ActiveModel {
             access_key_id: Set(access_key_id.to_string()),
             secret_access_key: Set(secret_access_key.to_string()),
@@ -253,7 +254,7 @@ impl DBService {
     }
 
     pub async fn cleanup_expired_credentials(&self) -> Result<u64, CrabCakesError> {
-        let now = chrono::Utc::now().naive_utc();
+        let now = chrono::Utc::now();
         let result = temporary_credentials::Entity::delete_many()
             .filter(temporary_credentials::Column::ExpiresAt.lt(now))
             .exec(&*self.db)

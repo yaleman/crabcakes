@@ -93,7 +93,7 @@ mod tests {
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired PKCE state (expired 1 hour ago)
-        let expired_at = chrono::Utc::now().naive_utc() - chrono::Duration::try_hours(1).unwrap();
+        let expired_at = chrono::Utc::now() - chrono::Duration::try_hours(1).unwrap();
         db_service
             .store_pkce_state(
                 "expired_state",
@@ -107,8 +107,7 @@ mod tests {
             .unwrap();
 
         // Store valid PKCE state (expires in 10 minutes)
-        let valid_expires =
-            chrono::Utc::now().naive_utc() + chrono::Duration::try_minutes(10).unwrap();
+        let valid_expires = chrono::Utc::now() + chrono::Duration::try_minutes(10).unwrap();
         db_service
             .store_pkce_state(
                 "valid_state",
@@ -144,7 +143,7 @@ mod tests {
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired credentials (expired 1 hour ago)
-        let expired_at = chrono::Utc::now().naive_utc() - chrono::Duration::try_hours(1).unwrap();
+        let expired_at = chrono::Utc::now() - chrono::Duration::try_hours(1).unwrap();
         db_service
             .store_temporary_credentials(
                 "EXPIRED_KEY_123",
@@ -158,8 +157,7 @@ mod tests {
             .unwrap();
 
         // Store valid credentials (expires in 10 minutes)
-        let valid_expires =
-            chrono::Utc::now().naive_utc() + chrono::Duration::try_minutes(10).unwrap();
+        let valid_expires = chrono::Utc::now() + chrono::Duration::try_minutes(10).unwrap();
         db_service
             .store_temporary_credentials(
                 "VALID_KEY_456",
@@ -206,7 +204,7 @@ mod tests {
         let db = initialize_in_memory_database().await.unwrap();
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
-        let expired_at = chrono::Utc::now().naive_utc() - chrono::Duration::try_hours(1).unwrap();
+        let expired_at = chrono::Utc::now() - chrono::Duration::try_hours(1).unwrap();
 
         // Store expired PKCE state
         db_service

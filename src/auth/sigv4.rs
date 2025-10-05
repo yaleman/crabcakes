@@ -88,7 +88,7 @@ pub async fn verify_sigv4(
                         })?;
 
                     // Check if temporary credentials are expired
-                    if temp_cred.expires_at < chrono::Utc::now().naive_utc() {
+                    if temp_cred.expires_at < chrono::Utc::now() {
                         debug!(access_key = %access_key, "Temporary credentials have expired");
                         return Err(BoxError::from("Temporary credentials expired".to_string()));
                     }
@@ -524,11 +524,10 @@ pub async fn verify_streaming_sigv4(
             CrabCakesError::Sigv4Verification("Missing x-amz-date header".to_string())
         })?;
 
-    let timestamp = chrono::NaiveDateTime::parse_from_str(timestamp_str, "%Y%m%dT%H%M%SZ")
-        .map_err(|e| {
+    let timestamp =
+        chrono::DateTime::parse_from_str(timestamp_str, "%Y%m%dT%H%M%SZ").map_err(|e| {
             CrabCakesError::Sigv4Verification(format!("Invalid x-amz-date format: {}", e))
-        })?
-        .and_utc();
+        })?;
 
     // Build canonical request using literal body hash
     let canonical_request = build_canonical_request(&parts, &signed_headers, body_hash);
@@ -542,7 +541,7 @@ pub async fn verify_streaming_sigv4(
     };
 
     // Compute string to sign
-    let string_to_sign = compute_string_to_sign(&timestamp, region, &canonical_request_hash);
+    let string_to_sign = compute_string_to_sign(&timestamp.into(), region, &canonical_request_hash);
     debug!("String to sign:\n{}", string_to_sign);
 
     // Get secret key from credential store

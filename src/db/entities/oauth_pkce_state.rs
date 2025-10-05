@@ -11,8 +11,8 @@ pub struct Model {
     pub nonce: String,
     pub pkce_challenge: String,
     pub redirect_uri: String,
-    pub expires_at: DateTime,
-    pub created_at: DateTime,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -111,7 +111,7 @@ impl OAuthClient {
             .url();
 
         // Store PKCE state in database (expires in 10 minutes)
-        let expires_at = chrono::Utc::now().naive_utc()
+        let expires_at = chrono::Utc::now()
             + chrono::Duration::try_minutes(10).ok_or_else(|| {
                 CrabCakesError::other(&"Failed to create PKCE session duration".to_string())
             })?;
@@ -144,7 +144,7 @@ impl OAuthClient {
             .ok_or(CrabCakesError::OidcStateParameterExpired)?;
 
         // Check if expired
-        if pkce_state.expires_at < chrono::Utc::now().naive_utc() {
+        if pkce_state.expires_at < chrono::Utc::now() {
             self.db.delete_pkce_state(state).await?;
             return Err(CrabCakesError::OidcStateParameterExpired);
         }
@@ -191,9 +191,8 @@ impl OAuthClient {
                         debug!("Token response body length: {} bytes", body.len());
 
                         if !status.is_success()
-                            && let Ok(body_str) = String::from_utf8(body.clone())
                         {
-                            error!("Token endpoint error response: {}", body_str);
+                            error!("Token endpoint error response body: '{}'", String::from_utf8(body.clone()).unwrap_or(format!("{:?}", body)));
                         }
 
                         // This should never fail as we're providing valid status and body
