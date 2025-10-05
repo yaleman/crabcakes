@@ -546,7 +546,7 @@ pub async fn verify_streaming_sigv4(
     };
 
     // Compute string to sign
-    let string_to_sign = compute_string_to_sign(&timestamp.into(), region, &canonical_request_hash);
+    let string_to_sign = compute_string_to_sign(&timestamp, region, &canonical_request_hash);
     debug!("String to sign:\n{}", string_to_sign);
 
     // Get secret key from credential store
