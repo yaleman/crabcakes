@@ -42,6 +42,7 @@ use crate::s3_handlers::S3Handler;
 use crate::web::handlers::WebHandler;
 use crate::web::service::WebService;
 
+/// Main server struct holding configuration and state, if oidc is not configured the admin interface won't be either.
 pub struct Server {
     hostname: String,
     host: String,
@@ -51,12 +52,12 @@ pub struct Server {
     region: String,
     tls_cert: Option<PathBuf>,
     tls_key: Option<PathBuf>,
-    #[allow(dead_code)] // Will be used when web UI is implemented
-    disable_api: bool,
-    #[allow(dead_code)] // Will be used when OIDC is implemented
+
     oidc_client_id: Option<String>,
-    #[allow(dead_code)] // Will be used when OIDC is implemented
     oidc_discovery_url: Option<String>,
+    #[cfg(test)]
+    #[allow(dead_code)]
+    disable_api: bool,
 }
 
 impl Server {
@@ -70,9 +71,10 @@ impl Server {
             region: cli.region,
             tls_cert: cli.tls_cert,
             tls_key: cli.tls_key,
-            disable_api: cli.disable_api,
             oidc_client_id: cli.oidc_client_id,
             oidc_discovery_url: cli.oidc_discovery_url,
+            #[cfg(test)]
+            disable_api: cli.disable_api,
         }
     }
 
@@ -158,7 +160,7 @@ impl Server {
         }
 
         // Create web service with session layer if OIDC is configured and API not disabled
-        let web_service: Option<WebServiceWithSession> = if !self.disable_api {
+        let web_service: Option<WebServiceWithSession> = {
             if let (Some(client_id), Some(discovery_url)) =
                 (&self.oidc_client_id, &self.oidc_discovery_url)
             {
@@ -212,9 +214,6 @@ impl Server {
                 info!("Web UI disabled: OIDC not configured");
                 None
             }
-        } else {
-            info!("Web UI disabled via --disable-api flag");
-            None
         };
 
         // Create S3 handler

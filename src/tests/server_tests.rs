@@ -435,6 +435,7 @@ async fn test_create_bucket() {
 
     // Verify bucket exists via ListBuckets
     let list_result = client.list_buckets().send().await;
+    dbg!(&list_result);
     assert!(list_result.is_ok());
     let list_output = list_result.unwrap();
     let buckets = list_output.buckets();
