@@ -813,6 +813,9 @@ fi
 rm -f "$TEMPDIR2/tagging-test.txt" "$TEMPDIR2/tagging.json"
 
 echo "All tests passed, killing crabcakes (PID $CRABCAKES_PID) and cleaning up $TEMPDIR"
-rm -rf "$TEMPDIR"
 kill "$CRABCAKES_PID"
 pkill -f target/debug/crabcakes
+rm -rf "$TEMPDIR"
+
+echo ""
+echo "✅ ALL TESTS PASSED! ✅"
