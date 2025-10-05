@@ -43,7 +43,7 @@ The server:
 - Stores object metadata (tags, OAuth PKCE state, temporary credentials) in SQLite with SeaORM
 - Runs database migrations automatically on startup
 - Optional admin UI with OIDC/OAuth2 authentication (configurable via --disable-api)
-- CLI accepts `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url` flags or environment variables
+- CLI accepts `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url`, `--frontend-url` flags or environment variables
 - Uses tracing for structured logging (configure with RUST_LOG environment variable)
 - Protected bucket names: admin, api, login, logout, oauth2, .well-known, config, oidc, crabcakes, docs, help
 
@@ -307,6 +307,7 @@ The server supports two types of AWS credentials:
 - `--disable-api` or `CRABCAKES_DISABLE_API`: Disable admin UI and API (default: `false`, API enabled)
 - `--oidc-client-id <id>` or `CRABCAKES_OIDC_CLIENT_ID`: OAuth client ID (required if API enabled)
 - `--oidc-discovery-url <url>` or `CRABCAKES_OIDC_DISCOVERY_URL`: OIDC discovery URL (required if API enabled)
+- `--frontend-url <url>` or `CRABCAKES_FRONTEND_URL`: Frontend URL for OIDC redirect URIs when behind a reverse proxy (e.g., `https://example.com`). If not set, uses `http(s)://hostname:port`
 
 ### Test Mode
 
@@ -476,8 +477,8 @@ Dev dependencies:
 
 The server accepts configuration via:
 
-- CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url`
-- Environment variables: `CRABCAKES_HOST`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REGION`, `CRABCAKES_DISABLE_API`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`
+- CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url`, `--frontend-url`
+- Environment variables: `CRABCAKES_LISTENER_ADDRESS`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REGION`, `CRABCAKES_DISABLE_API`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`, `CRABCAKES_FRONTEND_URL`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
 - Config directory defaults to `./config` (if it doesn't exist, server starts with no policies/credentials)

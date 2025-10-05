@@ -3,15 +3,13 @@
 # set -e
 
 SERVER_PORT=19000
-SERVER_ADDRESS="${CRABCAKES_HOSTNAME:-localhost}:$SERVER_PORT"
 
-if [ -n "${CRABCAKES_TLS_CERT}" ]; then
-    echo "Running tests with TLS enabled"
-    SERVER_ADDRESS="https://$SERVER_ADDRESS"
-else
-    echo "Running tests without TLS"
-    SERVER_ADDRESS="http://$SERVER_ADDRESS"
-fi
+
+FRONTEND_WITHOUT_PORT="$(echo "${CRABCAKES_FRONTEND_URL:-https://localhost}" | awk -F':' '{print $1 ":" $2}')"
+SERVER_ADDRESS="${FRONTEND_WITHOUT_PORT}:$SERVER_PORT"
+
+echo "SERVER ADDRESS=$SERVER_ADDRESS"
+
 
 TEST_BUCKET="bucket1"
 TEST_FILE="test.txt"

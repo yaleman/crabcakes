@@ -44,8 +44,7 @@ use crate::web::service::WebService;
 
 /// Main server struct holding configuration and state, if oidc is not configured the admin interface won't be either.
 pub struct Server {
-    hostname: String,
-    host: String,
+    bind_address: String,
     port: NonZeroU16,
     root_dir: PathBuf,
     config_dir: PathBuf,
@@ -55,6 +54,7 @@ pub struct Server {
 
     oidc_client_id: Option<String>,
     oidc_discovery_url: Option<String>,
+    frontend_url: Option<String>,
     #[cfg(test)]
     #[allow(dead_code)]
     disable_api: bool,
@@ -63,8 +63,7 @@ pub struct Server {
 impl Server {
     pub fn new(cli: Cli) -> Self {
         Self {
-            hostname: cli.hostname.unwrap_or(cli.host.clone()),
-            host: cli.host,
+            bind_address: cli.host,
             port: cli.port,
             root_dir: cli.root_dir,
             config_dir: cli.config_dir,
@@ -73,6 +72,7 @@ impl Server {
             tls_key: cli.tls_key,
             oidc_client_id: cli.oidc_client_id,
             oidc_discovery_url: cli.oidc_discovery_url,
+            frontend_url: cli.frontend_url,
             #[cfg(test)]
             disable_api: cli.disable_api,
         }
@@ -91,7 +91,6 @@ impl Server {
         if let Ok(listener) = TcpListener::bind(&addr).await {
             let port = listener.local_addr()?.port();
             let server = Server::new(Cli {
-                hostname: None,
                 host,
                 port: NonZeroU16::try_from(port).map_err(|_| {
                     CrabCakesError::Other(format!("Failed to convert port '{port}' to NonZeroU16",))
@@ -104,6 +103,7 @@ impl Server {
                 disable_api: true,               // Disable API in test mode
                 oidc_client_id: None,            // No OIDC in test mode
                 oidc_discovery_url: None,        // No OIDC in test mode
+                frontend_url: None,              // No frontend URL in test mode
             });
             return Ok((server, port));
         }
@@ -114,7 +114,7 @@ impl Server {
     }
 
     pub async fn run(self, use_in_memory_db: bool) -> Result<(), CrabCakesError> {
-        let addr = format!("{}:{}", self.host, self.port);
+        let addr = format!("{}:{}", self.bind_address, self.port);
         let addr: SocketAddr = addr.parse()?;
 
         // Create filesystem service
@@ -164,12 +164,16 @@ impl Server {
             if let (Some(client_id), Some(discovery_url)) =
                 (&self.oidc_client_id, &self.oidc_discovery_url)
             {
-                let redirect_uri = format!(
-                    "http{}://{}:{}/oauth2/callback",
-                    if self.tls_cert.is_some() { "s" } else { "" },
-                    self.hostname,
-                    self.port
-                );
+                let redirect_uri = if let Some(frontend_url) = &self.frontend_url {
+                    format!("{}/oauth2/callback", frontend_url)
+                } else {
+                    format!(
+                        "http{}://{}:{}/oauth2/callback",
+                        if self.tls_cert.is_some() { "s" } else { "" },
+                        self.bind_address,
+                        self.port
+                    )
+                };
                 let oauth_client = Arc::new(
                     OAuthClient::new(discovery_url, client_id, &redirect_uri, db_service.clone())
                         .await?,
@@ -239,20 +243,17 @@ impl Server {
 
         let listener = TcpListener::bind(addr).await?;
 
-        info!(
-            "Server listening on http{}://{}{}",
-            if self.tls_cert.is_some() && self.tls_key.is_some() {
-                "s"
-            } else {
-                ""
-            },
-            self.hostname,
-            if [80, 443].contains(&self.port.get()) {
-                String::new()
-            } else {
-                format!(":{}", self.port.get())
-            }
-        );
+        let listening_url = match self.frontend_url.as_ref() {
+            Some(val) => val,
+            None => &format!(
+                "http{}://{}:{}",
+                if self.tls_cert.is_some() { "s" } else { "" },
+                self.bind_address,
+                self.port
+            ),
+        };
+
+        info!("Server listening on {}", listening_url);
 
         if self.tls_cert.is_some() && self.tls_key.is_none()
             || self.tls_cert.is_none() && self.tls_key.is_some()
