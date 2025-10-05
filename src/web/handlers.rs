@@ -25,6 +25,13 @@ use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::policy_analyzer;
 
+/// Error page template
+#[derive(Template)]
+#[template(path = "error.html")]
+struct ErrorTemplate {
+    error_message: String,
+}
+
 /// Profile page template
 #[derive(Template)]
 #[template(path = "profile.html")]
@@ -152,6 +159,13 @@ fn login_redirect() -> Result<Response<Full<Bytes>>, CrabCakesError> {
         .map_err(CrabCakesError::from)
 }
 
+/// Return with a 404 Not Found response
+fn respond_404() -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from("Not Found")));
+    *response.status_mut() = StatusCode::NOT_FOUND;
+    response
+}
+
 /// Web handler for admin UI and API endpoints
 pub struct WebHandler {
     oauth_client: Arc<OAuthClient>,
@@ -233,6 +247,10 @@ impl WebHandler {
             }
             ("DELETE", path) if path.starts_with("/admin/api/credentials/") => {
                 let access_key_id = path.strip_prefix("/admin/api/credentials/").unwrap_or("");
+
+                if access_key_id.is_empty() {
+                    return Ok(respond_404());
+                }
                 self.handle_api_delete_credential(req, session.clone(), access_key_id)
                     .await
             }
@@ -262,11 +280,18 @@ impl WebHandler {
                     .strip_prefix("/admin/identities/")
                     .and_then(|s| s.strip_suffix("/edit"))
                     .unwrap_or("");
+
+                if access_key_id.is_empty() {
+                    return Ok(respond_404());
+                }
                 self.handle_credential_edit_form(session.clone(), access_key_id)
                     .await
             }
             ("GET", path) if path.starts_with("/admin/identities/") => {
                 let access_key_id = path.strip_prefix("/admin/identities/").unwrap_or("");
+                if access_key_id.is_empty() {
+                    return Ok(respond_404());
+                }
                 self.handle_identity_detail(session.clone(), access_key_id)
                     .await
             }
@@ -279,7 +304,7 @@ impl WebHandler {
             ("GET", path) if path.starts_with("/admin/static/") => {
                 self.handle_static_file(path).await
             }
-            _ => self.not_found().await,
+            _ => Ok(respond_404()),
         };
 
         match result {
@@ -784,7 +809,7 @@ impl WebHandler {
             .await
             .is_none()
         {
-            return self.not_found().await;
+            return Ok(respond_404());
         }
 
         let template = CredentialFormTemplate {
@@ -1410,12 +1435,7 @@ impl WebHandler {
         // Read file
         let content = match fs::read(&absolute_path).await {
             Ok(content) => content,
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Full::new(Bytes::from("Not Found")))
-                    .map_err(CrabCakesError::from);
-            }
+            Err(_) => return Ok(respond_404()),
         };
 
         // Determine content type
@@ -1435,78 +1455,31 @@ impl WebHandler {
             .map_err(CrabCakesError::from)
     }
 
-    /// 404 Not Found response
-    async fn not_found(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Full::new(Bytes::from("Not Found")))
-            .map_err(CrabCakesError::from)
-    }
-
     /// Error response
     fn error_response(&self, error: &CrabCakesError) -> Response<Full<Bytes>> {
-        let error_html = format!(
-            r#"<!DOCTYPE html>
+        let template = ErrorTemplate {
+            error_message: error.to_string(),
+        };
+
+        let html = template.render().unwrap_or_else(|_| {
+            format!(
+                r#"<!DOCTYPE html>
 <html>
-<head>
-    <title>Error</title>
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin: 0;
-            padding: 20px;
-        }}
-        .error-container {{
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-            padding: 40px;
-            max-width: 600px;
-            text-align: center;
-        }}
-        h1 {{
-            color: #e53e3e;
-            margin: 0 0 20px 0;
-        }}
-        p {{
-            color: #4a5568;
-            line-height: 1.6;
-            margin: 0 0 30px 0;
-        }}
-        a {{
-            display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: transform 0.2s;
-        }}
-        a:hover {{
-            transform: translateY(-2px);
-        }}
-    </style>
-</head>
+<head><title>Error</title></head>
 <body>
-    <div class="error-container">
-        <h1>Error</h1>
-        <p>{}</p>
-        <a href="/login">Restart Authentication</a>
-    </div>
+    <h1>Error</h1>
+    <p>{}</p>
+    <a href="/login">Restart Authentication</a>
 </body>
 </html>"#,
-            error
-        );
+                error
+            )
+        });
+
         Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Full::new(Bytes::from(error_html)))
+            .body(Full::new(Bytes::from(html)))
             .unwrap_or_else(|_| {
                 let mut r = Response::new(Full::new(Bytes::from(format!("Error: {}", error))));
                 *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
