@@ -3,24 +3,33 @@
 //! Implements AWS S3-compatible API operations including bucket and object management,
 //! with signature verification and IAM authorization.
 
+use std::collections::HashMap;
 use std::convert::Infallible;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use http::header::{
     ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST, LAST_MODIFIED,
     LOCATION, WWW_AUTHENTICATE,
 };
+use http::request::Parts;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
+use scratchstack_arn::Arn;
+use scratchstack_aws_principal::PrincipalIdentity;
+use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
+use scratchstack_aws_signature::{
+    GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, service_for_signing_key_fn,
+};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::auth::{
-    AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4,
-    verify_streaming_sigv4,
+    AuthContext, extract_bucket_and_key, http_method_to_s3_action,
+    sigv4_validate_streaming_request, verify_sigv4,
 };
 use crate::body_buffer::BufferedBody;
 use crate::credentials::CredentialStore;
@@ -69,11 +78,11 @@ impl S3Handler {
     }
 
     /// Verify AWS Signature V4 and buffer the request body
-    /// Returns Ok with (authenticated_username, buffered_body, request_parts) or Err with error response
+    /// Returns Ok with (parts, buffered_body, SigV4AuthenticatorResponse) or Err with error response
     async fn verify_and_buffer_request(
         &self,
         req: Request<hyper::body::Incoming>,
-    ) -> Result<(Option<String>, BufferedBody, http::request::Parts), Response<Full<Bytes>>> {
+    ) -> Result<(Parts, BufferedBody, SigV4AuthenticatorResponse), Response<Full<Bytes>>> {
         // Extract the parts we need before consuming the request
         let (parts, body) = req.into_parts();
 
@@ -120,17 +129,53 @@ impl S3Handler {
             false
         };
 
+        // let get_signing_key =
+        //     async move |req: GetSigningKeyRequest| -> Result<GetSigningKeyResponse, tower::BoxError> {
+        //         let cred_store = self.credentials_store.read().await;
+        //         cred_store.get_signing_key(req).await
+        //     };
+
         // Verify signature using appropriate method
-        let verified = if is_streaming {
+        let authenticatorresponse = if is_streaming {
             debug!("Using streaming signature verification");
-            match verify_streaming_sigv4(
+
+            let credentials_store = *self.credentials_store.clone();
+            let creds = credentials_store.read().await.credentials.clone();
+
+            let get_signing_key_fn = move |req: GetSigningKeyRequest| {
+                async move |creds: Arc<RwLock<HashMap<String, String>>>| {
+                    let creds_reader = creds.read().await;
+                    if let Some(sec) = creds_reader.get(req.access_key()) {
+                        let secret_key = KSecretKey::from_str(&sec.clone()).map_err(|err| {
+                            error!(error=%err, "Failed to parse secret key");
+                            tower::BoxError::from("Failed to parse secret key")
+                        })?;
+
+                        let signing_key =
+                            secret_key.to_ksigning(req.request_date(), req.region(), req.service());
+
+                        Ok(GetSigningKeyResponse::builder()
+                            .signing_key(signing_key)
+                            .build()?)
+                    } else {
+                        Err(tower::BoxError::from(format!(
+                            "Access key ID not found: {}",
+                            req.access_key()
+                        )))
+                    }
+                }
+            };
+            let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key_fn);
+
+            match sigv4_validate_streaming_request(
                 parts.clone(),
-                self.credentials_store.clone(),
                 &self.region,
+                "s3",
+                &mut get_signing_key_svc,
             )
             .await
             {
-                Ok(v) => v,
+                Ok((_parts, _body, response)) => response,
                 Err(e) => {
                     warn!(error = %e, "Streaming signature verification failed");
                     return Err(self
@@ -172,7 +217,7 @@ impl S3Handler {
             )
             .await
             {
-                Ok(v) => v,
+                Ok((_parts, _body, response)) => response,
                 Err(e) => {
                     warn!(error = %e, "Signature verification failed");
                     return Err(self
@@ -182,11 +227,11 @@ impl S3Handler {
         };
 
         info!(
-            access_key = %verified.access_key_id,
-            "Request signature verified successfully"
+            "Request signature verified successfully authenticator_response={:?}",
+            authenticatorresponse
         );
 
-        Ok((Some(verified.access_key_id), buffered_body, parts))
+        Ok((parts, buffered_body, authenticatorresponse))
     }
 
     pub async fn handle_request(
@@ -203,7 +248,7 @@ impl S3Handler {
         );
 
         // Verify signature and buffer body (or return error response)
-        let (authenticated_username, mut buffered_body, parts) =
+        let (parts, mut buffered_body, authenticator_response) =
             match self.verify_and_buffer_request(req).await {
                 Ok(result) => result,
                 Err(response) => return Ok(response),
@@ -245,18 +290,30 @@ impl S3Handler {
             path = %path,
             query = %query,
             bucket = %bucket_name,
-            authenticated_user = ?authenticated_username.as_ref().unwrap_or(&"-".to_string()),
+            authenticator_response = ?authenticator_response.clone(),
             copy_source = ?copy_source,
             "Incoming S3 request"
         );
 
         // Build authentication context from verified request
-        let auth_context = if let Some(ref username) = authenticated_username {
-            // Use verified username to build principal
-            let arn = format!("arn:aws:iam:::user/{}", username);
+        let auth_context = if let Some(principal) = authenticator_response.principal().first() {
+            let user = match principal {
+                PrincipalIdentity::User(user) => {
+                    debug!(user_name=%user.user_name(), "Authenticated S3 request with user identity");
+                    user
+                }
+                _ => {
+                    error!("Authenticated S3 request with non-user identity");
+                    return Ok(self.unauthorized_response(
+                        "Only user identities are supported for S3 requests",
+                    ));
+                }
+            };
+            let arn = Arn::from(user);
+
             AuthContext {
-                principal: iam_rs::Principal::Aws(iam_rs::PrincipalId::String(arn)),
-                username: Some(username.clone()),
+                principal: iam_rs::Principal::Aws(iam_rs::PrincipalId::String(arn.to_string())),
+                username: Some(user.user_name().to_string()),
             }
         } else {
             // Fallback to anonymous if signature not required
@@ -309,7 +366,7 @@ impl S3Handler {
         }
 
         // Check if this is a temporary credential (OAuth-based) - they get full access
-        let is_temp_credential = if let Some(ref username) = authenticated_username {
+        let is_temp_credential = if let Some(ref username) = auth_context.username {
             self.db_service
                 .get_temporary_credentials(username)
                 .await
@@ -322,7 +379,7 @@ impl S3Handler {
 
         // Build IAM request and evaluate policy (skip for temporary credentials)
         if is_temp_credential {
-            debug!(access_key = ?authenticated_username, "Temporary credential - granting full access");
+            debug!(access_key = ?auth_context.username, "Temporary credential - granting full access");
         } else {
             let iam_request = match auth_context.build_iam_request(
                 s3_action,
@@ -609,7 +666,7 @@ impl S3Handler {
         let status = response.status();
 
         // Log request with all relevant details
-        let user_str = authenticated_username.as_deref().unwrap_or("-");
+        let user_str = auth_context.username.as_deref().unwrap_or("-");
         if key.is_empty() {
             info!(
                 client_ip = %remote_addr.ip(),

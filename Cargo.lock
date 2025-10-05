@@ -1090,6 +1090,7 @@ dependencies = [
  "reqwest",
  "rustls 0.23.32",
  "rustls-pemfile 2.2.0",
+ "scratchstack-arn",
  "scratchstack-aws-principal",
  "scratchstack-aws-signature",
  "sea-orm",
@@ -3660,8 +3661,6 @@ dependencies = [
 [[package]]
 name = "scratchstack-aws-signature"
 version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e6ed6b6552a4cd123601d26fbd06448e5474b1c87ad2aa5d360556d43786f2f"
 dependencies = [
  "bytes",
  "chrono",

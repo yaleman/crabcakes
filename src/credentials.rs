@@ -30,7 +30,7 @@ impl TryFrom<&PathBuf> for Credential {
 }
 
 pub struct CredentialStore {
-    credentials: Arc<RwLock<HashMap<String, String>>>,
+    pub(crate) credentials: Arc<RwLock<HashMap<String, String>>>,
     credentials_dir: PathBuf,
 }
 

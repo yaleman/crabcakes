@@ -15,7 +15,8 @@ hyper-util = { version = "0.1.17", features = [
     "http2",
     "server",
 ] }
-scratchstack-aws-signature = "0.11.3"
+scratchstack-aws-signature = { path = "../scratchstack-aws-signature" }
+# scratchstack-aws-signature = "0.11.3"
 scratchstack-aws-principal = "0.4.9"
 # iam-rs = "0.0.23" # pending https://github.com/Foorack/iam-rs/pull/8
 iam-rs = { rev = "693fb5a22b95d8d79c01f050b51a65d36a228799", git = "https://github.com/yaleman/iam-rs/" }
@@ -62,6 +63,7 @@ askama = "0.14.0"
 tower-http = { version = "0.6.6", features = [
     "compression-gzip",
 ], default-features = false }
+scratchstack-arn = "0.4.9"
 
 [dev-dependencies]
 aws-config = "1.8.7"

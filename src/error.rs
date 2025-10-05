@@ -1,6 +1,6 @@
 //! Centralized error types for the crabcakes S3 server.
 
-use std::net::AddrParseError;
+use std::{error::Error, net::AddrParseError};
 
 use askama::Template;
 use http::{HeaderValue, Response, StatusCode, header::CONTENT_TYPE};
@@ -8,6 +8,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use iam_rs::EvaluationError;
 use mime_guess::mime::TEXT_HTML_UTF_8;
+use scratchstack_aws_signature::auth::SigV4AuthenticatorResponseBuilderError;
 
 use crate::web::handlers::ErrorTemplate;
 
@@ -32,6 +33,7 @@ pub enum CrabCakesError {
     Hyper(String),
     Reqwest(String),
     CredentialAlreadyExists,
+    SigV4AuthenticatorResponseBuilderError(String),
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -78,7 +80,28 @@ impl std::fmt::Display for CrabCakesError {
             CrabCakesError::CredentialAlreadyExists => {
                 write!(f, "Credential with the same identifier already exists")
             }
+            CrabCakesError::SigV4AuthenticatorResponseBuilderError(msg) => {
+                write!(f, "SigV4AuthenticatorResponse Builder Error: {}", msg)
+            }
         }
+    }
+}
+
+impl From<Box<dyn Error + Send + Sync>> for CrabCakesError {
+    fn from(err: Box<dyn Error + Send + Sync>) -> Self {
+        CrabCakesError::Other(err.to_string())
+    }
+}
+
+impl From<chrono::ParseError> for CrabCakesError {
+    fn from(err: chrono::ParseError) -> Self {
+        CrabCakesError::Other(format!("Failed to parse date: {}", err))
+    }
+}
+
+impl From<SigV4AuthenticatorResponseBuilderError> for CrabCakesError {
+    fn from(err: SigV4AuthenticatorResponseBuilderError) -> Self {
+        CrabCakesError::SigV4AuthenticatorResponseBuilderError(err.to_string())
     }
 }
 
