@@ -43,6 +43,13 @@ impl CredentialStore {
 
         if !credentials_dir.exists() {
             warn!(credentials_dir = ?credentials_dir, "Credentials directory does not exist, starting with no credentials");
+            fs::create_dir_all(credentials_dir).inspect_err(|err| {
+                error!(
+                    credentials_dir = ?credentials_dir,
+                    error = %err,
+                    "Failed to create credentials directory"
+                )
+            })?;
             return Ok(Self {
                 credentials: Arc::new(RwLock::new(credentials)),
                 credentials_dir: credentials_dir.clone(),

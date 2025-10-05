@@ -1,8 +1,6 @@
 //! IAM policy storage and evaluation.
 //!
 //! Loads JSON IAM policies and evaluates requests against them with caching support.
-
-use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, sync::Arc};
 
@@ -11,6 +9,7 @@ use iam_rs::{
     evaluate_policies,
 };
 use sha2::{Digest, Sha256};
+use std::fs;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -37,8 +36,14 @@ impl PolicyStore {
         let mut policies = HashMap::new();
 
         if !policy_dir.exists() {
-            warn!(policy_dir = ?policy_dir, "Policy directory does not exist, can't start without policies");
-            return Err(CrabCakesError::NoPolicies);
+            warn!(policy_dir = ?policy_dir, "Policy directory does not exist, creating it...");
+            fs::create_dir_all(policy_dir).inspect_err(|err| {
+                error!(
+                    policy_dir = ?policy_dir,
+                    error = %err,
+                    "Failed to create policy directory"
+                )
+            })?;
         } else {
             info!(policy_dir = ?policy_dir, "Loading IAM policies");
         }
