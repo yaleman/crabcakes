@@ -7,8 +7,8 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use http::header::{
-    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HOST, LAST_MODIFIED, LOCATION,
-    WWW_AUTHENTICATE,
+    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST, LAST_MODIFIED,
+    LOCATION, WWW_AUTHENTICATE,
 };
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -945,7 +945,7 @@ impl S3Handler {
                             .format("%a, %d %b %Y %H:%M:%S GMT")
                             .to_string(),
                     )
-                    .header("ETag", metadata.etag)
+                    .header(ETAG, metadata.etag)
                     .body(Full::new(Bytes::new()))
                     .expect("Failed to generate a HeadObject response")
             }
@@ -1052,7 +1052,7 @@ impl S3Handler {
                                     .format("%a, %d %b %Y %H:%M:%S GMT")
                                     .to_string(),
                             )
-                            .header("ETag", metadata.etag)
+                            .header(ETAG, metadata.etag)
                             .header(ACCEPT_RANGES, "bytes");
 
                         if is_range_request {
@@ -1110,7 +1110,7 @@ impl S3Handler {
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
-                    .header("ETag", metadata.etag)
+                    .header(ETAG, metadata.etag)
                     .body(Full::new(Bytes::new()))
                     .expect("Failed to generate a PutObject response")
             }
@@ -1524,7 +1524,7 @@ impl S3Handler {
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
-                    .header("ETag", part_info.etag)
+                    .header(ETAG, part_info.etag)
                     .body(Full::new(Bytes::new()))
                     .expect("Failed to generate UploadPart response")
             }
@@ -1725,8 +1725,8 @@ impl S3Handler {
                 #[allow(clippy::expect_used)]
                 Response::builder()
                     .status(StatusCode::OK)
-                    .header("Content-Type", "application/xml")
-                    .header("ETag", part_info.etag)
+                    .header(CONTENT_TYPE, "application/xml")
+                    .header(ETAG, part_info.etag)
                     .body(Full::new(Bytes::from(xml_body)))
                     .expect("Failed to generate UploadPartCopy response")
             }
