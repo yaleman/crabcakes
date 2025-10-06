@@ -6,17 +6,20 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use http::request::Parts;
 use http::{HeaderValue, Method};
+use hyper::body::Bytes;
 use hyper::{Request, header::AUTHORIZATION};
 use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
-use scratchstack_aws_principal;
+use scratchstack_aws_principal::{self, SessionData};
+use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
 use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
-    SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
+    SignatureError, SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
 use tokio::sync::RwLock;
-use tower::BoxError;
+use tower::{BoxError, Service, ServiceExt};
 use tracing::{debug, trace};
 
 use crate::credentials::CredentialStore;
@@ -45,7 +48,7 @@ pub async fn verify_sigv4(
     credentials_store: Arc<RwLock<CredentialStore>>,
     db: Arc<DBService>,
     region: &str,
-) -> Result<VerifiedRequest, CrabCakesError> {
+) -> Result<(Parts, Bytes, SigV4AuthenticatorResponse), CrabCakesError> {
     // Check if Authorization header exists
     let auth_header = req.headers().get(AUTHORIZATION);
 
@@ -149,7 +152,7 @@ pub async fn verify_sigv4(
     );
 
     // Validate the request
-    let (_parts, _body, auth) = sigv4_validate_request(
+    let (parts, body, auth) = sigv4_validate_request(
         req,
         region,
         "s3",
@@ -161,23 +164,14 @@ pub async fn verify_sigv4(
     .await
     .map_err(|e| CrabCakesError::Sigv4Verification(e.to_string()))?;
 
-    // Extract username from principal identities
-    let access_key_id = auth
-        .principal()
-        .as_slice()
-        .iter()
-        .find_map(|identity| match identity {
-            scratchstack_aws_principal::PrincipalIdentity::User(user) => {
-                Some(user.user_name().to_string())
-            }
-            _ => None,
-        })
-        .ok_or(CrabCakesError::NoUserIdInPrincipal)?;
-
-    Ok(VerifiedRequest {
-        access_key_id,
-        principal: auth.principal().clone(),
-    })
+    Ok((
+        parts,
+        body,
+        SigV4AuthenticatorResponse::builder()
+            .principal(auth.principal().clone())
+            .session_data(SessionData::new())
+            .build()?,
+    ))
 }
 
 impl AuthContext {
@@ -482,11 +476,21 @@ fn compute_string_to_sign(
 }
 
 /// Verify streaming signature for AWS SigV4
-pub async fn verify_streaming_sigv4(
+pub async fn sigv4_validate_streaming_request<G, F>(
     parts: http::request::Parts,
-    credentials_store: Arc<RwLock<CredentialStore>>,
     region: &str,
-) -> Result<VerifiedRequest, CrabCakesError> {
+    service: &str,
+    get_signing_key: &mut G,
+) -> Result<(Parts, Bytes, SigV4AuthenticatorResponse), CrabCakesError>
+where
+    G: Service<
+            GetSigningKeyRequest,
+            Response = GetSigningKeyResponse,
+            Error = BoxError,
+            Future = F,
+        > + Send,
+    F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
+{
     // Get Authorization header
     let auth_header = parts
         .headers
@@ -497,8 +501,32 @@ pub async fn verify_streaming_sigv4(
         })?;
 
     // Parse Authorization header
-    let (access_key_id, _date_str, signed_headers, provided_signature) =
+    let (access_key_id, date_str, signed_headers, provided_signature) =
         parse_authorization_header(auth_header)?;
+
+    debug!(date_str = &date_str);
+    let request_date = NaiveDate::parse_from_str(&date_str, "%Y%m%d").map_err(|e| {
+        CrabCakesError::Sigv4Verification(format!("Invalid date format in Credential: {}", e))
+    })?;
+
+    // Get secret key from credential store
+    let signing_key: GetSigningKeyResponse = get_signing_key
+        .oneshot(
+            GetSigningKeyRequest::builder()
+                .access_key(&access_key_id)
+                // .session_token(self.session_token().map(|x| x.to_string()))
+                .request_date(request_date)
+                .region(region)
+                .service(service)
+                .build()
+                .map_err(|e| {
+                    SignatureError::InternalServiceError(Box::new(std::io::Error::other(format!(
+                        "Invalid GetSigningKeyRequest: {}",
+                        e
+                    ))))
+                })?,
+        )
+        .await?;
 
     debug!(
         access_key = %access_key_id,
@@ -549,27 +577,13 @@ pub async fn verify_streaming_sigv4(
     let string_to_sign = compute_string_to_sign(&timestamp, region, &canonical_request_hash);
     debug!("String to sign:\n{}", string_to_sign);
 
-    // Get secret key from credential store
-    let secret_access_key = credentials_store
-        .read()
-        .await
-        .get_credential(&access_key_id)
-        .await
-        .ok_or(CrabCakesError::InvalidCredential)?;
-
-    // Derive signing key
-    let secret_key = KSecretKey::from_str(&secret_access_key)
-        .map_err(|e| CrabCakesError::Sigv4Verification(format!("Invalid secret key: {}", e)))?;
-
-    let signing_key = secret_key.to_ksigning(timestamp.date_naive(), region, "s3");
-
     // Compute expected signature
     let expected_signature = {
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
         type HmacSha256 = Hmac<Sha256>;
 
-        let mut mac = HmacSha256::new_from_slice(signing_key.as_ref())
+        let mut mac = HmacSha256::new_from_slice(signing_key.signing_key().as_ref())
             .map_err(|e| CrabCakesError::Sigv4Verification(format!("HMAC error: {}", e)))?;
         mac.update(string_to_sign.as_bytes());
         format!("{:x}", mac.finalize().into_bytes())
@@ -592,10 +606,14 @@ pub async fn verify_streaming_sigv4(
                 CrabCakesError::Sigv4Verification(format!("Failed to create principal: {}", e))
             })?;
 
-    Ok(VerifiedRequest {
-        access_key_id,
-        principal: principal.into(),
-    })
+    Ok((
+        parts,
+        Bytes::new(),
+        SigV4AuthenticatorResponse::builder()
+            .principal(principal)
+            .session_data(SessionData::new())
+            .build()?,
+    ))
 }
 
 #[cfg(test)]

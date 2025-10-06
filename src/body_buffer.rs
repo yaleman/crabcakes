@@ -9,11 +9,11 @@ use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-use crate::async_spooled_tempfile::SpooledTempFile;
 use crate::error::CrabCakesError;
+use crabcakes_async_spooled_tempfile::SpooledTempFile;
 use tracing::{debug, error, trace};
 
-const MEMORY_THRESHOLD: usize = 50 * 1024 * 1024; // 50MB
+const MEMORY_THRESHOLD: u64 = 50 * 1024 * 1024; // 50MB
 
 /// Decode AWS chunked encoding format
 /// Format: `<hex-chunk-size>\r\n<chunk-data>\r\n...\r\n0\r\n<optional-trailers>\r\n\r\n`

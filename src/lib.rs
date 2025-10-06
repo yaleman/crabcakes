@@ -15,7 +15,6 @@
 #![deny(clippy::needless_pass_by_value)]
 #![deny(clippy::trivially_copy_pass_by_ref)]
 
-pub mod async_spooled_tempfile;
 pub mod auth;
 pub mod body_buffer;
 pub mod cleanup;

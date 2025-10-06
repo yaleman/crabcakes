@@ -1,0 +1,22 @@
+[book]
+authors = ["James Hodgkinson"]
+language = "en"
+src = "src"
+title = "Crabcakes"
+
+[rust]
+edition = "2024"
+
+[build]
+create-missing = true
+use-default-preprocessors = true
+
+[preprocessor.index]
+
+[preprocessor.links]
+
+
+[output.html]
+edit-url-template = "https://github.com/yaleman/crabcakes/edit/main/docs/{path}"
+git-repository-url = "https://github.com/yaleman/crabcakes"
+git-repository-icon = "fa-github"

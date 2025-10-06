@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 #[derive(Debug)]
 enum DataLocation {
     InMemory(Option<Cursor<Vec<u8>>>),
+
     WritingToDisk(JoinHandle<io::Result<File>>),
     OnDisk(File),
     Poisoned,
@@ -39,13 +40,13 @@ pub enum SpooledData {
 /// spills to a temporary file on disk.
 #[derive(Debug)]
 pub struct SpooledTempFile {
-    max_size: usize,
+    max_size: u64,
     inner: Inner,
 }
 
 impl SpooledTempFile {
     /// Creates a new instance that can hold up to `max_size` bytes in memory.
-    pub fn new(max_size: usize) -> Self {
+    pub fn new(max_size: u64) -> Self {
         Self {
             max_size,
             inner: Inner {
@@ -57,7 +58,7 @@ impl SpooledTempFile {
 
     /// Creates a new instance that can hold up to `max_size` bytes in memory
     /// and pre-allocates space for the in-memory buffer.
-    pub fn with_max_size_and_capacity(max_size: usize, capacity: usize) -> Self {
+    pub fn with_max_size_and_capacity(max_size: u64, capacity: usize) -> Self {
         Self {
             max_size,
             inner: Inner {
@@ -103,9 +104,14 @@ impl SpooledTempFile {
         loop {
             match self.inner.data_location {
                 DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                    #[allow(clippy::expect_used)]
-                    let mut mem_buffer =
-                        opt_mem_buffer.take().expect("Failed to get memory buffer");
+                    let mut mem_buffer = match opt_mem_buffer.take() {
+                        Some(buf) => buf,
+                        None => {
+                            return Poll::Ready(Err(io::Error::other(
+                                "Failed to get memory buffer",
+                            )));
+                        }
+                    };
 
                     let handle = tokio::task::spawn_blocking(move || {
                         let mut file = tempfile::tempfile()?;
@@ -158,19 +164,20 @@ impl SpooledTempFile {
     /// If the provided size is greater than `max_size`, data will be moved from
     /// memory to disk regardless of the size of the data held by the current instance.
     pub async fn set_len(&mut self, size: u64) -> Result<(), io::Error> {
-        if size > self.max_size as u64 {
+        if size > self.max_size {
             self.roll().await?;
         }
 
         loop {
             match self.inner.data_location {
                 DataLocation::InMemory(ref mut opt_mem_buffer) => {
-                    #[allow(clippy::expect_used)]
-                    opt_mem_buffer
-                        .as_mut()
-                        .expect("Failed to get memory buffer")
-                        .get_mut()
-                        .resize(size as usize, 0);
+                    let buff = match opt_mem_buffer.as_mut() {
+                        Some(buf) => buf,
+                        None => {
+                            return Err(io::Error::other("Failed to get memory buffer"));
+                        }
+                    };
+                    buff.get_mut().resize(size as usize, 0);
                     return Ok(());
                 }
                 DataLocation::WritingToDisk(_) => {
@@ -205,7 +212,7 @@ impl AsyncWrite for SpooledTempFile {
                     // opt_mem_buffer should never be None here, but handle it gracefully just in case
                     let mut mem_buffer = opt_mem_buffer.take().unwrap_or_default();
 
-                    if mem_buffer.position().saturating_add(buf.len() as u64) > me.max_size as u64 {
+                    if mem_buffer.position().saturating_add(buf.len() as u64) > me.max_size {
                         *opt_mem_buffer = Some(mem_buffer);
 
                         ready!(me.poll_roll(cx))?;
@@ -409,7 +416,7 @@ mod tests {
         // Write exactly 50MB
         let threshold = 50 * 1024 * 1024;
         let mut file = SpooledTempFile::new(threshold);
-        let data = vec![77u8; threshold];
+        let data = vec![77u8; threshold as usize];
 
         file.write_all(&data).await.unwrap();
         file.flush().await.unwrap();
@@ -422,7 +429,7 @@ mod tests {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).await.unwrap();
 
-        assert_eq!(buf.len(), threshold, "Should read back full data");
+        assert_eq!(buf.len(), threshold as usize, "Should read back full data");
     }
 
     #[tokio::test]
@@ -430,7 +437,7 @@ mod tests {
         // Write 50MB + 1 byte to trigger spillover
         let threshold = 50 * 1024 * 1024;
         let mut file = SpooledTempFile::new(threshold);
-        let data = vec![88u8; threshold + 1];
+        let data = vec![88u8; (threshold + 1) as usize];
 
         file.write_all(&data).await.unwrap();
         file.flush().await.unwrap();
@@ -520,7 +527,7 @@ mod tests {
         let mut file = SpooledTempFile::new(threshold);
 
         // Set length larger than threshold
-        file.set_len((threshold + 100) as u64).await.unwrap();
+        file.set_len(threshold + 100).await.unwrap();
 
         assert!(
             file.is_rolled(),

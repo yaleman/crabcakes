@@ -1,0 +1,13 @@
+[package]
+name = "crabcakes-async-spooled-tempfile"
+description = "Asynchronous memory-then-disk spooled tempfile"
+version = "0.0.1"
+license = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+readme = "README.md"
+
+[dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
