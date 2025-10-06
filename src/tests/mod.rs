@@ -21,7 +21,7 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
     Ok(())
 }
 
-fn setup_test_files() -> TempDir {
+pub(crate) fn setup_test_files() -> TempDir {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     copy_dir_all("testfiles", temp_dir.path()).expect("Failed to copy test files");
     temp_dir

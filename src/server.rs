@@ -120,7 +120,7 @@ impl Server {
         let addr: SocketAddr = addr.parse()?;
 
         // Create filesystem service
-        let filesystem = Arc::new(RwLock::new(FilesystemService::new(self.root_dir.clone())));
+        let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone()));
 
         // Derive policy and credential paths from config_dir
         let policy_dir = self.config_dir.join("policies");
@@ -149,12 +149,25 @@ impl Server {
         } else {
             initialize_database(&self.config_dir).await?
         };
-        let db_service = Arc::new(DBService::new(Arc::new(db)));
+        let db = Arc::new(db);
+
+        let db_service = Arc::new(DBService::new(db.clone()));
+
+        let fs_cleanup_task =
+            crate::db::cleanup::TagCleaner::new(db.clone(), filesystem.clone(), Some(3600)); // Run every hour
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await; // Sleep for 30 seconds
+                if let Err(e) = fs_cleanup_task.run().await {
+                    error!(error=%e, "Filesystem cleanup task failed, sleeping for 30 seconds");
+                };
+            }
+        });
 
         // Spawn background cleanup task for expired PKCE states and temporary credentials
-        let cleanup_task = CleanupTask::new(db_service.clone(), 300); // Run every 5 minutes
+        let db_cleanup_task = CleanupTask::new(db_service.clone(), 300); // Run every 5 minutes
         tokio::spawn(async move {
-            cleanup_task.run().await;
+            db_cleanup_task.run().await;
         });
 
         if self.tls_cert.is_some() {
@@ -232,20 +245,7 @@ impl Server {
             self.region.clone(),
             addr.to_string(),
         ));
-
-        info!(
-            root_dir = ?self.root_dir,
-            config_dir = ?self.config_dir,
-            policy_dir = ?policy_dir,
-            credentials_dir = ?credentials_dir,
-            region = %self.region,
-            address = %addr,
-            "Starting crabcakes..."
-        );
-
-        let listener = TcpListener::bind(addr).await?;
-
-        let listening_url = match self.frontend_url.as_ref() {
+        let listening_url = match &self.frontend_url.as_ref() {
             Some(val) => val,
             None => &format!(
                 "http{}://{}:{}",
@@ -254,6 +254,18 @@ impl Server {
                 self.port
             ),
         };
+        info!(
+            root_dir = ?self.root_dir,
+            config_dir = ?self.config_dir,
+            policy_dir = ?policy_dir,
+            credentials_dir = ?credentials_dir,
+            region = %self.region,
+            address = %addr,
+            frontend_url = %listening_url,
+            "Starting crabcakes..."
+        );
+
+        let listener = TcpListener::bind(addr).await?;
 
         info!("Server listening on {}", listening_url);
 

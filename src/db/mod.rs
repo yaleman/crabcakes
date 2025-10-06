@@ -2,6 +2,7 @@
 //!
 //! Uses SQLite with SeaORM for schema management and migrations.
 
+pub mod cleanup;
 pub mod entities;
 pub mod migration;
 mod service;
