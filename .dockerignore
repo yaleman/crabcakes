@@ -8,3 +8,5 @@ notes/
 target/
 testfiles/
 test_config/
+.DS_Store
+**/.DS_Store
