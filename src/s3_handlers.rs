@@ -3,7 +3,6 @@
 //! Implements AWS S3-compatible API operations including bucket and object management,
 //! with signature verification and IAM authorization.
 
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -129,23 +128,18 @@ impl S3Handler {
             false
         };
 
-        // let get_signing_key =
-        //     async move |req: GetSigningKeyRequest| -> Result<GetSigningKeyResponse, tower::BoxError> {
-        //         let cred_store = self.credentials_store.read().await;
-        //         cred_store.get_signing_key(req).await
-        //     };
-
         // Verify signature using appropriate method
-        let authenticatorresponse = if is_streaming {
+        let (parts, authenticatorresponse) = if is_streaming {
             debug!("Using streaming signature verification");
 
-            let credentials_store = *self.credentials_store.clone();
+            let credentials_store = self.credentials_store.clone();
             let creds = credentials_store.read().await.credentials.clone();
 
             let get_signing_key_fn = move |req: GetSigningKeyRequest| {
-                async move |creds: Arc<RwLock<HashMap<String, String>>>| {
+                let creds = creds.clone();
+                async move {
                     let creds_reader = creds.read().await;
-                    if let Some(sec) = creds_reader.get(req.access_key()) {
+                    if let Some(sec) = (*creds_reader).get(req.access_key()) {
                         let secret_key = KSecretKey::from_str(&sec.clone()).map_err(|err| {
                             error!(error=%err, "Failed to parse secret key");
                             tower::BoxError::from("Failed to parse secret key")
@@ -168,14 +162,14 @@ impl S3Handler {
             let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key_fn);
 
             match sigv4_validate_streaming_request(
-                parts.clone(),
+                parts,
                 &self.region,
                 "s3",
                 &mut get_signing_key_svc,
             )
             .await
             {
-                Ok((_parts, _body, response)) => response,
+                Ok((parts, _body, response)) => (parts, response),
                 Err(e) => {
                     warn!(error = %e, "Streaming signature verification failed");
                     return Err(self
@@ -217,7 +211,7 @@ impl S3Handler {
             )
             .await
             {
-                Ok((_parts, _body, response)) => response,
+                Ok((parts, _body, response)) => (parts, response),
                 Err(e) => {
                     warn!(error = %e, "Signature verification failed");
                     return Err(self

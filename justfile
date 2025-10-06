@@ -1,11 +1,15 @@
+git := require("git")
+cargo := require("cargo")
+pnpm := require("pnpm")
+
 default:
     just --list
 
 # run the linter, tests, and format the code
 check:
-    cargo clippy --all-targets --quiet
-    cargo test --quiet
-    cargo fmt
+    cargo clippy --all-targets --quiet --workspace
+    cargo test --quiet --workspace
+    cargo fmt --all
     pnpm run lint
 
 # build JavaScript bundles
@@ -30,7 +34,12 @@ coverage:
 
 # build the docker image
 docker_build:
-    docker buildx build --load --tag ghcr.io/yaleman/crabcakes:latest .
+    docker buildx build \
+        --load \
+        --build-arg "GITHUB_SHA=$(git rev-parse HEAD)" \
+        --build-arg "DESCRIPTION=$(./scripts/get_description.sh)" \
+        --tag ghcr.io/yaleman/crabcakes:latest \
+        .
 
 # build and run the docker image, mounting ./config as the config dir
 docker_run: docker_build

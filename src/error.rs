@@ -8,7 +8,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use iam_rs::EvaluationError;
 use mime_guess::mime::TEXT_HTML_UTF_8;
-use scratchstack_aws_signature::auth::SigV4AuthenticatorResponseBuilderError;
+use scratchstack_aws_signature::{SignatureError, auth::SigV4AuthenticatorResponseBuilderError};
 
 use crate::web::handlers::ErrorTemplate;
 
@@ -96,6 +96,12 @@ impl From<Box<dyn Error + Send + Sync>> for CrabCakesError {
 impl From<chrono::ParseError> for CrabCakesError {
     fn from(err: chrono::ParseError) -> Self {
         CrabCakesError::Other(format!("Failed to parse date: {}", err))
+    }
+}
+
+impl From<SignatureError> for CrabCakesError {
+    fn from(err: SignatureError) -> Self {
+        CrabCakesError::Sigv4Verification(err.to_string())
     }
 }
 

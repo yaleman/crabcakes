@@ -6,7 +6,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use http::request::Parts;
 use http::{HeaderValue, Method};
 use hyper::body::Bytes;
@@ -16,7 +16,7 @@ use scratchstack_aws_principal::{self, SessionData};
 use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
 use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
-    SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
+    SignatureError, SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
 use tokio::sync::RwLock;
 use tower::{BoxError, Service, ServiceExt};
@@ -504,17 +504,27 @@ where
     let (access_key_id, date_str, signed_headers, provided_signature) =
         parse_authorization_header(auth_header)?;
 
+    debug!(date_str = &date_str);
+    let request_date = NaiveDate::parse_from_str(&date_str, "%Y%m%d").map_err(|e| {
+        CrabCakesError::Sigv4Verification(format!("Invalid date format in Credential: {}", e))
+    })?;
+
     // Get secret key from credential store
     let signing_key: GetSigningKeyResponse = get_signing_key
         .oneshot(
             GetSigningKeyRequest::builder()
                 .access_key(&access_key_id)
                 // .session_token(self.session_token().map(|x| x.to_string()))
-                .request_date(date_str.parse()?)
+                .request_date(request_date)
                 .region(region)
                 .service(service)
                 .build()
-                .expect("All fields set"),
+                .map_err(|e| {
+                    SignatureError::InternalServiceError(Box::new(std::io::Error::other(format!(
+                        "Invalid GetSigningKeyRequest: {}",
+                        e
+                    ))))
+                })?,
         )
         .await?;
 

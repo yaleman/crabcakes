@@ -5,7 +5,7 @@
 SERVER_PORT=19000
 
 
-FRONTEND_WITHOUT_PORT="$(echo "${CRABCAKES_FRONTEND_URL:-https://localhost}" | awk -F':' '{print $1 ":" $2}')"
+FRONTEND_WITHOUT_PORT="$(echo "${CRABCAKES_FRONTEND_URL:-http://localhost}" | awk -F':' '{print $1 ":" $2}')"
 SERVER_ADDRESS="${FRONTEND_WITHOUT_PORT}:$SERVER_PORT"
 
 echo "SERVER ADDRESS=$SERVER_ADDRESS"
@@ -19,14 +19,20 @@ if [[ -z "$(which -a jq)" ]]; then
     exit 1
 fi
 
+if [[ -z "$(which -a aws)" ]]; then
+    echo "The AWS cli command (aws) is required for this script"
+    exit 1
+fi
+
 pkill -f target/debug/crabcakes
 
 # Use test credentials from test_config/credentials/testuser.json
 AWS_ACCESS_KEY_ID="$(jq -r .access_key_id test_config/credentials/testuser.json)"
 AWS_SECRET_ACCESS_KEY="$(jq -r .secret_access_key test_config/credentials/testuser.json)"
+export AWS_ACCESS_KEY_ID
+export AWS_SECRET_ACCESS_KEY
 export AWS_MAX_ATTEMPTS=1
 export AWS_REGION="crabcakes"
-
 TEMPDIR="$(mktemp -d)"
 TEMPDIR2="$(mktemp -d)"
 
@@ -37,22 +43,25 @@ RUST_LOG=debug cargo run --quiet --bin crabcakes -- \
 CRABCAKES_PID=$!
 echo "Started crabcakes with PID $CRABCAKES_PID"
 
-
+echo "Copying test files to $TEMPDIR"
 cp -R testfiles/* "$TEMPDIR/"
 
 
 while true; do
     if curl -sk "$SERVER_ADDRESS" > /dev/null; then
-        echo "Server is up"
+        echo "Server is up!"
         break
     else
-        echo "Waiting for server to start..."
+        echo "Waiting for server to start... checking {$SERVER_ADDRESS}"
         sleep 1
     fi
 done
 
 
-LSTEXT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 ls s3://$TEST_BUCKET/$TEST_FILE --endpoint-url "$SERVER_ADDRESS")"
+echo "########################################"
+echo "Testing ListObjectsV2 - list files in bucket1"
+echo "########################################"
+LSTEXT="$(aws s3 ls s3://$TEST_BUCKET/$TEST_FILE --endpoint-url "$SERVER_ADDRESS")"
 
 if [[ "$LSTEXT" == *"test.txt" ]]; then
     echo "The output contains test.txt"
@@ -61,7 +70,15 @@ else
     exit 1
 fi
 
-LSTEXT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 ls s3://$TEST_BUCKET/foo.txt --endpoint-url "$SERVER_ADDRESS")"
+echo "########################################"
+echo "Testing ListObjectsV2 - list files in bucket1 (non-existent file)"
+echo "########################################"
+if [ -f "$TEMPDIR/foo.txt" ]; then
+    echo "Removing existing foo.txt"
+    rm "$TEMPDIR/foo.txt"
+fi
+
+LSTEXT="$(aws s3 ls s3://$TEST_BUCKET/foo.txt --endpoint-url "$SERVER_ADDRESS")"
 
 if [[ -z "$LSTEXT" ]]; then
     echo "The output is empty"
@@ -71,7 +88,11 @@ else
 fi
 
 
-LSTEXT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 ls s3://$TEST_BUCKET/ --endpoint-url "$SERVER_ADDRESS")"
+echo "########################################"
+echo "Testing ListObjectsV2 - list all files in bucket1"
+echo "########################################"
+
+LSTEXT="$(aws s3 ls s3://$TEST_BUCKET/ --endpoint-url "$SERVER_ADDRESS")"
 
 if [[ -z "$LSTEXT" ]]; then
     echo "The output is empty"
@@ -80,7 +101,10 @@ else
     echo "The output is not empty (expected since bucket1/test.txt exists)"
 fi
 
-HEADRES="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api head-object \
+echo "########################################"
+echo "Testing HeadObject"
+echo "########################################"
+HEADRES="$(aws s3api head-object \
     --bucket $TEST_BUCKET --key $TEST_FILE \
     --endpoint-url "$SERVER_ADDRESS")"
 
@@ -109,8 +133,10 @@ else
     exit 1
 fi
 
-# Verify the uploaded file can be retrieved
-GETRES="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp \
+echo "################################################"
+echo "Verifying the uploaded file can be retrieved..."
+echo "################################################"
+GETRES="$(aws s3 cp \
     s3://$TEST_BUCKET/$TEST_UPLOAD_FILE - \
     --endpoint-url "$SERVER_ADDRESS")"
 
@@ -123,7 +149,9 @@ fi
 
 rm "$TEMPDIR2/$TEST_UPLOAD_FILE"
 
-# Test CreateBucket
+echo "#######################################"
+echo "Testing CreateBucket"
+echo "#######################################"
 TEST_NEW_BUCKET="test-new-bucket"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 mb \
     s3://$TEST_NEW_BUCKET \
@@ -134,7 +162,9 @@ else
     exit 1
 fi
 
-# Test HeadBucket on newly created bucket
+echo "##########################################"
+echo "Testing HeadBucket on newly created bucket"
+echo "##########################################"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api head-bucket \
     --bucket $TEST_NEW_BUCKET \
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
@@ -144,7 +174,9 @@ else
     exit 1
 fi
 
-# Test HeadBucket on non-existent bucket
+echo "##########################################"
+echo "Testing HeadBucket on non-existent bucket"
+echo "##########################################"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api head-bucket \
     --bucket "nonexistent-bucket" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
@@ -154,8 +186,10 @@ else
     echo "HeadBucket correctly returned error for non-existent bucket"
 fi
 
-# Test GetBucketLocation on existing bucket
-LOCATION_RESULT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api get-bucket-location \
+echo "###############################################"
+echo "Testing GetBucketLocation on existing bucket"
+echo "###############################################"
+LOCATION_RESULT="$(aws s3api get-bucket-location \
     --bucket $TEST_BUCKET \
     --endpoint-url "$SERVER_ADDRESS" 2>&1)"
 
@@ -166,7 +200,9 @@ else
     exit 1
 fi
 
-# Test GetBucketLocation on non-existent bucket (should fail)
+echo "################################################################"
+echo "Testing GetBucketLocation on non-existent bucket (should fail)"
+echo "################################################################"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api get-bucket-location \
     --bucket "nonexistent-bucket" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
@@ -176,7 +212,9 @@ else
     echo "GetBucketLocation correctly returned error for non-existent bucket"
 fi
 
-# Test CopyObject - server-side copy of existing object
+echo "################################################################"
+echo "Testing CopyObject - server-side copy of existing object"
+echo "################################################################"
 TEST_COPY_KEY="test-copy.txt"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api copy-object \
     --bucket $TEST_BUCKET \
@@ -189,12 +227,14 @@ else
     exit 1
 fi
 
-# Verify copied object exists and has correct content
-COPY_CONTENT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp \
+echo "########################################################"
+echo "Verifying copied object exists and has correct content"
+echo "########################################################"
+COPY_CONTENT="$(aws s3 cp \
     s3://$TEST_BUCKET/$TEST_COPY_KEY - \
     --endpoint-url "$SERVER_ADDRESS")"
 
-ORIGINAL_CONTENT="$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 cp \
+ORIGINAL_CONTENT="$(aws s3 cp \
     s3://$TEST_BUCKET/$TEST_FILE - \
     --endpoint-url "$SERVER_ADDRESS")"
 
@@ -205,12 +245,14 @@ else
     exit 1
 fi
 
-# Clean up copied object
+echo "Cleaning up copied object"
 AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 rm \
     s3://$TEST_BUCKET/$TEST_COPY_KEY \
     --endpoint-url "$SERVER_ADDRESS" > /dev/null 2>&1
 
-# Test CopyObject with non-existent source (should fail)
+echo "############################################################"
+echo "Testing CopyObject with non-existent source (should fail)"
+echo "############################################################"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3api copy-object \
     --bucket $TEST_BUCKET \
     --key "copy-dest.txt" \
@@ -222,7 +264,9 @@ else
     echo "CopyObject correctly failed for non-existent source"
 fi
 
-# Test DeleteObject - delete the uploaded file
+echo "############################################################"
+echo "Testing DeleteObject - delete the uploaded file"
+echo "############################################################"
 if AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" aws s3 rm \
     s3://$TEST_BUCKET/$TEST_UPLOAD_FILE \
     --endpoint-url "$SERVER_ADDRESS"; then
@@ -422,7 +466,7 @@ fi
 echo "Split file into 2 parts"
 
 # Initiate multipart upload
-UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+UPLOAD_OUTPUT=$(\
     aws s3api create-multipart-upload \
     --bucket $TEST_BUCKET \
     --key $MULTIPART_KEY \
@@ -442,7 +486,7 @@ fi
 echo "Initiated multipart upload with ID: $UPLOAD_ID"
 
 # Upload part 1
-PART1_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+PART1_OUTPUT=$(\
     aws s3api upload-part \
     --bucket $TEST_BUCKET \
     --key $MULTIPART_KEY \
@@ -462,7 +506,7 @@ echo "PART1_OUTPUT=${PART1_OUTPUT}"
 echo "Uploaded part 1 with ETag: '$ETAG1'"
 
 # Upload part 2
-PART2_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+PART2_OUTPUT=$(\
     aws s3api upload-part \
     --bucket $TEST_BUCKET \
     --key $MULTIPART_KEY \
@@ -482,7 +526,7 @@ ETAG2=$(echo "$PART2_OUTPUT" | jq -r '.ETag'| tr -d '"')
 echo "Uploaded part 2 with ETag: '$ETAG2'"
 
 # List parts to verify
-LIST_PARTS_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+LIST_PARTS_OUTPUT=$(\
     aws s3api list-parts \
     --bucket $TEST_BUCKET \
     --key $MULTIPART_KEY \
@@ -515,7 +559,7 @@ EOF
 cat "$TEMPDIR2/complete-multipart.json"
 
 # Complete multipart upload
-COMPLETE_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+COMPLETE_OUTPUT=$(\
     aws s3api complete-multipart-upload \
     --bucket $TEST_BUCKET \
     --key $MULTIPART_KEY \
@@ -584,7 +628,7 @@ else
 fi
 
 # Initiate multipart upload for destination
-COPY_UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+COPY_UPLOAD_OUTPUT=$(\
     aws s3api create-multipart-upload \
     --bucket $TEST_BUCKET \
     --key "copied-object.bin" \
@@ -595,7 +639,7 @@ echo "Created multipart upload for copy with ID: $COPY_UPLOAD_ID"
 
 # Copy first 5MB using UploadPartCopy
 echo "Copying part 1 (bytes 0-5242879)..."
-COPY_PART1_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+COPY_PART1_OUTPUT=$(\
     aws s3api upload-part-copy \
     --bucket $TEST_BUCKET \
     --key "copied-object.bin" \
@@ -610,7 +654,7 @@ echo "Part 1 copied with ETag: $COPY_PART1_ETAG"
 
 # Copy second 5MB using UploadPartCopy
 echo "Copying part 2 (bytes 5242880-10485759)..."
-COPY_PART2_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+COPY_PART2_OUTPUT=$(\
     aws s3api upload-part-copy \
     --bucket $TEST_BUCKET \
     --key "copied-object.bin" \
@@ -690,7 +734,7 @@ rm -f "$TEMPDIR2/$SOURCE_KEY" "$TEMPDIR2/copied-downloaded.bin" "$TEMPDIR2/compl
 
 # Test abort multipart upload (create a new upload and abort it)
 echo "Testing abort multipart upload..."
-ABORT_UPLOAD_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+ABORT_UPLOAD_OUTPUT=$(\
     aws s3api create-multipart-upload \
     --bucket $TEST_BUCKET \
     --key "abort-test.bin" \
@@ -757,7 +801,7 @@ else
 fi
 
 # Get object tagging
-TAGS_OUTPUT=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+TAGS_OUTPUT=$(\
     aws s3api get-object-tagging \
     --bucket $TEST_BUCKET \
     --key "$TAGGING_KEY" \
@@ -795,7 +839,7 @@ else
 fi
 
 # Verify tags were deleted
-TAGS_AFTER_DELETE=$(AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+TAGS_AFTER_DELETE=$(\
     aws s3api get-object-tagging \
     --bucket $TEST_BUCKET \
     --key "$TAGGING_KEY" \
