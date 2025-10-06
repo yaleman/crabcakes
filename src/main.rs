@@ -5,6 +5,8 @@
 use clap::Parser;
 use crabcakes::cli::Cli;
 use crabcakes::server::Server;
+use tokio::signal::unix::{SignalKind, signal};
+use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -31,11 +33,28 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let cli = Cli::parse();
+    let mut hangup_waiter = signal(SignalKind::hangup())?;
+    loop {
+        let cli = Cli::parse();
+        let server = Server::new(cli);
+        tokio::select! {
+            res = server.run(false) => {
+                return res.map_err(|err| {
+                    eprintln!("Server error: {}", err);
+                    err.into()
+                })
+            }
+            _ = hangup_waiter.recv() => {
+                warn!("Received SIGHUP, shutting down.");
+                break
+                // TODO: Implement configuration reload logic here
 
-    let server = Server::new(cli);
-    server.run(false).await.map_err(|err| {
-        eprintln!("Server error: {}", err);
-        err.into()
-    })
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl-C, shutting down.");
+                break
+            }
+        }
+    }
+    Ok(())
 }
