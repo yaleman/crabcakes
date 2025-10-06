@@ -46,3 +46,7 @@ run:
 run_debug:
     pnpm build && \
     RUST_LOG=debug cargo run
+
+# run mdbook in "serve" mode
+serve_docs:
+    cd docs && mdbook serve
