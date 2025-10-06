@@ -23,7 +23,7 @@ repository = { workspace = true }
 homepage = { workspace = true }
 
 [dependencies]
-crabcakes-async-spooled-tempfile = { version = "0.0.1", path = "crabcakes-async-spooled-tempfile" }
+crabcakes-async-spooled-tempfile = { version = "0.0.1" }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.48", features = ["derive", "env"] }
 http = "1.3.1"
