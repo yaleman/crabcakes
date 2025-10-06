@@ -35,8 +35,10 @@ hyper-util = { version = "0.1.17", features = [
     "http2",
     "server",
 ] }
-scratchstack-aws-signature = { git = "https://github.com/yaleman/scratchstack-aws-signature", rev = "f3ac6ee", version = "0.12.0" }
-# scratchstack-aws-signature = { path = "../scratchstack-aws-signature", version = "0.12.0" }
+# scratchstack-aws-signature = { git = "https://github.com/yaleman/scratchstack-aws-signature", rev = "f3ac6ee", version = "0.12.0" }
+scratchstack-aws-signature = { path = "../scratchstack-aws-signature", features = [
+    "streaming",
+] }
 # scratchstack-aws-signature = "0.11.3"
 scratchstack-aws-principal = "0.4.9"
 # iam-rs = "0.0.23" # pending https://github.com/Foorack/iam-rs/pull/8

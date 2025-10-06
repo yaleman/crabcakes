@@ -3680,7 +3680,6 @@ dependencies = [
 [[package]]
 name = "scratchstack-aws-signature"
 version = "0.12.0"
-source = "git+https://github.com/yaleman/scratchstack-aws-signature?rev=f3ac6ee#f3ac6ee7f9afaa091dfa2d2012177128c6d4af80"
 dependencies = [
  "bytes",
  "chrono",

@@ -19,17 +19,16 @@ use scratchstack_arn::Arn;
 use scratchstack_aws_principal::PrincipalIdentity;
 use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
 use scratchstack_aws_signature::{
-    GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, service_for_signing_key_fn,
+    GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
+    SignatureOptions, X_AMZ_CONTENT_SHA256, service_for_signing_key_fn,
+    sigv4_validate_streaming_request,
 };
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use crate::auth::{
-    AuthContext, extract_bucket_and_key, http_method_to_s3_action,
-    sigv4_validate_streaming_request, verify_sigv4,
-};
+use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
 use crate::body_buffer::BufferedBody;
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
@@ -80,14 +79,14 @@ impl S3Handler {
     /// Returns Ok with (parts, buffered_body, SigV4AuthenticatorResponse) or Err with error response
     async fn verify_and_buffer_request(
         &self,
-        req: Request<hyper::body::Incoming>,
+        request: Request<hyper::body::Incoming>,
     ) -> Result<(Parts, BufferedBody, SigV4AuthenticatorResponse), Response<Full<Bytes>>> {
         // Extract the parts we need before consuming the request
-        let (parts, body) = req.into_parts();
+        let (parts, body) = request.into_parts();
 
         // Check if this is a streaming/chunked request that needs decoding
         let needs_aws_chunk_decode =
-            if let Some(content_sha256) = parts.headers.get("x-amz-content-sha256") {
+            if let Some(content_sha256) = parts.headers.get(X_AMZ_CONTENT_SHA256) {
                 if let Ok(sha_str) = content_sha256.to_str() {
                     sha_str == "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
                 } else {
@@ -118,7 +117,7 @@ impl S3Handler {
         };
 
         // Check if this is a streaming/chunked request
-        let is_streaming = if let Some(content_sha256) = parts.headers.get("x-amz-content-sha256") {
+        let is_streaming = if let Some(content_sha256) = parts.headers.get(X_AMZ_CONTENT_SHA256) {
             if let Ok(sha_str) = content_sha256.to_str() {
                 sha_str.starts_with("STREAMING-") || sha_str == "UNSIGNED-PAYLOAD"
             } else {
@@ -166,6 +165,9 @@ impl S3Handler {
                 &self.region,
                 "s3",
                 &mut get_signing_key_svc,
+                chrono::Utc::now(),
+                &NO_ADDITIONAL_SIGNED_HEADERS,
+                SignatureOptions::default(),
             )
             .await
             {
