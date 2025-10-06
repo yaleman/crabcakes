@@ -39,10 +39,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let server = Server::new(cli);
         tokio::select! {
             res = server.run(false) => {
-                return res.map_err(|err| {
+                if let Err(err) = res {
                     eprintln!("Server error: {}", err);
-                    err.into()
-                })
+                };
             }
             _ = hangup_waiter.recv() => {
                 warn!("Received SIGHUP, shutting down.");
