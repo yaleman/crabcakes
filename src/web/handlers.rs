@@ -189,7 +189,7 @@ pub struct WebHandler {
     db: Arc<DBService>,
     credentials_store: Arc<RwLock<CredentialStore>>,
     policy_store: Arc<PolicyStore>,
-    filesystem: Arc<RwLock<FilesystemService>>,
+    filesystem: Arc<FilesystemService>,
 }
 
 impl WebHandler {
@@ -198,7 +198,7 @@ impl WebHandler {
         db: Arc<DBService>,
         credentials_store: Arc<RwLock<CredentialStore>>,
         policy_store: Arc<PolicyStore>,
-        filesystem: Arc<RwLock<FilesystemService>>,
+        filesystem: Arc<FilesystemService>,
     ) -> Self {
         Self {
             oauth_client,
@@ -997,8 +997,6 @@ impl WebHandler {
 
         let buckets = self
             .filesystem
-            .read()
-            .await
             .list_buckets()
             .map_err(CrabCakesError::from)?;
 
@@ -1030,8 +1028,6 @@ impl WebHandler {
         // List objects in bucket with prefix
         let (entries, _) = self
             .filesystem
-            .read()
-            .await
             .list_directory(Some(&format!("{}/", bucket_name)), 1000, None)
             .map_err(CrabCakesError::from)?;
 
@@ -1119,8 +1115,6 @@ impl WebHandler {
 
         // Create bucket through filesystem service
         self.filesystem
-            .write()
-            .await
             .create_bucket(&request.bucket_name)
             .await
             .map_err(CrabCakesError::from)?;
@@ -1151,8 +1145,6 @@ impl WebHandler {
         // Get object count for the bucket
         let (entries, _) = self
             .filesystem
-            .read()
-            .await
             .list_directory(Some(&format!("{}/", bucket_name)), 10000, None)
             .map_err(CrabCakesError::from)?;
 
@@ -1193,16 +1185,12 @@ impl WebHandler {
             // Delete all objects in the bucket first
             let (entries, _) = self
                 .filesystem
-                .read()
-                .await
                 .list_directory(Some(&format!("{}/", bucket_name)), 10000, None)
                 .map_err(CrabCakesError::from)?;
 
             // Delete each object
             for entry in entries {
                 self.filesystem
-                    .write()
-                    .await
                     .delete_file(&entry.key)
                     .await
                     .map_err(CrabCakesError::from)?;
@@ -1211,8 +1199,6 @@ impl WebHandler {
 
         // Delete the bucket (will fail if not empty and force=false)
         self.filesystem
-            .write()
-            .await
             .delete_bucket(bucket_name)
             .await
             .map_err(CrabCakesError::from)?;

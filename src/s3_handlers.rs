@@ -46,7 +46,7 @@ use crate::xml_responses::{
 
 pub struct S3Handler {
     server_addr: String,
-    filesystem: Arc<RwLock<FilesystemService>>,
+    filesystem: Arc<FilesystemService>,
     policy_store: Arc<PolicyStore>,
     credentials_store: Arc<RwLock<CredentialStore>>,
     multipart_manager: Arc<RwLock<MultipartManager>>,
@@ -56,7 +56,7 @@ pub struct S3Handler {
 
 impl S3Handler {
     pub fn new(
-        filesystem: Arc<RwLock<FilesystemService>>,
+        filesystem: Arc<FilesystemService>,
         policy_store: Arc<PolicyStore>,
         credentials_store: Arc<RwLock<CredentialStore>>,
         multipart_manager: Arc<RwLock<MultipartManager>>,
@@ -792,11 +792,10 @@ impl S3Handler {
             prefix = Some(query_prefix);
         }
 
-        match self.filesystem.read().await.list_directory(
-            prefix.as_deref(),
-            max_keys,
-            continuation_token,
-        ) {
+        match self
+            .filesystem
+            .list_directory(prefix.as_deref(), max_keys, continuation_token)
+        {
             Ok((entries, next_token)) => {
                 debug!(
                     count = entries.len(),
@@ -910,8 +909,6 @@ impl S3Handler {
 
         match self
             .filesystem
-            .read()
-            .await
             .list_directory(Some(prefix_str), max_keys, marker_opt)
         {
             Ok((entries, next_marker)) => {
@@ -952,7 +949,7 @@ impl S3Handler {
 
     async fn handle_list_buckets(&self, _bucket_name: &str) -> Response<Full<Bytes>> {
         // List all top-level directories as buckets
-        match self.filesystem.read().await.list_buckets() {
+        match self.filesystem.list_buckets() {
             Ok(buckets) => {
                 debug!(count = buckets.len(), "Listed buckets");
                 let response = ListBucketsResponse::from_buckets(buckets);
@@ -982,7 +979,7 @@ impl S3Handler {
     }
 
     async fn handle_head_object(&self, key: &str) -> Response<Full<Bytes>> {
-        match self.filesystem.read().await.get_file_metadata(key) {
+        match self.filesystem.get_file_metadata(key) {
             Ok(metadata) => {
                 debug!(key = %key, size = metadata.size, "HeadObject success");
 
@@ -1023,7 +1020,7 @@ impl S3Handler {
         key: &str,
         range_header: Option<&str>,
     ) -> Response<Full<Bytes>> {
-        match self.filesystem.read().await.get_file_metadata(key) {
+        match self.filesystem.get_file_metadata(key) {
             Ok(metadata) => {
                 // Parse range header if present
                 let (start, end, is_range_request) = if let Some(range_str) = range_header {
@@ -1157,7 +1154,7 @@ impl S3Handler {
         let body = Bytes::from(body_vec);
 
         // Write the file
-        match self.filesystem.write().await.write_file(key, &body).await {
+        match self.filesystem.write_file(key, &body).await {
             Ok(metadata) => {
                 debug!(key = %key, size = metadata.size, "PutObject success");
                 #[allow(clippy::expect_used)]
@@ -1177,7 +1174,7 @@ impl S3Handler {
     async fn handle_create_bucket(&self, bucket: &str) -> Response<Full<Bytes>> {
         debug!(bucket = %bucket, "Handling CreateBucket request");
 
-        match self.filesystem.write().await.create_bucket(bucket).await {
+        match self.filesystem.create_bucket(bucket).await {
             Ok(()) => {
                 debug!(bucket = %bucket, "CreateBucket success");
                 #[allow(clippy::expect_used)]
@@ -1205,7 +1202,7 @@ impl S3Handler {
     async fn handle_delete_bucket(&self, bucket: &str) -> Response<Full<Bytes>> {
         debug!(bucket = %bucket, "Handling DeleteBucket request");
 
-        match self.filesystem.write().await.delete_bucket(bucket).await {
+        match self.filesystem.delete_bucket(bucket).await {
             Ok(()) => {
                 debug!(bucket = %bucket, "DeleteBucket success");
                 #[allow(clippy::expect_used)]
@@ -1234,7 +1231,7 @@ impl S3Handler {
     async fn handle_delete_object(&self, key: &str) -> Response<Full<Bytes>> {
         debug!(key = %key, "Handling DeleteObject request");
 
-        match self.filesystem.write().await.delete_file(key).await {
+        match self.filesystem.delete_file(key).await {
             Ok(()) => {
                 debug!(key = %key, "DeleteObject success");
                 #[allow(clippy::expect_used)]
@@ -1284,7 +1281,7 @@ impl S3Handler {
         // Delete each object (prepend bucket name to key)
         for obj in delete_request.objects {
             let full_key = format!("{}/{}", bucket, obj.key);
-            match self.filesystem.write().await.delete_file(&full_key).await {
+            match self.filesystem.delete_file(&full_key).await {
                 Ok(()) => {
                     debug!(key = %obj.key, full_key = %full_key, "Object deleted successfully");
                     if !delete_request.quiet {
@@ -1374,13 +1371,7 @@ impl S3Handler {
             }
         }
 
-        match self
-            .filesystem
-            .write()
-            .await
-            .copy_file(source_key, dest_key)
-            .await
-        {
+        match self.filesystem.copy_file(source_key, dest_key).await {
             Ok(metadata) => {
                 debug!(source = %source_key, dest = %dest_key, "CopyObject success");
 
@@ -1425,7 +1416,7 @@ impl S3Handler {
         debug!(bucket = %bucket, "Handling GetBucketLocation request");
 
         // Check if bucket exists
-        if !self.filesystem.read().await.bucket_exists(bucket) {
+        if !self.filesystem.bucket_exists(bucket) {
             warn!(bucket = %bucket, "Bucket does not exist");
             return self.no_such_bucket_response(bucket);
         }
@@ -1455,7 +1446,7 @@ impl S3Handler {
     async fn handle_head_bucket(&self, bucket: &str) -> Response<Full<Bytes>> {
         debug!(bucket = %bucket, "Handling HeadBucket request");
 
-        if self.filesystem.read().await.bucket_exists(bucket) {
+        if self.filesystem.bucket_exists(bucket) {
             debug!(bucket = %bucket, "HeadBucket success - bucket exists");
             #[allow(clippy::expect_used)]
             Response::builder()
@@ -1478,7 +1469,7 @@ impl S3Handler {
         debug!(bucket = %bucket, key = %key, "Handling CreateMultipartUpload request");
 
         // Verify bucket exists
-        if !self.filesystem.read().await.bucket_exists(bucket) {
+        if !self.filesystem.bucket_exists(bucket) {
             warn!(bucket = %bucket, "Bucket does not exist");
             return self.no_such_bucket_response(bucket);
         }
@@ -1657,7 +1648,7 @@ impl S3Handler {
         }
 
         // Read source object
-        let source_path = self.filesystem.read().await.resolve_path(source_key);
+        let source_path = self.filesystem.resolve_path(source_key);
         let mut file = match File::open(&source_path).await {
             Ok(f) => f,
             Err(e) => {
@@ -1832,7 +1823,7 @@ impl S3Handler {
         debug!(bucket = %bucket, "Handling ListMultipartUploads request");
 
         // Verify bucket exists
-        if !self.filesystem.read().await.bucket_exists(bucket) {
+        if !self.filesystem.bucket_exists(bucket) {
             warn!(bucket = %bucket, "Bucket does not exist");
             return self.no_such_bucket_response(bucket);
         }
@@ -1997,7 +1988,7 @@ impl S3Handler {
             .collect();
 
         // Build full key path
-        let dest_path = self.filesystem.read().await.resolve_path(key);
+        let dest_path = self.filesystem.resolve_path(key);
 
         // Complete multipart upload
         match self
@@ -2159,7 +2150,7 @@ impl S3Handler {
         } else {
             &format!("{}/{}", bucket, key)
         };
-        let file_path = self.filesystem.read().await.resolve_path(file_key);
+        let file_path = self.filesystem.resolve_path(file_key);
 
         // Get file metadata
         match tokio::fs::metadata(&file_path).await {
