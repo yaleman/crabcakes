@@ -21,12 +21,12 @@ jobs:
                   mdbook-version: "latest"
             - name: Run mdbook build
               run: |
-                  cd docs && mdbook build && tar czvf /tmp/book.tgz book
+                  cd docs && mdbook build
             - name: Upload build artifacts
               uses: actions/upload-artifact@v4
               with:
                   name: book
-                  path: /tmp/book.tgz
+                  path: ./docs/book
                   if-no-files-found: error
                   retention-days: 1
             - name: Deploy
