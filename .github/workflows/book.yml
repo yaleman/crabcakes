@@ -9,7 +9,7 @@ name: Deploy mdBook to GitHub Pages
 
 jobs:
     deploy:
-        runs-on: ubuntu-24.04-arm
+        runs-on: macos-latest
         concurrency:
             group: ${{ github.workflow }}-${{ github.ref }}
         steps:
