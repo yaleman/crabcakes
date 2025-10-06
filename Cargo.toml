@@ -23,6 +23,9 @@ repository = { workspace = true }
 homepage = { workspace = true }
 
 [dependencies]
+scratchstack-aws-signature = { git = "https://github.com/yaleman/scratchstack-aws-signature", rev = "d80753418d2e08520c07692faa5b1e54eb4154e2", features = [
+    "streaming",
+] }
 crabcakes-async-spooled-tempfile = { version = "0.0.1" }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.48", features = ["derive", "env"] }
@@ -35,10 +38,9 @@ hyper-util = { version = "0.1.17", features = [
     "http2",
     "server",
 ] }
-# scratchstack-aws-signature = { git = "https://github.com/yaleman/scratchstack-aws-signature", rev = "f3ac6ee", version = "0.12.0" }
-scratchstack-aws-signature = { path = "../scratchstack-aws-signature", features = [
-    "streaming",
-] }
+# scratchstack-aws-signature = { path = "../scratchstack-aws-signature", features = [
+#     "streaming",
+# ] }
 # scratchstack-aws-signature = "0.11.3"
 scratchstack-aws-principal = "0.4.9"
 # iam-rs = "0.0.23" # pending https://github.com/Foorack/iam-rs/pull/8
