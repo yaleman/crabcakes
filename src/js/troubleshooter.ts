@@ -4,6 +4,7 @@ interface PolicyCheckData {
     [key: string]: string;
 }
 
+
 interface PolicyCheckResult {
     decision: string;
     reason: string;
@@ -127,7 +128,7 @@ function debouncedCheck(debounce_timer: number): void {
     }
 }
 
-document.querySelectorAll<HTMLInputElement>(" .form-control").forEach((input) => {
+document.querySelectorAll<HTMLInputElement>(".form-control").forEach((input) => {
     input.addEventListener("input", () => {
         console.debug(`Input changed: ${input.id} = ${input.value}`);
         // update the URL parameters

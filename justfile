@@ -1,6 +1,7 @@
 git := require("git")
 cargo := require("cargo")
 pnpm := require("pnpm")
+npx := require("npx")
 
 default:
     just --list
@@ -15,6 +16,7 @@ check:
 # build JavaScript bundles
 build-js:
     pnpm run build
+    cd src/js && npx swc  --out-dir ../../static/js/ *.ts
 
 # lint JavaScript and CSS files
 lint-web:

@@ -1,1 +1,129 @@
-function C(){let t={};document.querySelectorAll(".form-control").forEach(e=>{t[e.id]=e.value}),fetch("/admin/api/policy_troubleshooter",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(t)}).then(e=>e.json()).then(e=>{console.log("Policy check result:",e);let n=document.getElementById("results");if(!n)return;for(;n.firstChild;)n.removeChild(n.firstChild);let i=document.createElement("h3");i.innerHTML=`Decision: <span class="badge badge-${e.decision.toLowerCase()}">${e.decision}</span>`,n.appendChild(i);let c=document.createElement("p");c.textContent=`Reason: ${e.reason}`,n.appendChild(c);let l=document.createElement("h4");l.textContent="Deny Policies:",n.appendChild(l);let r=document.createElement("ul");e.deny_policies.forEach(a=>{let o=document.createElement("li");o.textContent=a,r.appendChild(o)}),n.appendChild(r);let p=document.createElement("h4");p.textContent="Allow Policies:",n.appendChild(p);let h=document.createElement("ul");e.allow_policies.forEach(a=>{let o=document.createElement("li");o.textContent=a,h.appendChild(o)}),n.appendChild(h);let m=document.createElement("h4");m.textContent="Not Applicable Policies:",n.appendChild(m);let u=document.createElement("ul");e.not_applicable_policies.forEach(a=>{let o=document.createElement("li");o.textContent=a,u.appendChild(o)}),n.appendChild(u)}).catch(e=>{console.error("Error checking policy:",e);let n=document.getElementById("results");if(!n)return;for(;n.firstChild;)n.removeChild(n.firstChild);let i=document.createElement("div");i.className="error-container";let c=document.createElement("h1");c.textContent="Error checking policy. Please try again.",i.appendChild(c);let l=document.createElement("p");l.textContent=e.toString(),i.appendChild(l),n.appendChild(i)})}var s=0;function d(t){t?console.debug("Debounce timer is still running. Waiting for it to expire."):t=window.setTimeout(()=>{t=0,C()},300)}document.querySelectorAll(" .form-control").forEach(t=>{t.addEventListener("input",()=>{console.debug(`Input changed: ${t.id} = ${t.value}`);let e=new URL(window.location.href);e.searchParams.set(t.id,t.value),console.debug(`Updated URL: ${e.toString()}`),window.history.pushState({},"",e),d(s)})});document.getElementsByName("check_access").forEach(t=>{t.addEventListener("click",e=>{e.preventDefault(),d(s)}),t.addEventListener("submit",e=>{e.preventDefault(),d(s)})});window.addEventListener("load",()=>{let t=!1;document.querySelectorAll(".form-control").forEach(e=>{e.value&&(t=!0)}),t&&d(s)});
+// troubleshooter.ts
+function checkPolicy() {
+    var data = {};
+    document.querySelectorAll(".form-control").forEach(function(input) {
+        data[input.id] = input.value;
+    });
+    fetch("/admin/api/policy_troubleshooter", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(data)
+    }).then(function(response) {
+        return response.json();
+    }).then(function(result) {
+        console.log("Policy check result:", result);
+        var resultsDiv = document.getElementById("results");
+        if (!resultsDiv) return;
+        // Clear previous results
+        while(resultsDiv.firstChild){
+            resultsDiv.removeChild(resultsDiv.firstChild);
+        }
+        // Create and append decision heading
+        var decisionHeading = document.createElement("h3");
+        decisionHeading.innerHTML = 'Decision: <span class="badge badge-'.concat(result.decision.toLowerCase(), '">').concat(result.decision, "</span>");
+        resultsDiv.appendChild(decisionHeading);
+        // Create and append reason paragraph
+        var reasonParagraph = document.createElement("p");
+        reasonParagraph.textContent = "Reason: ".concat(result.reason);
+        resultsDiv.appendChild(reasonParagraph);
+        // Create and append deny policies heading
+        var denyPoliciesHeading = document.createElement("h4");
+        denyPoliciesHeading.textContent = "Deny Policies:";
+        resultsDiv.appendChild(denyPoliciesHeading);
+        // Create and append deny policies list
+        var denyPoliciesList = document.createElement("ul");
+        result.deny_policies.forEach(function(policy) {
+            var listItem = document.createElement("li");
+            listItem.textContent = policy;
+            denyPoliciesList.appendChild(listItem);
+        });
+        resultsDiv.appendChild(denyPoliciesList);
+        // Create and append allow policies heading
+        var allowPoliciesHeading = document.createElement("h4");
+        allowPoliciesHeading.textContent = "Allow Policies:";
+        resultsDiv.appendChild(allowPoliciesHeading);
+        // Create and append allow policies list
+        var allowPoliciesList = document.createElement("ul");
+        result.allow_policies.forEach(function(policy) {
+            var listItem = document.createElement("li");
+            listItem.textContent = policy;
+            allowPoliciesList.appendChild(listItem);
+        });
+        resultsDiv.appendChild(allowPoliciesList);
+        // Create and append not applicable policies heading
+        var notApplicablePoliciesHeading = document.createElement("h4");
+        notApplicablePoliciesHeading.textContent = "Not Applicable Policies:";
+        resultsDiv.appendChild(notApplicablePoliciesHeading);
+        // Create and append not applicable policies list
+        var notApplicablePoliciesList = document.createElement("ul");
+        result.not_applicable_policies.forEach(function(policy) {
+            var listItem = document.createElement("li");
+            listItem.textContent = policy;
+            notApplicablePoliciesList.appendChild(listItem);
+        });
+        resultsDiv.appendChild(notApplicablePoliciesList);
+    }).catch(function(error) {
+        console.error("Error checking policy:", error);
+        var resultsDiv = document.getElementById("results");
+        if (!resultsDiv) return;
+        // Clear previous results
+        while(resultsDiv.firstChild){
+            resultsDiv.removeChild(resultsDiv.firstChild);
+        }
+        var errorContainer = document.createElement("div");
+        errorContainer.className = "error-container";
+        var errorHeading = document.createElement("h1");
+        errorHeading.textContent = "Error checking policy. Please try again.";
+        errorContainer.appendChild(errorHeading);
+        var errorMessage = document.createElement("p");
+        errorMessage.textContent = error.toString();
+        errorContainer.appendChild(errorMessage);
+        resultsDiv.appendChild(errorContainer);
+    });
+}
+var debounce_timer = 0;
+function debouncedCheck(debounce_timer) {
+    if (!debounce_timer) {
+        debounce_timer = window.setTimeout(function() {
+            debounce_timer = 0; // Reset the timer after execution
+            checkPolicy();
+        }, 300);
+    } else {
+        console.debug("Debounce timer is still running. Waiting for it to expire.");
+    }
+}
+document.querySelectorAll(" .form-control").forEach(function(input) {
+    input.addEventListener("input", function() {
+        console.debug("Input changed: ".concat(input.id, " = ").concat(input.value));
+        // update the URL parameters
+        var url = new URL(window.location.href);
+        url.searchParams.set(input.id, input.value);
+        console.debug("Updated URL: ".concat(url.toString()));
+        window.history.pushState({}, '', url);
+        debouncedCheck(debounce_timer);
+    });
+});
+document.getElementsByName("check_access").forEach(function(input) {
+    input.addEventListener("click", function(event) {
+        event.preventDefault();
+        debouncedCheck(debounce_timer);
+    });
+    input.addEventListener("submit", function(event) {
+        event.preventDefault();
+        debouncedCheck(debounce_timer);
+    });
+});
+// On page load, populate the form fields from URL parameters
+window.addEventListener("load", function() {
+    var has_something = false;
+    document.querySelectorAll(".form-control").forEach(function(input) {
+        if (input.value) {
+            has_something = true;
+        }
+    });
+    if (has_something) {
+        debouncedCheck(debounce_timer);
+    }
+});
