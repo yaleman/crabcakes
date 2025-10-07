@@ -1,0 +1,29 @@
+---
+name: JavaScript and TypeScript Checks
+
+"on":
+    push:
+        branches:
+            - main
+    pull_request:
+    workflow_dispatch:
+
+jobs:
+    js-checks:
+        name: JavaScript and TypeScript Checks
+        runs-on: ubuntu-latest-arm64
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v5
+            - name: Set up Node.js
+              uses: actions/setup-node@v5
+
+            - name: "Install pnpm"
+              uses: pnpm/action-setup@v4
+              with:
+                  run_install: true
+            - name: Run compile
+              run: pnpm run build
+            - name: Check for outstanding changes
+              run: |
+                  ./scripts/git-pre-commit.sh
