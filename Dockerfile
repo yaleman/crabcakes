@@ -3,12 +3,8 @@ FROM node:24 AS js-builder
 ADD . /app
 WORKDIR /app
 RUN mkdir /node_modules
-RUN npx -y pnpm install --modules-dir /node_modules
-RUN echo "Cleaning old build files..." && \
-    rm -f src/js/*.js && \
-    npx -y pnpm run build-ts && \
+RUN npx -y pnpm install --modules-dir /node_modules && \
     npx -y pnpm run build
-
 
 
 FROM rust:1.90.0-slim-trixie AS builder

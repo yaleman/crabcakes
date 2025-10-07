@@ -265,21 +265,3 @@ if (document.readyState === 'loading') {
 } else {
     initializeBucketOperations();
 }
-
-// Extend the Window interface to include our global functions
-declare global {
-    interface Window {
-        downloadObject: typeof downloadObject;
-        deleteObject: typeof deleteObject;
-        toggleObjectSelection: typeof toggleObjectSelection;
-        toggleSelectAll: typeof toggleSelectAll;
-        deleteBatchObjects: typeof deleteBatchObjects;
-    }
-}
-
-// Keep functions available globally for backwards compatibility
-window.downloadObject = downloadObject;
-window.deleteObject = deleteObject;
-window.toggleObjectSelection = toggleObjectSelection;
-window.toggleSelectAll = toggleSelectAll;
-window.deleteBatchObjects = deleteBatchObjects;

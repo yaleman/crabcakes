@@ -4,9 +4,11 @@ import { readdirSync } from 'fs';
 import { join } from 'path';
 // import { ESLint } from 'eslint';
 
+const sourceDir = 'target/js/';
+const outDir = 'static/js/';
 
 async function buildfile(filepath) {
-    console.log(`Building ${filepath}...`);
+    console.log(`Building ${filepath}... to ${filepath.replace(sourceDir, outDir)}`);
     try {
         await build({
             entryPoints: [filepath],
@@ -14,7 +16,7 @@ async function buildfile(filepath) {
             format: 'esm',
             platform: 'browser',
             // Output .js files regardless of input extension
-            outfile: filepath.replace("src/js", "static/js").replace('.ts', '.js'),
+            outfile: filepath.replace(sourceDir, outDir),
             minify: true,
             sourcemap: false,
             external: [],
@@ -25,9 +27,9 @@ async function buildfile(filepath) {
     }
 }
 
-const files = readdirSync('./src/js/');
+const files = readdirSync(sourceDir);
 for (const file of files) {
-    const filepath = join('./src/js/', file);
+    const filepath = join(sourceDir, file);
     // Process both .js and .ts files
     if (!file.endsWith('.js')) continue;
 
@@ -36,15 +38,5 @@ for (const file of files) {
 
 
 
-// await build({
-//     entryPoints: ['src/js/troubleshooter.ts'],
-//     bundle: true,
-//     format: 'esm',
-//     platform: 'browser',
-//     outfile: 'static/js/troubleshooter.js',
-//     minify: true,
-//     sourcemap: false,
-//     external: [],
-// });
 
 console.log('Javascript bundle created successfully');
