@@ -206,7 +206,7 @@ impl PolicyStore {
         // check for a result in the cache
         let hashed_request = hash_request(request);
         let res = {
-            let cached_result = self.get_cached_result(&request).await;
+            let cached_result = self.get_cached_result(request).await;
             match cached_result {
                 Some(decision) => {
                     debug!("Cache hit for request");
@@ -531,7 +531,7 @@ impl PrincipalIdMatch for PrincipalId {
         match self {
             // if we're an array, drop down to a single-single comparison
             PrincipalId::Array(arr) => arr
-                .into_iter()
+                .iter()
                 .any(|p| PrincipalId::String(p.to_owned()).matches(principal)),
             PrincipalId::String(self_as_string) => match principal {
                 // if the other side's an array, drop down to a single-single comparison
