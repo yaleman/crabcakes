@@ -79,6 +79,10 @@ body {
     margin-top: 20px;
 }
 
+.font-weight-bold {
+    font-weight: var(--font-weight-bold);
+}
+
 .nav-link {
     display: block;
     padding: 0.8rem 1.0rem;
@@ -132,10 +136,25 @@ body {
     min-width: 50%;
 }
 
+.form-control {
+    width: 100%;
+    padding: 0.5rem;
+    font-size: var(--font-size-normal);
+    border: var(--color-purple-30pct) 1px solid;
+    border-radius: var(--border-radius-button);
+    margin-top: 0.2rem;
+    margin-bottom: 1.0rem;
+}
+
 h1 {
     color: #333;
     margin-bottom: 0.5rem;
     font-size: var(--font-size-h1);
+}
+
+h3 {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
 }
 
 .subtitle {
@@ -266,9 +285,6 @@ ul.button-list {
 .btn-danger:hover {
     background: linear-gradient(135deg, var(--bgcolor-red) 50%, darkred 100%);
 }
-
-
-
 
 .code-block {
     background: #2d3748;
@@ -474,17 +490,20 @@ th .select-column {
 }
 
 .badge-deny,
+.badge-false,
 .badge-red {
     background: var(--bgcolor-red);
     color: var(--color-white);
 }
 
+.badge-true,
 .badge-allow,
 .badge-green {
     background: var(--bgcolor-green);
     color: var(--color-white);
 }
 
+.badge-notapplicable,
 .badge-user,
 .badge-purple {
     background: var(--bgcolor-purple);
@@ -494,6 +513,14 @@ th .select-column {
 .no-list-style {
     list-style: none;
     padding-left: 0;
+}
+
+.list-item-padded li {
+    padding-bottom: 1.0rem;
+}
+
+.list-item-padded li ul li {
+    padding-bottom: 0;
 }
 
 .page-header {

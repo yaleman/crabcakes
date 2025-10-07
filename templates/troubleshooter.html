@@ -22,7 +22,14 @@
                 <input type="text" id="action" name="action" class="form-control" placeholder="Enter action (s3:GetObject or S3:PutObject etc)"
                     value="{{action}}"
                     required></p>
-
+            <p><label for="policy">Select Policy</label>
+                <select id="policy" name="policy" class="form-control" required>
+                    <option value selected>-- Check all --</option>
+                    {% for policy in policy_names %}
+                    <option value="{{policy}}" {% if &policy_name == policy %} selected {% endif %}>{{policy}}</option>
+                    {% endfor %}
+                </select>
+            </p>
             <p>
                 <button type="submit" name="check_access" class="btn btn-primary">Check Access</button>
             </p>

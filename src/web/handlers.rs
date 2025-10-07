@@ -20,17 +20,20 @@ use hyper::{
     Request, Response, StatusCode,
     body::{Bytes, Incoming},
 };
-use iam_rs::{Arn, Context, Decision, IAMRequest, PrincipalId};
+use iam_rs::{
+    Arn, Context, EvaluationOptions, EvaluationResult, IAMRequest, PolicyEvaluator, PrincipalId,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tower_sessions::Session;
+use tracing::debug;
 
 use crate::auth::OAuthClient;
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
-use crate::policy::{EvaluatePolicy, PolicyStore};
+use crate::policy::PolicyStore;
 use crate::policy_analyzer;
 
 /// Error page template
@@ -176,6 +179,8 @@ struct PolicyTroubleshooterTemplate {
     key: String,
     user: String,
     action: String,
+    policy_name: String,
+    policy_names: Vec<String>,
 }
 
 impl Default for PolicyTroubleshooterTemplate {
@@ -186,6 +191,8 @@ impl Default for PolicyTroubleshooterTemplate {
             key: String::new(),
             user: String::new(),
             action: String::new(),
+            policy_names: Vec::new(),
+            policy_name: String::new(),
         }
     }
 }
@@ -228,33 +235,12 @@ struct TroubleShooterForm {
     key: String,
     user: String,
     action: String,
+    policy: String,
 }
 
 #[derive(Serialize, Debug)]
 struct TroubleShooterResponse {
-    decision: Decision,
-    reason: String,
-    allow_policies: Vec<String>,
-    deny_policies: Vec<String>,
-    not_applicable_policies: Vec<String>,
-}
-
-impl TroubleShooterResponse {
-    fn new(
-        decision: Decision,
-        reason: &impl ToString,
-        allow_policies: Vec<String>,
-        deny_policies: Vec<String>,
-        not_applicable_policies: Vec<String>,
-    ) -> Self {
-        Self {
-            decision,
-            reason: reason.to_string(),
-            allow_policies,
-            deny_policies,
-            not_applicable_policies,
-        }
-    }
+    decision: EvaluationResult,
 }
 
 impl WebHandler {
@@ -657,7 +643,9 @@ impl WebHandler {
         &self,
         json: impl Serialize,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        let body = serde_json::to_string(&json)?;
+        let body = serde_json::to_string(&json).inspect_err(|err| {
+            debug!("Failed to serialize JSON response: {err:?}");
+        })?;
 
         Response::builder()
             .status(StatusCode::OK)
@@ -667,7 +655,10 @@ impl WebHandler {
             .header(X_FRAME_OPTIONS, "DENY")
             .header(REFERRER_POLICY, "strict-origin-when-cross-origin")
             .body(Full::new(Bytes::from(body)))
-            .map_err(CrabCakesError::from)
+            .map_err(|err| {
+                debug!("Failed to build JSON Response: {err:?}");
+                CrabCakesError::from(err)
+            })
     }
 
     /// GET /admin/profile - User profile page
@@ -1708,7 +1699,20 @@ impl WebHandler {
         };
         let (parts, _body) = req.into_parts();
 
-        let mut template = PolicyTroubleshooterTemplate::default();
+        let mut policy_names: Vec<String> = self
+            .policy_store
+            .policies
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        policy_names.sort();
+
+        let mut template = PolicyTroubleshooterTemplate {
+            policy_names,
+            ..Default::default()
+        };
         if let Some(query) = parts.uri.query() {
             form_urlencoded::parse(query.as_bytes()).for_each(|(key, value)| match key.as_ref() {
                 "bucket" => template.bucket = value.to_string(),
@@ -1750,33 +1754,33 @@ impl WebHandler {
 
         // look for a policy that matches the bucket and key
         let policies = self.policy_store.policies.read().await;
-        let mut allow_policies = Vec::new();
-        let mut deny_policies = Vec::new();
-        let mut not_applicable_policies = Vec::new();
-        policies
+        let filtered_policies = policies
             .iter()
-            .for_each(|(name, policy)| match policy.matches(&iam_request) {
-                Some(Decision::Allow) => allow_policies.push(name.clone()),
-                Some(Decision::Deny) => deny_policies.push(name.clone()),
-                Some(Decision::NotApplicable) => not_applicable_policies.push(name.clone()),
-                None => {}
+            .filter_map(|(name, policy)| match &form.policy.is_empty() {
+                false => {
+                    if name == &form.policy {
+                        Some(policy.clone())
+                    } else {
+                        None
+                    }
+                }
+                true => Some(policy.clone()),
+            })
+            .collect();
+
+        let policyevaluator =
+            PolicyEvaluator::with_policies(filtered_policies).with_options(EvaluationOptions {
+                stop_on_explicit_deny: false,
+                collect_match_details: true,
+                max_statements: usize::MAX,
+                ignore_resource_constraints: false,
             });
+        let evaluation_result = policyevaluator.evaluate(&iam_request)?;
 
-        let (reason, decision) = if !deny_policies.is_empty() {
-            ("Denied by a policy", Decision::Deny)
-        } else if !allow_policies.is_empty() {
-            ("Allowed by a policy", Decision::Allow)
-        } else {
-            ("No applicable policy", Decision::Deny)
+        let response = TroubleShooterResponse {
+            decision: evaluation_result,
         };
-
-        let response = TroubleShooterResponse::new(
-            decision,
-            &reason,
-            deny_policies,
-            allow_policies,
-            not_applicable_policies,
-        );
+        debug!("Troubleshooter response: {:?}", response);
         self.build_json_response(response)
     }
 }

@@ -16,6 +16,7 @@ use http::request::Parts;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
+use iam_rs::Decision;
 use scratchstack_arn::Arn;
 use scratchstack_aws_principal::PrincipalIdentity;
 use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
@@ -378,10 +379,10 @@ impl S3Handler {
             };
 
             match self.policy_store.evaluate_request(&iam_request).await {
-                Ok(true) => {
+                Ok(Decision::Allow) => {
                     debug!("Authorization granted");
                 }
-                Ok(false) => {
+                Ok(Decision::NotApplicable) | Ok(Decision::Deny) => {
                     warn!(
                         principal = ?iam_request.principal,
                         action = %s3_action,
@@ -1338,10 +1339,10 @@ impl S3Handler {
             .evaluate_request(&source_iam_request)
             .await
         {
-            Ok(true) => {
+            Ok(Decision::Allow) => {
                 debug!("Authorization granted for source object");
             }
-            Ok(false) => {
+            Ok(Decision::Deny) | Ok(Decision::NotApplicable) => {
                 warn!(
                     principal = ?source_iam_request.principal,
                     action = "s3:GetObject",
@@ -1614,10 +1615,10 @@ impl S3Handler {
             .evaluate_request(&source_iam_request)
             .await
         {
-            Ok(true) => {
+            Ok(Decision::Allow) => {
                 debug!("Authorization granted for source object");
             }
-            Ok(false) => {
+            Ok(Decision::Deny) | Ok(Decision::NotApplicable) => {
                 warn!(
                     principal = ?source_iam_request.principal,
                     action = "s3:GetObject",

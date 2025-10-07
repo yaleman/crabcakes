@@ -54,12 +54,10 @@ docker_run: docker_build
         --mount type=bind,src=$(pwd)/config,target=/config \
         ghcr.io/yaleman/crabcakes:latest
 
-run:
-    pnpm build && \
+run: build-js
     cargo run --
 
-run_debug:
-    pnpm build && \
+run_debug: build-js
     RUST_LOG=debug cargo run
 
 # run mdbook in "serve" mode

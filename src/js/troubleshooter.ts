@@ -1,22 +1,43 @@
 // troubleshooter.ts
 
+import { context } from "esbuild";
+
 interface PolicyCheckData {
     [key: string]: string;
 }
 
 
 interface PolicyCheckResult {
-    decision: string;
-    reason: string;
-    deny_policies: string[];
-    allow_policies: string[];
-    not_applicable_policies: string[];
+    decision: {
+        decision: string;
+        matched_statements: {
+            sid: string;
+            effect: string;
+            conditions_satisfied: boolean;
+            reason: string;
+        }[];
+        context: {
+            Principal: Record<string, string>;
+            Action: string;
+            Resource: string;
+            Context: Record<string, string>;
+        };
+    };
 }
 
 function checkPolicy(): void {
     const data: PolicyCheckData = {};
     document.querySelectorAll<HTMLInputElement>(".form-control").forEach((input) => {
-        data[input.id] = input.value;
+        if (input.value.length > 0) {
+            data[input.id] = input.value;
+
+        } else {
+            if (input.id != "policy") {
+                data[input.id] = "*";
+            } else {
+                data[input.id] = "";
+            }
+        }
     });
 
     fetch("/admin/api/policy_troubleshooter", {
@@ -39,56 +60,90 @@ function checkPolicy(): void {
 
             // Create and append decision heading
             const decisionHeading = document.createElement("h3");
-            decisionHeading.innerHTML = `Decision: <span class="badge badge-${result.decision.toLowerCase()}">${result.decision}</span>`;
+            decisionHeading.innerHTML = `Decision: <span class="badge badge-${result.decision.decision.toLowerCase()}">${result.decision.decision}</span>`;
             resultsDiv.appendChild(decisionHeading);
 
-            // Create and append reason paragraph
-            const reasonParagraph = document.createElement("p");
-            reasonParagraph.textContent = `Reason: ${result.reason}`;
-            resultsDiv.appendChild(reasonParagraph);
+            // Create and append context heading
+            const contextHeading = document.createElement("h3");
+            contextHeading.textContent = "Context:";
+            resultsDiv.appendChild(contextHeading);
 
-            // Create and append deny policies heading
-            const denyPoliciesHeading = document.createElement("h4");
-            denyPoliciesHeading.textContent = "Deny Policies:";
-            resultsDiv.appendChild(denyPoliciesHeading);
 
-            // Create and append deny policies list
-            const denyPoliciesList = document.createElement("ul");
-            result.deny_policies.forEach(policy => {
-                const listItem = document.createElement("li");
-                listItem.textContent = policy;
-                denyPoliciesList.appendChild(listItem);
+            const contextParagraph = document.createElement("p");
+            const principal = document.createElement("div");
+            var arn = "";
+            Object.entries(result.decision.context.Principal).forEach(([key, value]) => {
+                arn += `${key}(${value})<br />`;
             });
-            resultsDiv.appendChild(denyPoliciesList);
+            principal.innerHTML = `Principal: ${arn}`;
+            contextParagraph.appendChild(principal);
 
+            const actionParagraph = document.createElement("p");
+            const action = document.createElement("div");
+            action.innerText = `Action: ${result.decision.context.Action}`;
+            actionParagraph.appendChild(action);
+            contextParagraph.appendChild(actionParagraph);
 
-            // Create and append allow policies heading
-            const allowPoliciesHeading = document.createElement("h4");
-            allowPoliciesHeading.textContent = "Allow Policies:";
-            resultsDiv.appendChild(allowPoliciesHeading);
+            const resourceParagraph = document.createElement("p");
+            const resource = document.createElement("div");
+            resource.innerText = `Resource: ${result.decision.context.Resource}`;
+            resourceParagraph.appendChild(resource);
+            contextParagraph.appendChild(resourceParagraph);
 
-            // Create and append allow policies list
-            const allowPoliciesList = document.createElement("ul");
-            result.allow_policies.forEach(policy => {
+            if (result.decision.context.Context && Object.keys(result.decision.context.Context).length > 0) {
+                const contextJSONParagraph = document.createElement("p");
+                const contextJSON = document.createElement("div");
+                contextJSON.innerText = `Context: ${JSON.stringify(result.decision.context.Context, null, 2)}`;
+                contextJSONParagraph.appendChild(contextJSON);
+                contextParagraph.appendChild(contextJSONParagraph);
+            }
+
+            resultsDiv.appendChild(contextParagraph);
+
+            const matched_statements = document.createElement("h3");
+            matched_statements.textContent = "Matched Statements";
+            resultsDiv.appendChild(matched_statements);
+
+            // Create and append matched statements list
+            const matchedStatementsParagraph = document.createElement("div");
+
+            const matchedStatementsList = document.createElement("ul");
+            matchedStatementsList.classList = ["no-list-style ", "list-item-padded"].join(" ");
+
+            result.decision.matched_statements.forEach(statement => {
                 const listItem = document.createElement("li");
-                listItem.textContent = policy;
-                allowPoliciesList.appendChild(listItem);
-            });
-            resultsDiv.appendChild(allowPoliciesList);
 
-            // Create and append not applicable policies heading
-            const notApplicablePoliciesHeading = document.createElement("h4");
-            notApplicablePoliciesHeading.textContent = "Not Applicable Policies:";
-            resultsDiv.appendChild(notApplicablePoliciesHeading);
+                const subList = document.createElement("ul");
+                subList.classList = ["no-list-style"].join(" ");
+                const statementHeading = document.createElement("li");
+                statementHeading.className = "font-weight-bold";
+                statementHeading.textContent = `Statement ID: ${statement.sid}`;
+                subList.appendChild(statementHeading);
 
-            // Create and append not applicable policies list
-            const notApplicablePoliciesList = document.createElement("ul");
-            result.not_applicable_policies.forEach(policy => {
-                const listItem = document.createElement("li");
-                listItem.textContent = policy;
-                notApplicablePoliciesList.appendChild(listItem);
+                const conditionsItem = document.createElement("li");
+                conditionsItem.innerHTML = `Conditions Satisfied: <span class="badge badge-${statement.conditions_satisfied.toString().toLowerCase()}">${statement.conditions_satisfied}</span>`;
+                subList.appendChild(conditionsItem);
+
+                if (statement.conditions_satisfied) {
+                    const effectItem = document.createElement("li");
+                    effectItem.innerHTML = `Policy Effect: <span class="badge badge-${statement.effect.toLowerCase()}">${statement.effect}</span>`;
+                    subList.appendChild(effectItem);
+                }
+
+
+                if (statement.reason.trim() !== "" && statement.reason) {
+                    const reasonItem = document.createElement("li");
+                    reasonItem.innerHTML = `Reason: ${statement.reason}`;
+                    subList.appendChild(reasonItem);
+
+                }
+
+                listItem.appendChild(subList);
+                matchedStatementsList.appendChild(listItem);
             });
-            resultsDiv.appendChild(notApplicablePoliciesList);
+            matchedStatementsParagraph.appendChild(matchedStatementsList);
+            resultsDiv.appendChild(matchedStatementsParagraph);
+
         })
         .catch(error => {
             console.error("Error checking policy:", error);
@@ -138,6 +193,7 @@ document.querySelectorAll<HTMLInputElement>(".form-control").forEach((input) => 
         window.history.pushState({}, '', url);
         debouncedCheck(debounce_timer);
     });
+
 
 });
 document.getElementsByName("check_access").forEach((input) => {
