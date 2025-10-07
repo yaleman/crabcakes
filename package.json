@@ -4,7 +4,7 @@
   "description": "S3-compatible server written in Rust",
   "type": "module",
   "scripts": {
-    "build": "node build-aws-sdk.js",
+    "build": "node build-js.js",
     "lint:js": "eslint 'static/js/**/*.js' --ignore-pattern 'static/js/bucket-operations.js'",
     "lint:css": "stylelint 'static/css/**/*.css'",
     "lint": "pnpm run lint:js && pnpm run lint:css"
