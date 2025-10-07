@@ -44,7 +44,7 @@ hyper-util = { version = "0.1.17", features = [
 # scratchstack-aws-signature = "0.11.3"
 scratchstack-aws-principal = "0.4.9"
 # iam-rs = "0.0.23" # pending https://github.com/Foorack/iam-rs/pull/8
-iam-rs = { rev = "693fb5a22b95d8d79c01f050b51a65d36a228799", git = "https://github.com/yaleman/iam-rs/", version = "0.0.23" }
+iam-rs = { rev = "65dabe70638b058c8431345f29c51702919faee1", git = "https://github.com/yaleman/iam-rs/", version = "0.0.23" }
 mime_guess = "2.0"
 quick-xml = { version = "0.38.3", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }

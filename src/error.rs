@@ -34,6 +34,7 @@ pub enum CrabCakesError {
     Reqwest(String),
     CredentialAlreadyExists,
     SigV4AuthenticatorResponseBuilderError(String),
+    TemplateRendering(String),
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -83,13 +84,28 @@ impl std::fmt::Display for CrabCakesError {
             CrabCakesError::SigV4AuthenticatorResponseBuilderError(msg) => {
                 write!(f, "SigV4AuthenticatorResponse Builder Error: {}", msg)
             }
+            CrabCakesError::TemplateRendering(msg) => {
+                write!(f, "Template Rendering Error: {}", msg)
+            }
         }
+    }
+}
+
+impl From<askama::Error> for CrabCakesError {
+    fn from(err: askama::Error) -> Self {
+        CrabCakesError::TemplateRendering(err.to_string())
     }
 }
 
 impl From<Box<dyn Error + Send + Sync>> for CrabCakesError {
     fn from(err: Box<dyn Error + Send + Sync>) -> Self {
         CrabCakesError::Other(err.to_string())
+    }
+}
+
+impl From<iam_rs::ArnError> for CrabCakesError {
+    fn from(err: iam_rs::ArnError) -> Self {
+        CrabCakesError::Other(format!("Failed to parse ARN: {}", err))
     }
 }
 

@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+
+{% block title %}Policy Troubleshooter - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<h1>Troubleshooter</h1>
+<p class="subtitle">Help diagnose policy issues with Crabcakes</p>
+
+<div class="horizontal-container">
+    <div class="form-group">
+        <form id="troubleshooter-form">
+            <p><label for="bucket">Bucket Name</label>
+                <input type="text" id="bucket" name="bucket" class="form-control" placeholder="Enter bucket name" required value="{{bucket}}"></p>
+
+            <p><label for="key">Object Key</label>
+                <input type="text" id="key" name="key" class="form-control" placeholder="Enter object key" required value="{{key}}"></p>
+
+            <p><label for="user">User Name</label>
+                <input type="text" id="user" name="user" class="form-control" placeholder="Enter user name" required value="{{user}}"></p>
+
+            <p><label for="action">Action</label>
+                <input type="text" id="action" name="action" class="form-control" placeholder="Enter action (s3:GetObject or S3:PutObject etc)"
+                    value="{{action}}"
+                    required></p>
+
+            <p>
+                <button type="submit" name="check_access" class="btn btn-primary">Check Access</button>
+            </p>
+
+        </form>
+    </div>
+
+    <div class="troubleshooter-results" id="results"></div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/js/troubleshooter.js"></script>
+{% endblock %}
