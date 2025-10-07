@@ -15,8 +15,10 @@ check:
 
 # build JavaScript bundles
 build-js:
+    echo "Cleaning old build files..."
+    rm -f src/js/*.js
     @echo "Transpiling TypeScript files..."
-    @cd src/js && npx swc --out-dir . *.ts
+    @pnpm run build-ts
     @echo "Bundling files..."
     @pnpm run build
 

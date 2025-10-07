@@ -4,6 +4,7 @@
   "description": "S3-compatible server written in Rust",
   "type": "module",
   "scripts": {
+    "build-ts": "swc src/js --out-dir . *.ts",
     "build": "node build-js.js",
     "lint:js": "eslint 'static/js/**/*.js' --ignore-pattern 'static/js/bucket-operations.js'",
     "lint:css": "stylelint 'static/css/**/*.css'",
