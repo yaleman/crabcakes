@@ -1,6 +1,13 @@
 // Credential CRUD operations
+import { authenticatedFetch } from './csrf';
 
-async function deleteCredential(accessKeyId) {
+
+interface CredentialResponse {
+    access_key_id?: string;
+    message?: string;
+}
+
+async function deleteCredential(accessKeyId: string): Promise<void> {
     if (!confirm(`Are you sure you want to delete credential "${accessKeyId}"?`)) {
         return;
     }
@@ -19,11 +26,12 @@ async function deleteCredential(accessKeyId) {
         window.location.href = '/admin/identities';
     } catch (error) {
         console.error('Error deleting credential:', error);
-        alert(`Error deleting credential: ${error.message}`);
+        const message = error instanceof Error ? error.message : String(error);
+        alert(`Error deleting credential: ${message}`);
     }
 }
 
-async function saveCredential(accessKeyId, secretAccessKey, isEdit) {
+async function saveCredential(accessKeyId: string, secretAccessKey: string, isEdit: boolean): Promise<CredentialResponse> {
     try {
         const url = isEdit
             ? `/admin/api/credentials/${accessKeyId}`
@@ -44,7 +52,7 @@ async function saveCredential(accessKeyId, secretAccessKey, isEdit) {
             throw new Error(`Failed to save credential: ${error}`);
         }
 
-        const result = await response.json();
+        const result: CredentialResponse = await response.json();
         return result;
     } catch (error) {
         console.error('Error saving credential:', error);
@@ -53,7 +61,7 @@ async function saveCredential(accessKeyId, secretAccessKey, isEdit) {
 }
 
 // Generate a random 40-character secret key
-function generateSecretKey() {
+function generateSecretKey(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     let result = '';
     const randomValues = new Uint8Array(40);
@@ -67,18 +75,18 @@ function generateSecretKey() {
 }
 
 // Form handler for credential edit page
-function initCredentialForm() {
-    const form = document.getElementById('credential-form');
+function initCredentialForm(): void {
+    const form = document.getElementById('credential-form') as HTMLFormElement | null;
     if (!form) return;
 
-    const accessKeyIdInput = document.getElementById('access-key-id');
-    const secretKeyInput = document.getElementById('secret-access-key');
-    const generateBtn = document.getElementById('generate-key-btn');
-    const toggleBtn = document.getElementById('toggle-visibility-btn');
+    const accessKeyIdInput = document.getElementById('access-key-id') as HTMLInputElement;
+    const secretKeyInput = document.getElementById('secret-access-key') as HTMLInputElement;
+    const generateBtn = document.getElementById('generate-key-btn') as HTMLButtonElement | null;
+    const toggleBtn = document.getElementById('toggle-visibility-btn') as HTMLButtonElement | null;
 
     // Handle generate button
     if (generateBtn) {
-        generateBtn.addEventListener('click', (e) => {
+        generateBtn.addEventListener('click', (e: Event) => {
             e.preventDefault();
             const newKey = generateSecretKey();
             secretKeyInput.value = newKey;
@@ -88,14 +96,14 @@ function initCredentialForm() {
 
     // Handle show/hide button
     if (toggleBtn) {
-        toggleBtn.addEventListener('click', (e) => {
+        toggleBtn.addEventListener('click', (e: Event) => {
             e.preventDefault();
             secretKeyInput.type = secretKeyInput.type === 'password' ? 'text' : 'password';
         });
     }
 
     // Handle form submission
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', async (e: Event) => {
         e.preventDefault();
 
         const accessKeyId = accessKeyIdInput.value.trim();
@@ -113,25 +121,28 @@ function initCredentialForm() {
             alert('Credential saved successfully!');
             window.location.href = `/admin/identities/${accessKeyId}`;
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            const message = error instanceof Error ? error.message : String(error);
+            alert(`Error: ${message}`);
         }
     });
 }
 
 // Handler for credential detail page delete button
-function initCredentialDetail() {
-    const deleteBtn = document.getElementById('delete-credential-btn');
+function initCredentialDetail(): void {
+    const deleteBtn = document.getElementById('delete-credential-btn') as HTMLButtonElement | null;
     if (!deleteBtn) return;
 
-    deleteBtn.addEventListener('click', (e) => {
+    deleteBtn.addEventListener('click', (e: Event) => {
         e.preventDefault();
         const accessKeyId = deleteBtn.dataset.accessKeyId;
-        deleteCredential(accessKeyId);
+        if (accessKeyId) {
+            deleteCredential(accessKeyId);
+        }
     });
 }
 
 // Initialize on page load
-function initCredentialPages() {
+function initCredentialPages(): void {
     initCredentialForm();
     initCredentialDetail();
 }

@@ -1,6 +1,12 @@
 // Policy CRUD operations
+import { authenticatedFetch } from './csrf';
 
-async function deletePolicy(policyName) {
+interface PolicyResponse {
+    name?: string;
+    message?: string;
+}
+
+async function deletePolicy(policyName: string): Promise<void> {
     if (!confirm(`Are you sure you want to delete policy "${policyName}"?`)) {
         return;
     }
@@ -19,11 +25,12 @@ async function deletePolicy(policyName) {
         window.location.href = '/admin/policies';
     } catch (error) {
         console.error('Error deleting policy:', error);
-        alert(`Error deleting policy: ${error.message}`);
+        const message = error instanceof Error ? error.message : String(error);
+        alert(`Error deleting policy: ${message}`);
     }
 }
 
-async function savePolicy(policyName, policyData) {
+async function savePolicy(policyName: string, policyData: any): Promise<PolicyResponse> {
     try {
         const isUpdate = policyName && policyName !== '';
         const url = isUpdate ? `/admin/api/policies/${policyName}` : '/admin/api/policies';
@@ -41,7 +48,7 @@ async function savePolicy(policyName, policyData) {
             throw new Error(`Failed to save policy: ${error}`);
         }
 
-        const result = await response.json();
+        const result: PolicyResponse = await response.json();
         return result;
     } catch (error) {
         console.error('Error saving policy:', error);
@@ -50,15 +57,17 @@ async function savePolicy(policyName, policyData) {
 }
 
 // Form handler for policy edit page
-function initPolicyForm() {
-    const form = document.getElementById('policy-form');
+function initPolicyForm(): void {
+    const form = document.getElementById('policy-form') as HTMLFormElement | null;
     if (!form) return;
 
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', async (e: Event) => {
         e.preventDefault();
 
-        const policyName = document.getElementById('policy-name').value;
-        const policyJson = document.getElementById('policy-json').value;
+        const policyNameInput = document.getElementById('policy-name') as HTMLInputElement;
+        const policyJsonInput = document.getElementById('policy-json') as HTMLTextAreaElement;
+        const policyName = policyNameInput.value;
+        const policyJson = policyJsonInput.value;
 
         try {
             const policyData = JSON.parse(policyJson);
@@ -66,25 +75,28 @@ function initPolicyForm() {
             alert('Policy saved successfully!');
             window.location.href = `/admin/policies/${policyName}`;
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            const message = error instanceof Error ? error.message : String(error);
+            alert(`Error: ${message}`);
         }
     });
 }
 
 // Handler for policy detail page delete button
-function initPolicyDetail() {
-    const deleteBtn = document.getElementById('delete-policy-btn');
+function initPolicyDetail(): void {
+    const deleteBtn = document.getElementById('delete-policy-btn') as HTMLButtonElement | null;
     if (!deleteBtn) return;
 
-    deleteBtn.addEventListener('click', (e) => {
+    deleteBtn.addEventListener('click', (e: Event) => {
         e.preventDefault();
         const policyName = deleteBtn.dataset.policyName;
-        deletePolicy(policyName);
+        if (policyName) {
+            deletePolicy(policyName);
+        }
     });
 }
 
 // Initialize on page load
-function initPolicyPages() {
+function initPolicyPages(): void {
     initPolicyForm();
     initPolicyDetail();
 }

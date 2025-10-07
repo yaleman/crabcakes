@@ -1,0 +1,1 @@
+function t(){window.history.length>1?window.history.back():window.location.href="/admin"}document.addEventListener("DOMContentLoaded",function(){var n=document.getElementById("back-button");n&&(n.addEventListener("click",t),n.href="#")});

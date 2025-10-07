@@ -276,10 +276,3 @@ declare global {
         deleteBatchObjects: typeof deleteBatchObjects;
     }
 }
-
-// Keep functions available globally for backwards compatibility
-window.downloadObject = downloadObject;
-window.deleteObject = deleteObject;
-window.toggleObjectSelection = toggleObjectSelection;
-window.toggleSelectAll = toggleSelectAll;
-window.deleteBatchObjects = deleteBatchObjects;

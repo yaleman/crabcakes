@@ -1,7 +1,11 @@
 // CSRF token handling
-let csrfToken = null;
+let csrfToken: string | null = null;
 
-async function getCsrfToken() {
+interface CsrfTokenResponse {
+    csrf_token: string;
+}
+
+async function getCsrfToken(): Promise<string> {
     if (csrfToken) {
         return csrfToken;
     }
@@ -11,7 +15,7 @@ async function getCsrfToken() {
         if (!response.ok) {
             throw new Error('Failed to fetch CSRF token');
         }
-        const data = await response.json();
+        const data: CsrfTokenResponse = await response.json();
         csrfToken = data.csrf_token;
         return csrfToken;
     } catch (error) {
@@ -20,22 +24,33 @@ async function getCsrfToken() {
     }
 }
 
+interface AuthenticatedFetchOptions extends RequestInit {
+    body?: any;
+}
+
 // Helper to make authenticated requests with CSRF token
-async function authenticatedFetch(url, options = {}) {
+async function authenticatedFetch(url: string, options: AuthenticatedFetchOptions = {}): Promise<Response> {
     const token = await getCsrfToken();
 
-    const headers = {
+    const headers: HeadersInit = {
         ...options.headers,
         'X-CSRF-Token': token,
     };
 
     if (options.body && typeof options.body === 'object') {
-        headers['Content-Type'] = 'application/json';
+        (headers as Record<string, string>)['Content-Type'] = 'application/json';
         options.body = JSON.stringify(options.body);
+
     }
 
     return fetch(url, {
+
         ...options,
+
         headers,
     });
 }
+
+
+
+export { authenticatedFetch, getCsrfToken };

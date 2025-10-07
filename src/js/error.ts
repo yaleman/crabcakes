@@ -2,7 +2,7 @@
  * Go back one step in the browser history
  * If there's no history to go back to, redirect to the home page
  */
-function goBack() {
+function goBack(): void {
     // Check if there's history to go back to
     if (window.history.length > 1) {
         window.history.back();
@@ -13,8 +13,8 @@ function goBack() {
 }
 
 // Add event listener when the DOM is loaded
-document.addEventListener('DOMContentLoaded', function () {
-    const backButton = document.getElementById('back-button');
+document.addEventListener('DOMContentLoaded', function (): void {
+    const backButton = document.getElementById('back-button') as HTMLAnchorElement | null;
     if (backButton) {
         backButton.addEventListener('click', goBack);
         backButton.href = "#"; // Prevent default link behavior

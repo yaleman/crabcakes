@@ -15,12 +15,8 @@ check:
 
 # build JavaScript bundles
 build-js:
-    echo "Cleaning old build files..."
-    rm -f src/js/*.js
-    @echo "Transpiling TypeScript files..."
-    @pnpm run build-ts
-    @echo "Bundling files..."
-    @pnpm run build
+    echo "Bundling files..."
+    pnpm run build
 
 # lint JavaScript and CSS files
 lint-web:

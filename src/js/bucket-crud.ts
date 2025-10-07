@@ -1,10 +1,20 @@
+import { authenticatedFetch } from './csrf';
+
 // Bucket CRUD operations
 
-async function createBucket(bucketName) {
+interface BucketResponse {
+    bucket_name?: string;
+    message?: string;
+}
+
+async function createBucket(bucketName: string): Promise<BucketResponse> {
     try {
         const response = await authenticatedFetch('/admin/api/buckets', {
             method: 'POST',
-            body: { bucket_name: bucketName },
+            body: JSON.stringify({ bucket_name: bucketName }),
+            headers: {
+                'Content-Type': 'application/json',
+            },
         });
 
         if (!response.ok) {
@@ -12,7 +22,7 @@ async function createBucket(bucketName) {
             throw new Error(`Failed to create bucket: ${error}`);
         }
 
-        const result = await response.json();
+        const result: BucketResponse = await response.json();
         return result;
     } catch (error) {
         console.error('Error creating bucket:', error);
@@ -21,14 +31,15 @@ async function createBucket(bucketName) {
 }
 
 // Form handler for bucket creation page
-function initBucketForm() {
-    const form = document.getElementById('bucket-form');
+function initBucketForm(): void {
+    const form = document.getElementById('bucket-form') as HTMLFormElement | null;
     if (!form) return;
 
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', async (e: Event) => {
         e.preventDefault();
 
-        const bucketName = document.getElementById('bucket-name').value;
+        const bucketNameInput = document.getElementById('bucket-name') as HTMLInputElement;
+        const bucketName = bucketNameInput.value;
 
         try {
             await createBucket(bucketName);
@@ -36,13 +47,14 @@ function initBucketForm() {
             window.location.href = `/admin/buckets/${bucketName}`;
         } catch (error) {
             // Show error in the form
-            showError(error.message);
+            const message = error instanceof Error ? error.message : String(error);
+            showError(message);
         }
     });
 }
 
 // Show error message in the form
-function showError(message) {
+function showError(message: string): void {
     const form = document.getElementById('bucket-form') || document.getElementById('bucket-delete-form');
     if (!form) return;
 
@@ -61,7 +73,7 @@ function showError(message) {
     form.insertBefore(errorDiv, form.firstChild);
 }
 
-async function deleteBucket(bucketName, force = false) {
+async function deleteBucket(bucketName: string, force: boolean = false): Promise<BucketResponse> {
     try {
         const url = force
             ? `/admin/api/buckets/${bucketName}?force=true`
@@ -76,7 +88,7 @@ async function deleteBucket(bucketName, force = false) {
             throw new Error(`Failed to delete bucket: ${error}`);
         }
 
-        const result = await response.json();
+        const result: BucketResponse = await response.json();
         return result;
     } catch (error) {
         console.error('Error deleting bucket:', error);
@@ -85,18 +97,20 @@ async function deleteBucket(bucketName, force = false) {
 }
 
 // Form handler for bucket deletion confirmation page
-function initBucketDeleteForm() {
-    const form = document.getElementById('bucket-delete-form');
+function initBucketDeleteForm(): void {
+    const form = document.getElementById('bucket-delete-form') as HTMLFormElement | null;
     if (!form) return;
 
-    const bucketName = document.getElementById('bucket-name').value;
-    const objectCount = parseInt(document.getElementById('object-count').value, 10);
-    const confirmNameInput = document.getElementById('confirm-bucket-name');
-    const confirmCheckbox = document.getElementById('confirm-delete-objects');
-    const deleteBtn = document.getElementById('delete-btn');
+    const bucketNameInput = document.getElementById('bucket-name') as HTMLInputElement;
+    const bucketName = bucketNameInput.value;
+    const objectCountInput = document.getElementById('object-count') as HTMLInputElement;
+    const objectCount = parseInt(objectCountInput.value, 10);
+    const confirmNameInput = document.getElementById('confirm-bucket-name') as HTMLInputElement;
+    const confirmCheckbox = document.getElementById('confirm-delete-objects') as HTMLInputElement | null;
+    const deleteBtn = document.getElementById('delete-btn') as HTMLButtonElement;
 
     // Enable/disable delete button based on validation
-    function validateForm() {
+    function validateForm(): void {
         const nameMatches = confirmNameInput.value === bucketName;
         const checkboxValid = objectCount === 0 || (confirmCheckbox && confirmCheckbox.checked);
 
@@ -108,7 +122,7 @@ function initBucketDeleteForm() {
         confirmCheckbox.addEventListener('change', validateForm);
     }
 
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', async (e: Event) => {
         e.preventDefault();
 
         try {
@@ -118,13 +132,14 @@ function initBucketDeleteForm() {
             window.location.href = '/admin/buckets';
         } catch (error) {
             // Show error in the form
-            showError(error.message);
+            const message = error instanceof Error ? error.message : String(error);
+            showError(message);
         }
     });
 }
 
 // Initialize on page load
-function initBucketPages() {
+function initBucketPages(): void {
     initBucketForm();
     initBucketDeleteForm();
 }
