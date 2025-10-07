@@ -15,8 +15,10 @@ check:
 
 # build JavaScript bundles
 build-js:
-    pnpm run build
-    cd src/js && npx swc  --out-dir ../../static/js/ *.ts
+    @echo "Transpiling TypeScript files..."
+    @cd src/js && npx swc --out-dir . *.ts
+    @echo "Bundling files..."
+    @pnpm run build
 
 # lint JavaScript and CSS files
 lint-web:
