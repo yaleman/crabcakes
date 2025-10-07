@@ -12,3 +12,4 @@ test_config/*.sqlite3
 # Node.js
 node_modules/
 docs/book/
+src/js/*.js

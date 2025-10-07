@@ -1,3 +1,16 @@
+FROM node:24 AS js-builder
+
+ADD . /app
+WORKDIR /app
+RUN mkdir /node_modules
+RUN npx -y pnpm install --modules-dir /node_modules
+RUN echo "Cleaning old build files..." && \
+    rm -f src/js/*.js && \
+    npx -y pnpm run build-ts && \
+    npx -y pnpm run build
+
+
+
 FROM rust:1.90.0-slim-trixie AS builder
 
 ARG GITHUB_SHA="$(git rev-parse HEAD)"
@@ -32,7 +45,7 @@ RUN apt-get -y remove --allow-remove-essential \
 # https://github.com/GoogleContainerTools/distroless/blob/main/examples/rust/Dockerfile
 COPY --from=builder /crabcakes/target/release/crabcakes /
 COPY --from=builder /crabcakes/static /static
-
+COPY --from=js-builder /app/static/js/* /static/js/
 WORKDIR /
 RUN useradd -m nonroot
 

@@ -4,16 +4,20 @@
   "description": "S3-compatible server written in Rust",
   "type": "module",
   "scripts": {
-    "build": "node build-aws-sdk.js",
+    "build-ts": "swc src/js --out-dir . *.ts",
+    "build": "node build-js.js",
     "lint:js": "eslint 'static/js/**/*.js' --ignore-pattern 'static/js/bucket-operations.js'",
     "lint:css": "stylelint 'static/css/**/*.css'",
     "lint": "pnpm run lint:js && pnpm run lint:css"
   },
   "devDependencies": {
+    "@swc/cli": "^0.7.8",
+    "@swc/core": "^1.13.5",
     "esbuild": "^0.25.10",
-    "eslint": "^8.57.0",
+    "eslint": "^8.57.1",
     "stylelint": "^16.2.1",
-    "stylelint-config-standard": "^36.0.0"
+    "stylelint-config-standard": "^36.0.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.901.0"

@@ -1,6 +1,7 @@
 git := require("git")
 cargo := require("cargo")
 pnpm := require("pnpm")
+npx := require("npx")
 
 default:
     just --list
@@ -14,7 +15,12 @@ check:
 
 # build JavaScript bundles
 build-js:
-    pnpm run build
+    echo "Cleaning old build files..."
+    rm -f src/js/*.js
+    @echo "Transpiling TypeScript files..."
+    @pnpm run build-ts
+    @echo "Bundling files..."
+    @pnpm run build
 
 # lint JavaScript and CSS files
 lint-web:
@@ -48,12 +54,10 @@ docker_run: docker_build
         --mount type=bind,src=$(pwd)/config,target=/config \
         ghcr.io/yaleman/crabcakes:latest
 
-run:
-    pnpm build && \
+run: build-js
     cargo run --
 
-run_debug:
-    pnpm build && \
+run_debug: build-js
     RUST_LOG=debug cargo run
 
 # run mdbook in "serve" mode

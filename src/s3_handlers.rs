@@ -7,6 +7,7 @@ use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use http::HeaderValue;
 use http::header::{
     ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST, LAST_MODIFIED,
     LOCATION, WWW_AUTHENTICATE,
@@ -15,6 +16,7 @@ use http::request::Parts;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
+use iam_rs::Decision;
 use scratchstack_arn::Arn;
 use scratchstack_aws_principal::PrincipalIdentity;
 use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
@@ -26,7 +28,7 @@ use scratchstack_aws_signature::{
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
 use crate::body_buffer::BufferedBody;
@@ -222,7 +224,7 @@ impl S3Handler {
             }
         };
 
-        info!(
+        debug!(
             "Request signature verified successfully authenticator_response={:?}",
             authenticatorresponse
         );
@@ -230,19 +232,16 @@ impl S3Handler {
         Ok((parts, buffered_body, authenticatorresponse))
     }
 
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(method, uri, remote_addr, status_code, user, bucket, key)
+    )]
     pub async fn handle_request(
         &self,
         req: Request<hyper::body::Incoming>,
         remote_addr: std::net::SocketAddr,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
-        debug!(
-            method = %req.method(),
-            uri = %req.uri(),
-            remote_addr = %remote_addr,
-            has_range_header = req.headers().contains_key("range"),
-            "Incoming S3 request"
-        );
-
         // Verify signature and buffer body (or return error response)
         let (parts, mut buffered_body, authenticator_response) =
             match self.verify_and_buffer_request(req).await {
@@ -280,16 +279,6 @@ impl S3Handler {
             .headers
             .get("x-amz-copy-source-range")
             .and_then(|v| v.to_str().ok());
-
-        info!(
-            method = %method,
-            path = %path,
-            query = %query,
-            bucket = %bucket_name,
-            authenticator_response = ?authenticator_response.clone(),
-            copy_source = ?copy_source,
-            "Incoming S3 request"
-        );
 
         // Build authentication context from verified request
         let auth_context = if let Some(principal) = authenticator_response.principal().first() {
@@ -390,10 +379,10 @@ impl S3Handler {
             };
 
             match self.policy_store.evaluate_request(&iam_request).await {
-                Ok(true) => {
+                Ok(Decision::Allow) => {
                     debug!("Authorization granted");
                 }
-                Ok(false) => {
+                Ok(Decision::NotApplicable) | Ok(Decision::Deny) => {
                     warn!(
                         principal = ?iam_request.principal,
                         action = %s3_action,
@@ -658,33 +647,30 @@ impl S3Handler {
                 self.not_found_response()
             }
         };
-
-        let status = response.status();
-
-        // Log request with all relevant details
-        let user_str = auth_context.username.as_deref().unwrap_or("-");
-        if key.is_empty() {
-            info!(
-                client_ip = %remote_addr.ip(),
-                method = %method,
-                path = %path,
-                bucket = %bucket_for_operation,
-                status = %status.as_u16(),
-                user = %user_str,
-                "Request completed"
-            );
-        } else {
-            info!(
-                client_ip = %remote_addr.ip(),
-                method = %method,
-                path = %path,
-                bucket = %bucket_for_operation,
-                key = %key,
-                status = %status.as_u16(),
-                user = %user_str,
-                "Request completed"
-            );
+        let span = tracing::Span::current();
+        span.record("method", tracing::field::display(method));
+        span.record("uri", tracing::field::display(parts.uri));
+        span.record("bucket", tracing::field::display(&bucket_name));
+        if let Some(copy_source) = copy_source {
+            span.record("copy_source", tracing::field::display(copy_source));
         }
+
+        span.record("remote_addr", tracing::field::display(remote_addr));
+        span.record(
+            "has_range_header",
+            tracing::field::display(parts.headers.contains_key("range")),
+        );
+        span.record("key", tracing::field::display(&key));
+        span.record(
+            "status_code",
+            tracing::field::display(response.status().as_u16() + 50),
+        );
+
+        span.record(
+            "user",
+            tracing::field::display(auth_context.username.as_deref().unwrap_or("-")),
+        );
+        info!("S3 Request completed");
 
         Ok(response)
     }
@@ -1353,10 +1339,10 @@ impl S3Handler {
             .evaluate_request(&source_iam_request)
             .await
         {
-            Ok(true) => {
+            Ok(Decision::Allow) => {
                 debug!("Authorization granted for source object");
             }
-            Ok(false) => {
+            Ok(Decision::Deny) | Ok(Decision::NotApplicable) => {
                 warn!(
                     principal = ?source_iam_request.principal,
                     action = "s3:GetObject",
@@ -1629,10 +1615,10 @@ impl S3Handler {
             .evaluate_request(&source_iam_request)
             .await
         {
-            Ok(true) => {
+            Ok(Decision::Allow) => {
                 debug!("Authorization granted for source object");
             }
-            Ok(false) => {
+            Ok(Decision::Deny) | Ok(Decision::NotApplicable) => {
                 warn!(
                     principal = ?source_iam_request.principal,
                     action = "s3:GetObject",
@@ -2205,85 +2191,87 @@ impl S3Handler {
     }
 
     fn not_found_response(&self) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(CONTENT_TYPE, "application/xml")
-            .body(Full::new(Bytes::from(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>",
-            )))
-            .expect("Failed to generate a not found response")
+        let mut res = Response::new(Full::new(Bytes::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>",
+        )));
+        *res.status_mut() = StatusCode::NOT_FOUND;
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        res
     }
 
     fn access_denied_response(&self) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .header(CONTENT_TYPE, "application/xml")
-            .body(Full::new(Bytes::from(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
-            )))
-            .expect("Failed to generate an access denied response")
+        tracing::Span::current().record("status_code", tracing::field::display(403));
+        let mut res = Response::new(Full::new(Bytes::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
+        )));
+        *res.status_mut() = StatusCode::FORBIDDEN;
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        res
     }
 
     fn unauthorized_response(&self, reason: &str) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(CONTENT_TYPE, "application/xml")
-            .header(WWW_AUTHENTICATE, "AWS4-HMAC-SHA256")
-            .body(Full::new(Bytes::from(format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidAccessKeyId</Code><Message>{}</Message></Error>",
-                reason
-            ))))
-            .expect("Failed to generate an unauthorized response")
+        tracing::Span::current().record("status_code", tracing::field::display(401));
+        let mut response = Response::new(Full::new(Bytes::from(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidAccessKeyId</Code><Message>{}</Message></Error>",
+            reason
+        ))));
+        *response.status_mut() = StatusCode::UNAUTHORIZED;
+        let headers = response.headers_mut();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        headers.insert(
+            WWW_AUTHENTICATE,
+            HeaderValue::from_static("AWS4-HMAC-SHA256"),
+        );
+        response
     }
 
     fn internal_error_response(&self) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .header(CONTENT_TYPE, "application/xml")
-            .body(Full::new(Bytes::from(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>",
-            )))
-            .expect("Failed to generate an internal error response")
+        tracing::Span::current().record("status_code", tracing::field::display(500));
+        let mut res = Response::new(Full::new(Bytes::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>",
+        )));
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        res
     }
 
     fn bucket_already_exists_response(&self, bucket: &str) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::CONFLICT)
-            .header(CONTENT_TYPE, "application/xml")
-            .body(Full::new(Bytes::from(format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketAlreadyExists</Code><Message>The requested bucket name '{}' is not available.</Message></Error>",
-                bucket
-            ))))
-            .expect("Failed to generate a bucket already exists response")
+        tracing::Span::current().record("status_code", tracing::field::display(409));
+        let mut res = Response::new(Full::new(Bytes::from(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketAlreadyExists</Code><Message>The requested bucket name '{}' is not available.</Message></Error>",
+            bucket
+        ))));
+        *res.status_mut() = StatusCode::CONFLICT;
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        res
     }
 
     fn bucket_not_empty_response(&self, bucket: &str) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::CONFLICT)
-            .header(CONTENT_TYPE, "application/xml")
-            .body(Full::new(Bytes::from(format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketNotEmpty</Code><Message>The bucket '{}' you tried to delete is not empty.</Message></Error>",
-                bucket
-            ))))
-            .expect("Failed to generate a bucket not empty response")
+        tracing::Span::current().record("status_code", tracing::field::display(409));
+        let mut res = Response::new(Full::new(Bytes::from(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketNotEmpty</Code><Message>The bucket '{}' you tried to delete is not empty.</Message></Error>",
+            bucket
+        ))));
+        *res.status_mut() = StatusCode::CONFLICT;
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        res
     }
 
     fn no_such_bucket_response(&self, bucket: &str) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(CONTENT_TYPE, "application/xml")
-            .body(Full::new(Bytes::from(format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchBucket</Code><Message>The specified bucket '{}' does not exist.</Message></Error>",
-                bucket
-            ))))
-            .expect("Failed to generate a no such bucket response")
+        tracing::Span::current().record("status_code", tracing::field::display(404));
+        let mut res = Response::new(Full::new(Bytes::from(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchBucket</Code><Message>The specified bucket '{}' does not exist.</Message></Error>",
+            bucket
+        ))));
+        *res.status_mut() = StatusCode::NOT_FOUND;
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        res
     }
 
     fn invalid_bucket_name_response(&self, reason: &str) -> Response<Full<Bytes>> {

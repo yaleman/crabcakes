@@ -1,3 +1,4 @@
+use iam_rs::Decision;
 use tracing::debug;
 
 use crate::{policy::PolicyStore, setup_test_logging};
@@ -34,8 +35,9 @@ async fn test_wildcard_principal() {
         "Policy evaluation failed: {:?}",
         result.err()
     );
-    assert!(
+    assert_eq!(
         result.unwrap(),
+        Decision::Allow,
         "Expected allow-all policy to allow wildcard access"
     );
 }
@@ -65,8 +67,9 @@ async fn test_alice_policy() {
         "Policy evaluation failed: {:?}",
         result.err()
     );
-    assert!(
+    assert_eq!(
         result.unwrap(),
+        Decision::Allow,
         "Expected alice policy to allow alice's access"
     );
 }

@@ -1,11 +1,26 @@
 // Bucket object operations using AWS SDK v3
 import { S3Client, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 
+interface S3Object {
+    bucket: string;
+    key: string;
+}
+
+interface DeleteError {
+    Key?: string;
+    Message?: string;
+}
+
+interface DeleteResponse {
+    Deleted?: Array<{ Key?: string }>;
+    Errors?: DeleteError[];
+}
+
 // Track selected objects
-const selectedObjects = new Set();
+const selectedObjects = new Set<S3Object>();
 
 // Get S3 client configured with credentials from localStorage
-function getS3Client() {
+function getS3Client(): S3Client {
     const accessKeyId = localStorage.getItem('crabcakes_access_key_id');
     const secretAccessKey = localStorage.getItem('crabcakes_secret_access_key');
 
@@ -24,7 +39,7 @@ function getS3Client() {
 }
 
 // Download an object
-async function downloadObject(bucket, key) {
+async function downloadObject(bucket: string, key: string): Promise<void> {
     try {
         const client = getS3Client();
         const command = new GetObjectCommand({
@@ -33,9 +48,13 @@ async function downloadObject(bucket, key) {
         });
         const response = await client.send(command);
 
+        if (!response.Body) {
+            throw new Error('No response body received');
+        }
+
         // Convert response body to blob
         const blob = await response.Body.transformToByteArray();
-        const blobObj = new Blob([blob]);
+        const blobObj = new Blob([blob as BlobPart]);
 
         // Create download link
         const url = URL.createObjectURL(blobObj);
@@ -48,12 +67,13 @@ async function downloadObject(bucket, key) {
         URL.revokeObjectURL(url);
     } catch (error) {
         console.error('Error downloading object:', error);
-        alert(`Error downloading object: ${error.message}`);
+        const message = error instanceof Error ? error.message : String(error);
+        alert(`Error downloading object: ${message}`);
     }
 }
 
 // Delete a single object
-async function deleteObject(bucket, key) {
+async function deleteObject(bucket: string, key: string): Promise<void> {
     if (!confirm(`Are you sure you want to delete "${key}"?`)) {
         return;
     }
@@ -70,14 +90,20 @@ async function deleteObject(bucket, key) {
         window.location.reload();
     } catch (error) {
         console.error('Error deleting object:', error);
-        alert(`Error deleting object: ${error.message}`);
+        const message = error instanceof Error ? error.message : String(error);
+        alert(`Error deleting object: ${message}`);
     }
 }
 
 // Toggle object selection
-function toggleObjectSelection(checkbox) {
+function toggleObjectSelection(checkbox: HTMLInputElement): void {
     const key = checkbox.dataset.key;
     const bucket = checkbox.dataset.bucket;
+
+    if (!key || !bucket) {
+        console.error('Checkbox missing required data attributes');
+        return;
+    }
 
     if (checkbox.checked) {
         selectedObjects.add({ bucket, key });
@@ -95,8 +121,8 @@ function toggleObjectSelection(checkbox) {
 }
 
 // Toggle select all
-function toggleSelectAll(checkbox) {
-    const checkboxes = document.querySelectorAll('.object-checkbox');
+function toggleSelectAll(checkbox: HTMLInputElement): void {
+    const checkboxes = document.querySelectorAll<HTMLInputElement>('.object-checkbox');
     checkboxes.forEach(cb => {
         cb.checked = checkbox.checked;
         toggleObjectSelection(cb);
@@ -104,8 +130,8 @@ function toggleSelectAll(checkbox) {
 }
 
 // Update bulk delete button state
-function updateBulkDeleteButton() {
-    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+function updateBulkDeleteButton(): void {
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn') as HTMLButtonElement | null;
     const counter = document.getElementById('selection-counter');
     const count = selectedObjects.size;
 
@@ -119,7 +145,7 @@ function updateBulkDeleteButton() {
 }
 
 // Delete batch of selected objects
-async function deleteBatchObjects() {
+async function deleteBatchObjects(): Promise<void> {
     const count = selectedObjects.size;
 
     if (count === 0) {
@@ -132,7 +158,7 @@ async function deleteBatchObjects() {
 
     try {
         // Group objects by bucket (in case we have multiple buckets selected)
-        const byBucket = {};
+        const byBucket: Record<string, Array<{ Key: string }>> = {};
         for (const obj of selectedObjects) {
             if (!byBucket[obj.bucket]) {
                 byBucket[obj.bucket] = [];
@@ -154,7 +180,7 @@ async function deleteBatchObjects() {
                 },
             });
 
-            const response = await client.send(command);
+            const response = await client.send(command) as DeleteResponse;
 
             if (response.Deleted) {
                 totalDeleted += response.Deleted.length;
@@ -177,34 +203,39 @@ async function deleteBatchObjects() {
         window.location.reload();
     } catch (error) {
         console.error('Error deleting objects:', error);
-        alert(`Error deleting objects: ${error.message}`);
+        const message = error instanceof Error ? error.message : String(error);
+        alert(`Error deleting objects: ${message}`);
     }
 }
 
 // Initialize event handlers when the page loads
-function initializeBucketOperations() {
+function initializeBucketOperations(): void {
     // Bind download button events
-    document.querySelectorAll('.download-object-btn').forEach(btn => {
+    document.querySelectorAll<HTMLButtonElement>('.download-object-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             const bucket = btn.dataset.bucket;
             const key = btn.dataset.key;
-            downloadObject(bucket, key);
+            if (bucket && key) {
+                downloadObject(bucket, key);
+            }
         });
     });
 
     // Bind delete button events
-    document.querySelectorAll('.delete-object-btn').forEach(btn => {
+    document.querySelectorAll<HTMLButtonElement>('.delete-object-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             const bucket = btn.dataset.bucket;
             const key = btn.dataset.key;
-            deleteObject(bucket, key);
+            if (bucket && key) {
+                deleteObject(bucket, key);
+            }
         });
     });
 
     // Bind bulk delete button
-    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn') as HTMLButtonElement | null;
     if (bulkDeleteBtn) {
         bulkDeleteBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -213,17 +244,17 @@ function initializeBucketOperations() {
     }
 
     // Bind select all checkbox
-    const selectAllCheckbox = document.getElementById('select-all');
+    const selectAllCheckbox = document.getElementById('select-all') as HTMLInputElement | null;
     if (selectAllCheckbox) {
         selectAllCheckbox.addEventListener('change', (e) => {
-            toggleSelectAll(e.target);
+            toggleSelectAll(e.target as HTMLInputElement);
         });
     }
 
     // Bind individual object checkboxes
-    document.querySelectorAll('.object-checkbox').forEach(checkbox => {
+    document.querySelectorAll<HTMLInputElement>('.object-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', (e) => {
-            toggleObjectSelection(e.target);
+            toggleObjectSelection(e.target as HTMLInputElement);
         });
     });
 }
@@ -233,6 +264,17 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeBucketOperations);
 } else {
     initializeBucketOperations();
+}
+
+// Extend the Window interface to include our global functions
+declare global {
+    interface Window {
+        downloadObject: typeof downloadObject;
+        deleteObject: typeof deleteObject;
+        toggleObjectSelection: typeof toggleObjectSelection;
+        toggleSelectAll: typeof toggleSelectAll;
+        deleteBatchObjects: typeof deleteBatchObjects;
+    }
 }
 
 // Keep functions available globally for backwards compatibility

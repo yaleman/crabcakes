@@ -22,6 +22,10 @@
     --font-size-small: 12px;
 
     --font-code: 'Source Code Pro', 'Monaco', 'Courier New', monospace;
+
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-bold: 600;
 }
 
 * {
@@ -47,7 +51,7 @@ body {
 .logo {
     color: var(--color-white);
     font-size: var(--font-size-h1);
-    font-weight: 700;
+    font-weight: var(--font-weight-bold);
     margin-bottom: 30px;
     text-align: center;
     text-decoration: none;
@@ -75,6 +79,10 @@ body {
     margin-top: 20px;
 }
 
+.font-weight-bold {
+    font-weight: var(--font-weight-bold);
+}
+
 .nav-link {
     display: block;
     padding: 0.8rem 1.0rem;
@@ -91,7 +99,7 @@ body {
 .nav-link.active {
     background: rgba(255, 255, 255, 0.2);
     color: var(--color-white);
-    font-weight: 600;
+    font-weight: var(--font-weight-bold);
 }
 
 .logout-form {
@@ -113,10 +121,40 @@ body {
     padding: 2.0rem;
 }
 
+.horizontal-container {
+    display: flex;
+    flex-direction: row;
+    gap: 1.0rem;
+    max-width: 100%;
+    margin: 0 auto;
+}
+
+.form-group,
+.troubleshooter-results {
+    flex: 1 1 auto;
+    max-width: 100%;
+    min-width: 50%;
+}
+
+.form-control {
+    width: 100%;
+    padding: 0.5rem;
+    font-size: var(--font-size-normal);
+    border: var(--color-purple-30pct) 1px solid;
+    border-radius: var(--border-radius-button);
+    margin-top: 0.2rem;
+    margin-bottom: 1.0rem;
+}
+
 h1 {
     color: #333;
     margin-bottom: 0.5rem;
     font-size: var(--font-size-h1);
+}
+
+h3 {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
 }
 
 .subtitle {
@@ -144,8 +182,14 @@ h1 {
     border-bottom: none;
 }
 
+label {
+    font-weight: var(--font-weight-bold);
+    ;
+}
+
+
 .info-label {
-    font-weight: 600;
+    font-weight: var(--font-weight-bold);
     color: #5a67d8;
 }
 
@@ -168,7 +212,7 @@ th {
     color: #5a67d8;
     padding: 12px;
     text-align: left;
-    font-weight: 600;
+    font-weight: var(--font-weight-bold);
     border-bottom: 2px solid var(--color-purple-30pct);
 }
 
@@ -191,7 +235,7 @@ ul.button-list {
     display: inline-block;
     padding: 0.75rem 1.0rem;
     text-decoration: none;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
     transition: box-shadow 0.2s;
     border: none;
     border-radius: var(--border-radius-button);
@@ -241,9 +285,6 @@ ul.button-list {
 .btn-danger:hover {
     background: linear-gradient(135deg, var(--bgcolor-red) 50%, darkred 100%);
 }
-
-
-
 
 .code-block {
     background: #2d3748;
@@ -295,7 +336,7 @@ ul.button-list {
 .bucket-link {
     color: #667eea;
     text-decoration: none;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
 }
 
 
@@ -355,6 +396,19 @@ textarea#policy-json {
     flex-direction: column;
 }
 
+.form-group label {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0.2rem;
+}
+
+
+.form-group input {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0.2rem;
+}
+
 /* Text input styling */
 input[type="text"],
 input[type="password"] {
@@ -411,7 +465,7 @@ table td button {
     padding: 12px 24px;
     border-radius: 6px;
     border: none;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
     cursor: pointer;
     transition: transform 0.2s;
     font-size: inherit;
@@ -432,21 +486,24 @@ th .select-column {
     border-radius: 12px;
     color: var(--color-white);
     font-size: var(--font-size-normal);
-    font-weight: 600;
+    font-weight: var(--font-weight-bold);
 }
 
 .badge-deny,
+.badge-false,
 .badge-red {
     background: var(--bgcolor-red);
     color: var(--color-white);
 }
 
+.badge-true,
 .badge-allow,
 .badge-green {
     background: var(--bgcolor-green);
     color: var(--color-white);
 }
 
+.badge-notapplicable,
 .badge-user,
 .badge-purple {
     background: var(--bgcolor-purple);
@@ -456,6 +513,14 @@ th .select-column {
 .no-list-style {
     list-style: none;
     padding-left: 0;
+}
+
+.list-item-padded li {
+    padding-bottom: 1.0rem;
+}
+
+.list-item-padded li ul li {
+    padding-bottom: 0;
 }
 
 .page-header {

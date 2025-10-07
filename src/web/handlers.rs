@@ -3,20 +3,30 @@
 //! Handles authentication and API endpoints for the admin web interface.
 
 use std::convert::Infallible;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use askama::Template;
 use form_urlencoded;
-use http::Method;
-use http::header::{
-    CACHE_CONTROL, CONTENT_TYPE, LOCATION, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+use http::{
+    HeaderValue, Method,
+    header::{
+        CACHE_CONTROL, CONTENT_TYPE, LOCATION, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+        X_FRAME_OPTIONS,
+    },
 };
 use http_body_util::{BodyExt, Full};
-use hyper::body::Bytes;
-use hyper::{Request, Response, StatusCode};
+use hyper::{
+    Request, Response, StatusCode,
+    body::{Bytes, Incoming},
+};
+use iam_rs::{
+    Arn, Context, EvaluationOptions, EvaluationResult, IAMRequest, PolicyEvaluator, PrincipalId,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tower_sessions::Session;
+use tracing::debug;
 
 use crate::auth::OAuthClient;
 use crate::credentials::CredentialStore;
@@ -160,6 +170,33 @@ struct IdentitySummary {
     has_credential: bool,
 }
 
+/// Identity detail template
+#[derive(Template)]
+#[template(path = "troubleshooter.html")]
+struct PolicyTroubleshooterTemplate {
+    page: String,
+    bucket: String,
+    key: String,
+    user: String,
+    action: String,
+    policy_name: String,
+    policy_names: Vec<String>,
+}
+
+impl Default for PolicyTroubleshooterTemplate {
+    fn default() -> Self {
+        Self {
+            page: "policy_troubleshooter".to_string(),
+            bucket: String::new(),
+            key: String::new(),
+            user: String::new(),
+            action: String::new(),
+            policy_names: Vec::new(),
+            policy_name: String::new(),
+        }
+    }
+}
+
 /// Object info for bucket listing
 #[derive(Debug)]
 struct ObjectInfo {
@@ -169,11 +206,11 @@ struct ObjectInfo {
 }
 
 fn login_redirect() -> Result<Response<Full<Bytes>>, CrabCakesError> {
-    Response::builder()
-        .status(StatusCode::FOUND)
-        .header(LOCATION, "/login")
-        .body(Full::new(Bytes::new()))
-        .map_err(CrabCakesError::from)
+    let mut res = Response::new(Full::new(Bytes::new()));
+    res.headers_mut()
+        .insert(LOCATION, HeaderValue::from_static("/login"));
+    *res.status_mut() = StatusCode::FOUND;
+    Ok(res)
 }
 
 /// Return with a 404 Not Found response
@@ -190,6 +227,20 @@ pub struct WebHandler {
     credentials_store: Arc<RwLock<CredentialStore>>,
     policy_store: Arc<PolicyStore>,
     filesystem: Arc<FilesystemService>,
+}
+
+#[derive(Deserialize, Debug)]
+struct TroubleShooterForm {
+    bucket: String,
+    key: String,
+    user: String,
+    action: String,
+    policy: String,
+}
+
+#[derive(Serialize, Debug)]
+struct TroubleShooterResponse {
+    decision: EvaluationResult,
 }
 
 impl WebHandler {
@@ -212,7 +263,7 @@ impl WebHandler {
     /// Main request handler - routes to appropriate endpoint
     pub async fn handle_request(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let method = req.method().clone();
@@ -221,21 +272,19 @@ impl WebHandler {
             (Method::GET, "/") => self.handle_root().await,
             (Method::GET, "/login") => self.handle_login().await,
             (Method::GET, path) if path.starts_with("/oauth2/callback") => {
-                self.handle_oauth_callback(req, session.clone()).await
+                self.handle_oauth_callback(req, session).await
             }
-            (Method::POST, "/logout") => self.handle_logout(session.clone()).await,
-            (Method::GET, "/api/session") => self.handle_get_session(session.clone()).await,
-            (Method::GET, "/admin/api/csrf-token") => self.handle_csrf_token(session.clone()).await,
-            (Method::GET, "/admin/api/policies") => {
-                self.handle_api_list_policies(session.clone()).await
-            }
+            (Method::POST, "/logout") => self.handle_logout(session).await,
+            (Method::GET, "/api/session") => self.handle_get_session(session).await,
+            (Method::GET, "/admin/api/csrf-token") => self.handle_csrf_token(session).await,
+            (Method::GET, "/admin/api/policies") => self.handle_api_list_policies(session).await,
             (Method::POST, "/admin/api/policies") => {
-                self.handle_api_create_policy(req, session.clone()).await
+                self.handle_api_create_policy(req, session).await
             }
             (Method::PUT, path) if path.starts_with("/admin/api/policies/") => {
                 self.handle_api_update_policy(
                     req,
-                    session.clone(),
+                    session,
                     path.strip_prefix("/admin/api/policies/").unwrap_or(""),
                 )
                 .await
@@ -243,22 +292,26 @@ impl WebHandler {
             (Method::DELETE, path) if path.starts_with("/admin/api/policies/") => {
                 self.handle_api_delete_policy(
                     req,
-                    session.clone(),
+                    session,
                     path.strip_prefix("/admin/api/policies/").unwrap_or(""),
                 )
                 .await
             }
+            (Method::POST, path)
+                if path.split("?").next().unwrap_or("") == "/admin/api/policy_troubleshooter" =>
+            {
+                self.handle_api_policy_troubleshooter(req, session).await
+            }
             (Method::GET, "/admin/api/credentials") => {
-                self.handle_api_list_credentials(session.clone()).await
+                self.handle_api_list_credentials(session).await
             }
             (Method::POST, "/admin/api/credentials") => {
-                self.handle_api_create_credential(req, session.clone())
-                    .await
+                self.handle_api_create_credential(req, session).await
             }
             (Method::PUT, path) if path.starts_with("/admin/api/credentials/") => {
                 self.handle_api_update_credential(
                     req,
-                    session.clone(),
+                    session,
                     path.strip_prefix("/admin/api/credentials/").unwrap_or(""),
                 )
                 .await
@@ -269,14 +322,15 @@ impl WebHandler {
                 if access_key_id.is_empty() {
                     return Ok(respond_404());
                 }
-                self.handle_api_delete_credential(req, session.clone(), access_key_id)
+                self.handle_api_delete_credential(req, session, access_key_id)
                     .await
             }
             (Method::GET, "/admin") | (Method::GET, "/admin/") => self.handle_root().await,
-            (Method::GET, "/admin/profile") => self.handle_profile(session.clone()).await,
-            (Method::GET, "/admin/policies") => self.handle_policies(session.clone()).await,
-            (Method::GET, "/admin/policies/new") => {
-                self.handle_policy_new_form(session.clone()).await
+            (Method::GET, "/admin/profile") => self.handle_profile(session).await,
+            (Method::GET, "/admin/policies") => self.handle_policies(session).await,
+            (Method::GET, "/admin/policies/new") => self.handle_policy_new_form(session).await,
+            (Method::GET, "/admin/policy_troubleshooter") => {
+                self.handle_policy_troubleshooter(req, session).await
             }
             (Method::GET, path)
                 if path.starts_with("/admin/policies/") && path.ends_with("/edit") =>
@@ -285,15 +339,13 @@ impl WebHandler {
                     .strip_prefix("/admin/policies/")
                     .and_then(|s| s.strip_suffix("/edit"))
                     .unwrap_or("");
-                self.handle_policy_edit_form(session.clone(), policy_name)
-                    .await
+                self.handle_policy_edit_form(session, policy_name).await
             }
             (Method::GET, path) if path.starts_with("/admin/policies/") => {
                 let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
-                self.handle_policy_detail(session.clone(), policy_name)
-                    .await
+                self.handle_policy_detail(session, policy_name).await
             }
-            (Method::GET, "/admin/identities") => self.handle_identities(session.clone()).await,
+            (Method::GET, "/admin/identities") => self.handle_identities(session).await,
             (Method::GET, "/admin/identities/new") => {
                 let access_key_id = req
                     .uri()
@@ -306,7 +358,7 @@ impl WebHandler {
                             .map(|(_, v)| v)
                     })
                     .unwrap_or_default();
-                self.handle_credential_new_form(session.clone(), access_key_id)
+                self.handle_credential_new_form(session, access_key_id)
                     .await
             }
             (Method::GET, path)
@@ -320,7 +372,7 @@ impl WebHandler {
                 if access_key_id.is_empty() {
                     return Ok(respond_404());
                 }
-                self.handle_credential_edit_form(session.clone(), access_key_id)
+                self.handle_credential_edit_form(session, access_key_id)
                     .await
             }
             (Method::GET, path) if path.starts_with("/admin/identities/") => {
@@ -328,15 +380,12 @@ impl WebHandler {
                 if access_key_id.is_empty() {
                     return Ok(respond_404());
                 }
-                self.handle_identity_detail(session.clone(), access_key_id)
-                    .await
+                self.handle_identity_detail(session, access_key_id).await
             }
-            (Method::GET, "/admin/buckets") => self.handle_buckets(session.clone()).await,
-            (Method::GET, "/admin/buckets/new") => {
-                self.handle_bucket_new_form(session.clone()).await
-            }
+            (Method::GET, "/admin/buckets") => self.handle_buckets(session).await,
+            (Method::GET, "/admin/buckets/new") => self.handle_bucket_new_form(session).await,
             (Method::POST, "/admin/api/buckets") => {
-                self.handle_api_create_bucket(req, session.clone()).await
+                self.handle_api_create_bucket(req, session).await
             }
             (Method::GET, path)
                 if path.starts_with("/admin/buckets/") && path.ends_with("/delete") =>
@@ -345,18 +394,16 @@ impl WebHandler {
                     .strip_prefix("/admin/buckets/")
                     .and_then(|s| s.strip_suffix("/delete"))
                     .unwrap_or("");
-                self.handle_bucket_delete_form(session.clone(), bucket_name)
-                    .await
+                self.handle_bucket_delete_form(session, bucket_name).await
             }
             (Method::DELETE, path) if path.starts_with("/admin/api/buckets/") => {
                 let bucket_name = path.strip_prefix("/admin/api/buckets/").unwrap_or("");
-                self.handle_api_delete_bucket(req, session.clone(), bucket_name)
+                self.handle_api_delete_bucket(req, session, bucket_name)
                     .await
             }
             (Method::GET, path) if path.starts_with("/admin/buckets/") => {
                 let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
-                self.handle_bucket_detail(session.clone(), bucket_path)
-                    .await
+                self.handle_bucket_detail(session, bucket_path).await
             }
             (Method::GET, path) if path.starts_with("/admin/static/") => {
                 self.handle_static_file(path).await
@@ -393,7 +440,7 @@ impl WebHandler {
     /// GET /oauth2/callback - Handle OAuth callback
     async fn handle_oauth_callback(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Extract query parameters
@@ -592,6 +639,28 @@ impl WebHandler {
             .map_err(CrabCakesError::from)
     }
 
+    fn build_json_response(
+        &self,
+        json: impl Serialize,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        let body = serde_json::to_string(&json).inspect_err(|err| {
+            debug!("Failed to serialize JSON response: {err:?}");
+        })?;
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .header(X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(X_FRAME_OPTIONS, "DENY")
+            .header(REFERRER_POLICY, "strict-origin-when-cross-origin")
+            .body(Full::new(Bytes::from(body)))
+            .map_err(|err| {
+                debug!("Failed to build JSON Response: {err:?}");
+                CrabCakesError::from(err)
+            })
+    }
+
     /// GET /admin/profile - User profile page
     async fn handle_profile(
         &self,
@@ -631,11 +700,7 @@ impl WebHandler {
             expires_at: creds.expires_at.to_string(),
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/policies - List all policies
@@ -662,11 +727,7 @@ impl WebHandler {
             policies,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/policies/{name} - View policy details
@@ -764,11 +825,7 @@ impl WebHandler {
             policy_principal_permissions,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/policies/new - Show form for creating a new policy
@@ -786,11 +843,7 @@ impl WebHandler {
             policy_json: String::new(),
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/policies/{name}/edit - Show form for editing a policy
@@ -818,11 +871,7 @@ impl WebHandler {
             policy_json,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/identities/new - Show form for creating a new credential
@@ -852,11 +901,7 @@ impl WebHandler {
             is_edit: false,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/credentials/{id}/edit - Show form for editing a credential
@@ -887,11 +932,7 @@ impl WebHandler {
             is_edit: true,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/identities - List all identities (credentials)
@@ -938,11 +979,7 @@ impl WebHandler {
             identities,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/identities/{access_key_id} - View identity details
@@ -979,11 +1016,7 @@ impl WebHandler {
             has_credential,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/buckets - List all buckets
@@ -1005,11 +1038,7 @@ impl WebHandler {
             buckets,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/buckets/{bucket} - View bucket contents
@@ -1057,11 +1086,7 @@ impl WebHandler {
             objects,
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// GET /admin/buckets/new - Show form for creating a new bucket
@@ -1077,17 +1102,13 @@ impl WebHandler {
             page: "buckets".to_string(),
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// POST /admin/api/buckets - Create a new bucket
     async fn handle_api_create_bucket(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Check authentication
@@ -1154,17 +1175,13 @@ impl WebHandler {
             object_count: entries.len(),
         };
 
-        let html = template
-            .render()
-            .map_err(|e| CrabCakesError::other(&format!("Failed to render template: {}", e)))?;
-
-        self.build_html_response(html)
+        self.build_html_response(template.render()?)
     }
 
     /// DELETE /admin/api/buckets/{name} - Delete a bucket
     async fn handle_api_delete_bucket(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
         bucket_name: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1335,7 +1352,7 @@ impl WebHandler {
     /// POST /admin/api/policies - Create a new policy
     async fn handle_api_create_policy(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Check authentication
@@ -1383,7 +1400,7 @@ impl WebHandler {
     /// PUT /admin/api/policies/{name} - Update an existing policy
     async fn handle_api_update_policy(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
         policy_name: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1426,7 +1443,7 @@ impl WebHandler {
     /// DELETE /admin/api/policies/{name} - Delete a policy
     async fn handle_api_delete_policy(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
         policy_name: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1493,7 +1510,7 @@ impl WebHandler {
     /// POST /admin/api/credentials - Create a new credential
     async fn handle_api_create_credential(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Check authentication
@@ -1543,7 +1560,7 @@ impl WebHandler {
     /// PUT /admin/api/credentials/{access_key_id} - Update an existing credential
     async fn handle_api_update_credential(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
         access_key_id: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1593,7 +1610,7 @@ impl WebHandler {
     /// DELETE /admin/api/credentials/{access_key_id} - Delete a credential
     async fn handle_api_delete_credential(
         &self,
-        req: Request<hyper::body::Incoming>,
+        req: Request<Incoming>,
         session: Session,
         access_key_id: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1670,6 +1687,101 @@ impl WebHandler {
             .header(CACHE_CONTROL, "public, max-age=3600")
             .body(Full::new(Bytes::from(content)))
             .map_err(CrabCakesError::from)
+    }
+
+    async fn handle_policy_troubleshooter(
+        &self,
+        req: Request<Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
+        };
+        let (parts, _body) = req.into_parts();
+
+        let mut policy_names: Vec<String> = self
+            .policy_store
+            .policies
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        policy_names.sort();
+
+        let mut template = PolicyTroubleshooterTemplate {
+            policy_names,
+            ..Default::default()
+        };
+        if let Some(query) = parts.uri.query() {
+            form_urlencoded::parse(query.as_bytes()).for_each(|(key, value)| match key.as_ref() {
+                "bucket" => template.bucket = value.to_string(),
+                "key" => template.key = value.to_string(),
+                "user" => template.user = value.to_string(),
+                "action" => template.action = value.to_string(),
+                _ => {}
+            });
+        }
+
+        self.build_html_response(template.render()?)
+    }
+
+    async fn handle_api_policy_troubleshooter(
+        &self,
+        req: Request<Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // parse out the form
+        let body = req.into_body();
+        let body_bytes = body.collect().await?.to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes)
+            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+
+        let form: TroubleShooterForm = serde_json::from_str(body_str)?;
+        // build the iam request
+        let iam_request = IAMRequest {
+            action: form.action.clone(),
+            principal: iam_rs::Principal::Aws(PrincipalId::String(format!(
+                "arn:aws:iam:::user/{}",
+                form.user
+            ))),
+            resource: Arn::from_str(&format!("arn:aws:s3:::{}/{}", form.bucket, form.key))?,
+            context: Context::new(),
+        };
+
+        // look for a policy that matches the bucket and key
+        let policies = self.policy_store.policies.read().await;
+        let filtered_policies = policies
+            .iter()
+            .filter_map(|(name, policy)| match &form.policy.is_empty() {
+                false => {
+                    if name == &form.policy {
+                        Some(policy.clone())
+                    } else {
+                        None
+                    }
+                }
+                true => Some(policy.clone()),
+            })
+            .collect();
+
+        let policyevaluator =
+            PolicyEvaluator::with_policies(filtered_policies).with_options(EvaluationOptions {
+                stop_on_explicit_deny: false,
+                collect_match_details: true,
+                max_statements: usize::MAX,
+                ignore_resource_constraints: false,
+            });
+        let evaluation_result = policyevaluator.evaluate(&iam_request)?;
+
+        let response = TroubleShooterResponse {
+            decision: evaluation_result,
+        };
+        debug!("Troubleshooter response: {:?}", response);
+        self.build_json_response(response)
     }
 }
 
