@@ -42,35 +42,9 @@
   - [ ] Update templates/policy_detail.html - Add Edit/Delete buttons
   - [ ] Update templates/credentials.html - Add Create and Delete buttons
 
-### Phase 6: Routing & Request Dispatch
+### Phase 8: Admin UI Implementation
 
-- [ ] Update server.rs::run() to dispatch based on disable_api flag
-- [ ] Route /admin/* to SPA (index.html from web/dist/)
-- [ ] Route /api/* to API handlers with session auth
-- [ ] Route /login, /logout, /oauth2/* to OAuth handlers
-- [ ] Serve static assets from web/dist/assets/
-- [ ] Fallback /admin/* to index.html (SPA routing)
-
-### Phase 7: TypeScript Frontend Setup
-
-- [ ] Create web/ directory with pnpm create vite
-- [ ] Configure Vite for /admin/ base path
-- [ ] Setup Tailwind CSS
-- [ ] Setup shadcn/ui components
-- [ ] Add React Router with BrowserRouter (basename="/admin")
-- [ ] Add ESLint + Prettier
-- [ ] Add AWS SDK for JavaScript (@aws-sdk/client-s3)
-
-### Phase 8: React Admin UI Implementation
-
-- [ ] Setup routes: /, /credentials, /policies, /policies/:name
-- [ ] Create TypeScript types for API responses
-- [ ] Implement auth flow (login redirect, session fetch, credential storage)
-- [ ] Create API client utility for /api/* calls
-- [ ] Setup AWS S3 client with temp credentials from LocalStorage
-- [ ] Build credentials management UI (table, create/delete)
 - [ ] Build policy management UI (list, create, edit, delete)
-- [ ] Ensure all navigation updates URL for deep linking
 
 ### Phase 9: Build System Integration
 
@@ -79,13 +53,7 @@
 - [ ] Add .gitignore entries for web/node_modules/, web/dist/
 - [ ] Update CLAUDE.md with frontend dev instructions
 
-## Environment Variables (Admin UI)
-
-- `CRABCAKES_DISABLE_API` - Disable admin UI and API (default: false, API enabled by default)
-- `CRABCAKES_OIDC_CLIENT_ID` - OAuth client ID (required if API enabled)
-- `CRABCAKES_OIDC_DISCOVERY_URL` - OIDC discovery URL (required if API enabled)
-
-## URL Structure (when API is enabled, i.e., CRABCAKES_DISABLE_API=false)
+## URL Structure (when API is enabled, i.e, OAuth is enabled)
 
 - `/admin/*` - Admin UI (SPA)
 - `/api/*` - API endpoints (JSON)
@@ -104,7 +72,7 @@
 
 #### Infrastructure
 
-- [ ] Design ACL storage (similar to tags, use sidecar files)
+- [ ] Design ACL storage (similar to tags, use a database table)
 - [ ] Implement ACL validation and defaults
 - [ ] Support canned ACLs (private, public-read, etc.)
 
@@ -126,7 +94,6 @@
 
 - [ ] Investigate using shellflip crate for graceful server restarts - example implementation here <https://github.com/cloudflare/shellflip/blob/main/examples/restarter.rs>
 - [ ] Enable dual-stack (IPv4/IPv6) listening support
-- [ ] policy troubleshooter - input the bucket/key/action/user and see what the result will be
 - [ ] policy suggester - enable the mode, take some actions, and get suggestions as to what's missing from policy
   - [ ] this stores all actions while it's running (maybe in the database?) for later reference
 - [ ] regular database vacuum with a record of when it was last done, so if it's overdue or really needs it, then just run the task

@@ -304,7 +304,6 @@ The server supports two types of AWS credentials:
   - Policies loaded from `config_dir/policies/`
   - Credentials loaded from `config_dir/credentials/`
 - `--region <name>` or `CRABCAKES_REGION`: AWS region name (default: `crabcakes`)
-- `--disable-api` or `CRABCAKES_DISABLE_API`: Disable admin UI and API (default: `false`, API enabled)
 - `--oidc-client-id <id>` or `CRABCAKES_OIDC_CLIENT_ID`: OAuth client ID (required if API enabled)
 - `--oidc-discovery-url <url>` or `CRABCAKES_OIDC_DISCOVERY_URL`: OIDC discovery URL (required if API enabled)
 - `--frontend-url <url>` or `CRABCAKES_FRONTEND_URL`: Frontend URL for OIDC redirect URIs when behind a reverse proxy (e.g., `https://example.com`). If not set, uses `http(s)://hostname:port`
@@ -478,7 +477,7 @@ Dev dependencies:
 The server accepts configuration via:
 
 - CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url`, `--frontend-url`
-- Environment variables: `CRABCAKES_LISTENER_ADDRESS`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REGION`, `CRABCAKES_DISABLE_API`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`, `CRABCAKES_FRONTEND_URL`
+- Environment variables: `CRABCAKES_LISTENER_ADDRESS`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REGION`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`, `CRABCAKES_FRONTEND_URL`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
 - Config directory defaults to `./config` (if it doesn't exist, server starts with no policies/credentials)
