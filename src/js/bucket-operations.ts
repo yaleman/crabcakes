@@ -1,5 +1,6 @@
 // Bucket object operations using AWS SDK v3
 import { S3Client, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
+import { sessionCredentials, SessionData } from './shared';
 
 interface S3Object {
     bucket: string;
@@ -20,19 +21,18 @@ interface DeleteResponse {
 const selectedObjects = new Set<S3Object>();
 
 // Get S3 client configured with credentials from localStorage
-function getS3Client(): S3Client {
-    const accessKeyId = localStorage.getItem('crabcakes_access_key_id');
-    const secretAccessKey = localStorage.getItem('crabcakes_secret_access_key');
+async function getS3Client(): Promise<S3Client> {
+    const creds: SessionData | null = await sessionCredentials();
 
-    if (!accessKeyId || !secretAccessKey) {
+    if (!creds || creds === null) {
         throw new Error('No credentials found. Please refresh the page.');
     }
     return new S3Client({
         region: 'crabcakes',
         endpoint: window.location.origin,
         credentials: {
-            accessKeyId,
-            secretAccessKey,
+            accessKeyId: creds.access_key_id,
+            secretAccessKey: creds.secret_access_key,
         },
         forcePathStyle: true,
     });
@@ -41,7 +41,7 @@ function getS3Client(): S3Client {
 // Download an object
 async function downloadObject(bucket: string, key: string): Promise<void> {
     try {
-        const client = getS3Client();
+        const client = await getS3Client().catch(() => { throw new Error('Failed to get S3 client'); });
         const command = new GetObjectCommand({
             Bucket: bucket,
             Key: key,
@@ -78,8 +78,9 @@ async function deleteObject(bucket: string, key: string): Promise<void> {
         return;
     }
 
+
     try {
-        const client = getS3Client();
+        const client = await getS3Client().catch(() => { throw new Error('Failed to get S3 client'); });;
         const command = new DeleteObjectCommand({
             Bucket: bucket,
             Key: key,
@@ -166,7 +167,7 @@ async function deleteBatchObjects(): Promise<void> {
             byBucket[obj.bucket].push({ Key: obj.key });
         }
 
-        const client = getS3Client();
+        const client = await getS3Client();
         let totalDeleted = 0;
         let totalErrors = 0;
 
