@@ -29,7 +29,7 @@ interface AuthenticatedFetchOptions extends RequestInit {
 }
 
 // Helper to make authenticated requests with CSRF token
-async function authenticatedFetch(url: string, options: AuthenticatedFetchOptions = {}): Promise<Response> {
+export async function authenticatedFetch(url: string, options: AuthenticatedFetchOptions = {}): Promise<Response> {
     const token = await getCsrfToken();
 
     const headers: HeadersInit = {
@@ -50,7 +50,3 @@ async function authenticatedFetch(url: string, options: AuthenticatedFetchOption
         headers,
     });
 }
-
-
-
-export { authenticatedFetch, getCsrfToken };
