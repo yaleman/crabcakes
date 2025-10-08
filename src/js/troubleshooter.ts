@@ -75,7 +75,7 @@ function checkPolicy(): void {
             Object.entries(result.decision.context.Principal).forEach(([key, value]) => {
                 arn += `${key}(${value})<br />`;
             });
-            principal.innerHTML = `Principal: ${arn}`;
+            principal.innerText = `Principal: ${arn}`;
             contextParagraph.appendChild(principal);
 
             const actionParagraph = document.createElement("p");
@@ -133,7 +133,7 @@ function checkPolicy(): void {
 
                 if (statement.reason.trim() !== "" && statement.reason) {
                     const reasonItem = document.createElement("li");
-                    reasonItem.innerHTML = `Reason: ${statement.reason}`;
+                    reasonItem.innerText = `Reason: ${statement.reason}`;
                     subList.appendChild(reasonItem);
 
                 }
