@@ -8,6 +8,10 @@ name: Clippy
       - main
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"
