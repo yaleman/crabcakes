@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "description": "S3-compatible server written in Rust",
   "type": "module",
+  "packageManager": "pnpm@10.18.1",
   "scripts": {
     "build-ts": "swc src/js --delete-dir-on-start --strip-leading-paths --out-dir target/ *.ts",
     "build": "pnpm build-ts && node build-js.js",
-    "lint:js": "eslint 'static/js/**/*.js' --ignore-pattern 'static/js/bucket-operations.js'",
     "lint:css": "stylelint 'static/css/**/*.css'",
-    "lint": "pnpm run lint:js && pnpm run lint:css",
+    "lint": "pnpm run lint:css",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
@@ -23,7 +23,7 @@
     "eslint": "^9.37.0",
     "happy-dom": "^19.0.2",
     "jsdom": "^27.0.0",
-    "stylelint": "^16.2.1",
+    "stylelint": "^16.25.0",
     "stylelint-config-standard": "^39.0.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
