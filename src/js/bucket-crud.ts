@@ -44,7 +44,8 @@ function initBucketForm(): void {
         try {
             await createBucket(bucketName);
             // Redirect to the new bucket
-            window.location.href = `/admin/buckets/${bucketName}`;
+            const bucketNameEncoded = encodeURIComponent(bucketName);
+            window.location.href = `/admin/buckets/${bucketNameEncoded}`;
         } catch (error) {
             // Show error in the form
             const message = error instanceof Error ? error.message : String(error);
