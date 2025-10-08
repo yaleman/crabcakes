@@ -147,3 +147,5 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+
+      # TODO: add a step to test-run the containers before push? `docker run --rm -it ghcr.io/yaleman/crabcakes:latest --help`

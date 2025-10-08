@@ -75,9 +75,10 @@ function showError(message: string): void {
 
 async function deleteBucket(bucketName: string, force: boolean = false): Promise<BucketResponse> {
     try {
+        const bucketNameEncoded = encodeURIComponent(bucketName);
         const url = force
-            ? `/admin/api/buckets/${bucketName}?force=true`
-            : `/admin/api/buckets/${bucketName}`;
+            ? `/admin/api/buckets/${bucketNameEncoded}?force=true`
+            : `/admin/api/buckets/${bucketNameEncoded}`;
 
         const response = await authenticatedFetch(url, {
             method: 'DELETE',
