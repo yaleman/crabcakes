@@ -96,6 +96,7 @@
             <th>User ID</th>
             <th>Created At</th>
             <th>Expires At</th>
+            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -106,6 +107,13 @@
             <td>{{ cred.user_id }}</td>
             <td>{{ cred.created_at }}</td>
             <td>{{ cred.expires_at }}</td>
+            <td>
+                <button
+                    class="btn btn-danger btn-small delete-temp-credential-btn"
+                    data-accessKeyId="{{ cred.access_key_id }}">
+                    Delete
+                </button>
+            </td>
         </tr>
         {% endfor %}
     </tbody>
@@ -116,4 +124,8 @@
     <p>No active temporary credentials</p>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/js/credential-crud.js"></script>
 {% endblock %}

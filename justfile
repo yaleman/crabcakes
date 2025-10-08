@@ -23,10 +23,6 @@ build-js:
 lint-web:
     pnpm run lint
 
-# lint JavaScript only
-lint-js:
-    pnpm run lint:js
-
 # lint CSS only
 lint-css:
     pnpm run lint:css

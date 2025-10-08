@@ -24,6 +24,7 @@ use iam_rs::{
     Arn, Context, EvaluationOptions, EvaluationResult, IAMRequest, PolicyEvaluator, PrincipalId,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio::sync::RwLock;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
@@ -349,6 +350,15 @@ impl WebHandler {
                 self.handle_api_delete_credential(req, session, access_key_id)
                     .await
             }
+            (Method::DELETE, path) if path.starts_with("/admin/api/temp_creds/") => {
+                match path.strip_prefix("/admin/api/temp_creds/") {
+                    Some(access_key_id) => {
+                        self.handle_api_delete_temp_credential(req, session, access_key_id)
+                            .await
+                    }
+                    None => Ok(respond_404()),
+                }
+            }
             (Method::GET, "/admin") | (Method::GET, "/admin/") => self.handle_root().await,
             (Method::GET, "/admin/profile") => self.handle_profile(session).await,
             (Method::GET, "/admin/policies") => self.handle_policies(session).await,
@@ -458,7 +468,7 @@ impl WebHandler {
                 span.record("status_code", StatusCode::INTERNAL_SERVER_ERROR.as_u16());
                 if is_api_request {
                     debug!("API request error: {:?}", e);
-                    match self.build_json_response(serde_json::json!({
+                    match self.build_json_response(json!({
                         "success": false,
                         "error": e
                     })) {
@@ -710,13 +720,13 @@ impl WebHandler {
 
         res.headers_mut().extend(vec![
             (CONTENT_TYPE, HeaderValue::from_static("application/json")),
-            // &(CACHE_CONTROL, HeaderValue::from_static("no-store")),
-            // &(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
-            // &(X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
-            // &(
-            //     REFERRER_POLICY,
-            //     HeaderValue::from_static("strict-origin-when-cross-origin"),
-            // ),
+            (CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            (X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            (X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
+            (
+                REFERRER_POLICY,
+                HeaderValue::from_static("strict-origin-when-cross-origin"),
+            ),
         ]);
 
         Ok(res)
@@ -1237,16 +1247,10 @@ impl WebHandler {
             .map_err(CrabCakesError::from)?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "success": true,
             "bucket_name": request.bucket_name
-        }))?;
-
-        Response::builder()
-            .status(StatusCode::CREATED)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        }))
     }
 
     /// GET /admin/buckets/{name}/delete - Show bucket deletion confirmation page
@@ -1317,16 +1321,10 @@ impl WebHandler {
             .map_err(CrabCakesError::from)?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "success": true,
             "bucket_name": bucket_name
-        }))?;
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        }))
     }
 
     /// GET /api/session - Return session info with temp credentials
@@ -1414,15 +1412,9 @@ impl WebHandler {
         let token = self.generate_csrf_token(&session).await?;
 
         // Return JSON response
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "csrf_token": token
-        }))?;
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        }))
     }
 
     /// GET /admin/api/policies - List all policies (JSON)
@@ -1440,20 +1432,14 @@ impl WebHandler {
         let mut policies = Vec::new();
         for name in policy_names {
             if let Some(policy) = self.policy_store.get_policy(&name).await {
-                policies.push(serde_json::json!({
+                policies.push(json!({
                     "name": name,
                     "statement_count": policy.statement.len()
                 }));
             }
         }
 
-        let json = serde_json::to_string(&policies)?;
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        self.build_json_response(&policies)
     }
 
     /// POST /admin/api/policies - Create a new policy
@@ -1492,16 +1478,10 @@ impl WebHandler {
             .await?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "success": true,
             "name": request.name
-        }))?;
-
-        Response::builder()
-            .status(StatusCode::CREATED)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        }))
     }
 
     /// PUT /admin/api/policies/{name} - Update an existing policy
@@ -1529,7 +1509,7 @@ impl WebHandler {
         let policy: iam_rs::IAMPolicy = match serde_json::from_str(body_str) {
             Ok(p) => p,
             Err(e) => {
-                return self.build_json_response(serde_json::json!({
+                return self.build_json_response(json!({
                     "success": false,
                     "error": format!("Invalid JSON: {}", e)
                 }));
@@ -1542,7 +1522,7 @@ impl WebHandler {
             .await?;
 
         // Return success
-        let json = serde_json::json!({
+        let json = json!({
             "success": true,
             "name": policy_name
         });
@@ -1570,16 +1550,10 @@ impl WebHandler {
         self.policy_store.delete_policy(policy_name).await?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "success": true,
             "name": policy_name
-        }))?;
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        }))
     }
 
     /// GET /admin/api/credentials - List all credentials (JSON)
@@ -1602,19 +1576,13 @@ impl WebHandler {
         let credentials: Vec<serde_json::Value> = access_key_ids
             .into_iter()
             .map(|id| {
-                serde_json::json!({
+                json!({
                     "access_key_id": id
                 })
             })
             .collect();
 
-        let json = serde_json::to_string(&credentials)?;
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        self.build_json_response(&credentials)
     }
 
     /// POST /admin/api/credentials - Create a new credential
@@ -1655,16 +1623,10 @@ impl WebHandler {
             .await?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "success": true,
             "access_key_id": request.access_key_id
-        }))?;
-
-        Response::builder()
-            .status(StatusCode::CREATED)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        }))
     }
 
     /// PUT /admin/api/credentials/{access_key_id} - Update an existing credential
@@ -1705,16 +1667,10 @@ impl WebHandler {
             .await?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "success": true,
             "access_key_id": access_key_id
-        }))?;
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        }))
     }
 
     /// DELETE /admin/api/credentials/{access_key_id} - Delete a credential
@@ -1741,16 +1697,36 @@ impl WebHandler {
             .await?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        self.build_json_response(json!({
             "success": true,
             "access_key_id": access_key_id
-        }))?;
+        }))
+    }
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+    /// DELETE /admin/api/temp_creds/{access_key_id} - Delete a temporary credential
+    async fn handle_api_delete_temp_credential(
+        &self,
+        req: Request<Incoming>,
+        session: Session,
+        access_key_id: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts for CSRF validation
+        let (parts, _body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Delete temporary credential from database
+        self.db.delete_temporary_credentials(access_key_id).await?;
+
+        // Return success
+        self.build_json_response(json!({
+            "success": true,
+            "access_key_id": access_key_id
+        }))
     }
 
     /// Serve static files (CSS, JS)
