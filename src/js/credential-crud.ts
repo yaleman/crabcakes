@@ -119,7 +119,8 @@ function initCredentialForm(): void {
         try {
             await saveCredential(accessKeyId, secretAccessKey, isEdit);
             alert('Credential saved successfully!');
-            window.location.href = `/admin/identities/${accessKeyId}`;
+            const newAccessKeyId = encodeURIComponent(accessKeyId);
+            window.location.href = `/admin/identities/${newAccessKeyId}`
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             alert(`Error: ${message}`);
