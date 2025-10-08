@@ -66,7 +66,8 @@ function initPolicyForm(): void {
 
         const policyNameInput = document.getElementById('policy-name') as HTMLInputElement;
         const policyJsonInput = document.getElementById('policy-json') as HTMLTextAreaElement;
-        const policyName = policyNameInput.value;
+        // strip all non-url-safe characters from policy name for redirect
+        const policyName = encodeURIComponent(policyNameInput.value);
         const policyJson = policyJsonInput.value;
 
         try {

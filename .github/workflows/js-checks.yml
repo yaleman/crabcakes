@@ -8,6 +8,15 @@ name: JavaScript and TypeScript Checks
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   js-checks:
     name: JavaScript and TypeScript Checks
