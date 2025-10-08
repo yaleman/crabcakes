@@ -80,4 +80,52 @@
     <p>No identities found in policies</p>
 </div>
 {% endif %}
+
+<h2>Temporary Credentials</h2>
+
+<p class="info-text">
+    Temporary credentials are created through OAuth login and automatically expire.
+    These credentials have full access to all S3 operations.
+</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Access Key ID</th>
+            <th>User Email</th>
+            <th>User ID</th>
+            <th>Created At</th>
+            <th>Expires At</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for cred in temporary_credentials %}
+        <tr>
+            <td><code>{{ cred.access_key_id }}</code></td>
+            <td>{{ cred.user_email }}</td>
+            <td>{{ cred.user_id }}</td>
+            <td>{{ cred.created_at }}</td>
+            <td>{{ cred.expires_at }}</td>
+            <td>
+                <button
+                    class="btn btn-danger btn-small delete-temp-credential-btn"
+                    data-accessKeyId="{{ cred.access_key_id }}">
+                    Delete
+                </button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if temporary_credentials.is_empty() %}
+<div class="info-section empty-state">
+    <p>No active temporary credentials</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/js/credential-crud.js"></script>
 {% endblock %}

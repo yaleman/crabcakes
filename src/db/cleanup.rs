@@ -82,11 +82,13 @@ impl TagCleaner {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Duration;
     use sea_orm::ActiveValue::{NotSet, Set};
 
     use super::*;
-    use crate::{db::initialize_in_memory_database, setup_test_logging, tests::setup_test_files};
+    use crate::{
+        constants::MAX_TEMP_CREDS_DURATION, db::initialize_in_memory_database, setup_test_logging,
+        tests::setup_test_files,
+    };
 
     #[tokio::test]
     async fn test_cleanup_no_orphans() {
@@ -119,7 +121,7 @@ mod tests {
                 key: Set("nonexistent.txt".to_string()),
                 tag_key: Set("example".to_string()),
                 tag_value: Set("value".to_string()),
-                created_at: Set(chrono::Utc::now() - Duration::hours(1)),
+                created_at: Set(chrono::Utc::now() - *MAX_TEMP_CREDS_DURATION),
             };
             object_tags::Entity::insert(new_tag)
                 .exec(&*tag_db)

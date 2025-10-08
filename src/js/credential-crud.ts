@@ -142,14 +142,62 @@ function initCredentialDetail(): void {
     });
 }
 
+function initCredentialList(): void {
+    const deleteButtons = document.querySelectorAll('.delete-temp-credential-btn');
+    deleteButtons.forEach((btn) => {
+        btn.addEventListener('click', (e: Event) => {
+            e.preventDefault();
+            if (!(e.target instanceof HTMLElement)) return;
+            const accessKeyId = e.target.dataset.accesskeyid;
+            console.debug(`Delete button clicked '${accessKeyId}'`);
+            if (accessKeyId) {
+                deleteTempCredential(accessKeyId);
+            }
+        });
+    });
+}
+
 // Initialize on page load
 function initCredentialPages(): void {
     initCredentialForm();
     initCredentialDetail();
+
+    initCredentialList();
 }
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initCredentialPages);
 } else {
     initCredentialPages();
+}
+
+
+async function deleteTempCredential(accessKeyId: string): Promise<void> {
+    if (!confirm(`Are you sure you want to delete temporary credential ${accessKeyId}?`)) {
+        return;
+    }
+
+    try {
+        // Get CSRF token
+        const csrfResponse = await fetch('/admin/api/csrf-token');
+        const csrfData = await csrfResponse.json();
+
+        // Delete the credential
+        const response = await fetch(encodeURI(`/admin/api/temp_creds/${accessKeyId}`), {
+            method: 'DELETE',
+            headers: {
+                'X-CSRF-Token': csrfData.csrf_token
+            }
+        });
+
+        if (response.ok) {
+            // Reload the page to show updated list
+            window.location.reload();
+        } else {
+            const error = await response.json();
+            alert(`Failed to delete credential: ${error.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Failed to delete credential: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }

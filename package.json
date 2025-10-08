@@ -8,17 +8,12 @@
     "build-ts": "swc src/js --delete-dir-on-start --strip-leading-paths --out-dir target/js/ *.ts",
     "build": "pnpm build-ts && node build-js.js",
     "lint:css": "stylelint 'static/css/**/*.css'",
-    "lint": "pnpm run lint:css",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "lint": "pnpm run lint:css"
   },
   "devDependencies": {
     "@swc/cli": "^0.7.8",
     "@swc/core": "^1.13.5",
     "@testing-library/dom": "^10.4.1",
-    "@vitest/ui": "^3.2.4",
     "esbuild": "^0.25.10",
     "eslint": "^9.37.0",
     "happy-dom": "^19.0.2",
@@ -28,6 +23,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.901.0"
+    "@aws-sdk/client-s3": "^3.906.0"
   }
 }
