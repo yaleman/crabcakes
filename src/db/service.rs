@@ -1,7 +1,10 @@
 //! Database service providing business logic for all database operations
 
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder,
+    Set,
+};
 use std::sync::Arc;
 use tracing::{debug, error};
 
@@ -217,6 +220,23 @@ impl DBService {
     ) -> Result<Vec<temporary_credentials::Model>, CrabCakesError> {
         let creds = temporary_credentials::Entity::find()
             .filter(temporary_credentials::Column::SessionId.eq(session_id))
+            .all(&*self.db)
+            .await?;
+        Ok(creds)
+    }
+
+    pub async fn get_all_temporary_credentials(
+        &self,
+        order_by: Option<temporary_credentials::Column>,
+        direction: Option<Order>,
+    ) -> Result<Vec<temporary_credentials::Model>, CrabCakesError> {
+        let now = chrono::Utc::now();
+        let creds = temporary_credentials::Entity::find()
+            .filter(temporary_credentials::Column::ExpiresAt.gt(now))
+            .order_by(
+                order_by.unwrap_or(temporary_credentials::Column::CreatedAt),
+                direction.unwrap_or(Order::Desc),
+            )
             .all(&*self.db)
             .await?;
         Ok(creds)

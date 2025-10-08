@@ -4,7 +4,7 @@ import { readdirSync } from 'fs';
 import { join } from 'path';
 // import { ESLint } from 'eslint';
 
-const sourceDir = 'target/js/';
+const sourceDir = 'target/js/js/';
 const outDir = 'static/js/';
 
 async function buildfile(filepath) {

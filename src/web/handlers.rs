@@ -28,13 +28,13 @@ use tokio::sync::RwLock;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
-use crate::auth::OAuthClient;
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::policy_analyzer;
+use crate::{auth::OAuthClient, db::entities::temporary_credentials};
 
 /// Error page template
 #[derive(Template)]
@@ -141,6 +141,17 @@ struct BucketDetailTemplate {
 struct IdentitiesTemplate {
     page: String,
     identities: Vec<IdentitySummary>,
+    temporary_credentials: Vec<TemporaryCredentialSummary>,
+}
+
+/// Temporary credential summary for listing
+#[derive(Debug)]
+struct TemporaryCredentialSummary {
+    access_key_id: String,
+    user_email: String,
+    user_id: String,
+    expires_at: String,
+    created_at: String,
 }
 
 /// Identity detail template
@@ -217,6 +228,13 @@ fn login_redirect() -> Result<Response<Full<Bytes>>, CrabCakesError> {
 fn respond_404() -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from("Not Found")));
     *response.status_mut() = StatusCode::NOT_FOUND;
+    response
+}
+
+/// Return with a 500 response
+fn respond_500(msg: &impl ToString) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from(msg.to_string())));
+    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
     response
 }
 
@@ -351,7 +369,19 @@ impl WebHandler {
                 let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
                 self.handle_policy_detail(session, policy_name).await
             }
-            (Method::GET, "/admin/identities") => self.handle_identities(session).await,
+            (Method::GET, "/admin/identities") => {
+                self.handle_identities(
+                    session,
+                    form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes())
+                        .filter_map(|(k, v)| {
+                            ["order_by", "direction"]
+                                .contains(&k.as_ref())
+                                .then_some((k.to_string(), v.to_string()))
+                        })
+                        .collect(),
+                )
+                .await
+            }
             (Method::GET, "/admin/identities/new") => {
                 let access_key_id = req
                     .uri()
@@ -430,10 +460,12 @@ impl WebHandler {
                     debug!("API request error: {:?}", e);
                     match self.build_json_response(serde_json::json!({
                         "success": false,
-                        "error": e.to_string()
+                        "error": e
                     })) {
-                        Ok(resp) => Ok(resp),
-                        Err(err) => panic!("Fuckit {err:}"),
+                        Ok(val) => Ok(val),
+                        Err(err) => Ok(respond_500(&format!(
+                            "Failed to build error response: {err}"
+                        ))),
                     }
                 } else {
                     Ok(e.into())
@@ -968,6 +1000,7 @@ impl WebHandler {
     async fn handle_identities(
         &self,
         session: Session,
+        query_params: Vec<(String, String)>,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         if self.check_auth(&session).await.is_err() {
             return login_redirect();
@@ -1003,9 +1036,43 @@ impl WebHandler {
             });
         }
 
+        let order_by = query_params
+            .iter()
+            .find(|(k, _)| k == "order_by")
+            .map(|(_, v)| {
+                temporary_credentials::Column::from_str(v.as_ref())
+                    .unwrap_or(temporary_credentials::Column::CreatedAt)
+            });
+
+        let direction = query_params
+            .iter()
+            .find(|(k, _)| k == "direction")
+            .map(|(_, v)| match v.as_ref() {
+                "asc" => sea_orm::Order::Asc,
+                "desc" => sea_orm::Order::Desc,
+                _ => sea_orm::Order::Desc,
+            });
+
+        // Get all temporary credentials
+        let temp_creds = self
+            .db
+            .get_all_temporary_credentials(order_by, direction)
+            .await?;
+        let temporary_credentials: Vec<TemporaryCredentialSummary> = temp_creds
+            .into_iter()
+            .map(|cred| TemporaryCredentialSummary {
+                access_key_id: cred.access_key_id,
+                user_email: cred.user_email,
+                user_id: cred.user_id,
+                expires_at: cred.expires_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+                created_at: cred.created_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            })
+            .collect();
+
         let template = IdentitiesTemplate {
             page: "identities".to_string(),
             identities,
+            temporary_credentials,
         };
 
         self.build_html_response(template.render()?)
@@ -1268,6 +1335,8 @@ impl WebHandler {
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Check authentication using user_id (subject from OIDC claim)
+        self.check_auth(&session).await?;
+
         let user_id: String = session
             .get("user_id")
             .await
@@ -1316,12 +1385,7 @@ impl WebHandler {
         };
 
         // Return JSON response
-        let json = serde_json::to_string(&session_info)?;
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        self.build_json_response(&session_info)
     }
 
     /// GET /admin/api/csrf-token - Get CSRF token for current session
@@ -1451,10 +1515,10 @@ impl WebHandler {
         let policy: iam_rs::IAMPolicy = match serde_json::from_str(body_str) {
             Ok(p) => p,
             Err(e) => {
-                return Ok(self.build_json_response(serde_json::json!({
+                return self.build_json_response(serde_json::json!({
                     "success": false,
                     "error": format!("Invalid JSON: {}", e)
-                }))?);
+                }));
             }
         };
 

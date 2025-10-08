@@ -95,6 +95,7 @@ tower-http = { version = "0.6.6", features = [
 ], default-features = false }
 scratchstack-arn = "0.4.9"
 futures = "0.3.31"
+serde_with = { version = "3.15.0", features = ["json"] }
 
 [dev-dependencies]
 aws-config = "1.8.7"

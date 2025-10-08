@@ -9,15 +9,19 @@ use hyper::body::Bytes;
 use iam_rs::EvaluationError;
 use mime_guess::mime::TEXT_HTML_UTF_8;
 use scratchstack_aws_signature::{SignatureError, auth::SigV4AuthenticatorResponseBuilderError};
+use serde::Serialize;
+use serde_with::{DisplayFromStr, serde_as};
 
 use crate::web::handlers::ErrorTemplate;
 
-#[derive(Debug)]
+#[serde_as]
+#[derive(Serialize, Debug)]
 pub enum CrabCakesError {
-    IamEvaluation(EvaluationError),
+    IamEvaluation(#[serde_as(as = "DisplayFromStr")] EvaluationError),
     Other(String),
-    SerdeJson(serde_json::Error),
-    Io(std::io::Error),
+
+    SerdeJson(#[serde_as(as = "DisplayFromStr")] serde_json::Error),
+    Io(#[serde_as(as = "DisplayFromStr")] std::io::Error),
     Database(String),
     NoPolicies,
     NoAuthenticationSupplied(String),
