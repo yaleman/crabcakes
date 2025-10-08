@@ -26,7 +26,7 @@ use iam_rs::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tower_sessions::Session;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 use crate::auth::OAuthClient;
 use crate::credentials::CredentialStore;
@@ -261,6 +261,11 @@ impl WebHandler {
     }
 
     /// Main request handler - routes to appropriate endpoint
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(method, uri, remote_addr, status_code, user, bucket, key)
+    )]
     pub async fn handle_request(
         &self,
         req: Request<Incoming>,
@@ -268,6 +273,7 @@ impl WebHandler {
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         let method = req.method().clone();
         let path = req.uri().path().to_string();
+        let is_api_request = path.starts_with("/admin/api/");
         let result = match (method, path.as_str()) {
             (Method::GET, "/") => self.handle_root().await,
             (Method::GET, "/login") => self.handle_login().await,
@@ -275,7 +281,7 @@ impl WebHandler {
                 self.handle_oauth_callback(req, session).await
             }
             (Method::POST, "/logout") => self.handle_logout(session).await,
-            (Method::GET, "/api/session") => self.handle_get_session(session).await,
+            (Method::GET, "/admin/api/session") => self.handle_get_session(session).await,
             (Method::GET, "/admin/api/csrf-token") => self.handle_csrf_token(session).await,
             (Method::GET, "/admin/api/policies") => self.handle_api_list_policies(session).await,
             (Method::POST, "/admin/api/policies") => {
@@ -410,10 +416,29 @@ impl WebHandler {
             }
             _ => Ok(respond_404()),
         };
+        let span = tracing::Span::current();
 
         match result {
-            Ok(response) => Ok(response),
-            Err(e) => Ok(e.into()),
+            Ok(response) => {
+                span.record("status_code", response.status().as_u16());
+
+                Ok(response)
+            }
+            Err(e) => {
+                span.record("status_code", StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+                if is_api_request {
+                    debug!("API request error: {:?}", e);
+                    match self.build_json_response(serde_json::json!({
+                        "success": false,
+                        "error": e.to_string()
+                    })) {
+                        Ok(resp) => Ok(resp),
+                        Err(err) => panic!("Fuckit {err:}"),
+                    }
+                } else {
+                    Ok(e.into())
+                }
+            }
         }
     }
 
@@ -647,18 +672,22 @@ impl WebHandler {
             debug!("Failed to serialize JSON response: {err:?}");
         })?;
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .header(CACHE_CONTROL, "no-store")
-            .header(X_CONTENT_TYPE_OPTIONS, "nosniff")
-            .header(X_FRAME_OPTIONS, "DENY")
-            .header(REFERRER_POLICY, "strict-origin-when-cross-origin")
-            .body(Full::new(Bytes::from(body)))
-            .map_err(|err| {
-                debug!("Failed to build JSON Response: {err:?}");
-                CrabCakesError::from(err)
-            })
+        let mut res = Response::new(Full::new(Bytes::from(body)));
+
+        *res.status_mut() = StatusCode::OK;
+
+        res.headers_mut().extend(vec![
+            (CONTENT_TYPE, HeaderValue::from_static("application/json")),
+            // &(CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            // &(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+            // &(X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
+            // &(
+            //     REFERRER_POLICY,
+            //     HeaderValue::from_static("strict-origin-when-cross-origin"),
+            // ),
+        ]);
+
+        Ok(res)
     }
 
     /// GET /admin/profile - User profile page
@@ -1419,8 +1448,15 @@ impl WebHandler {
             .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
 
         // Parse policy from request body
-        let policy: iam_rs::IAMPolicy = serde_json::from_str(body_str)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+        let policy: iam_rs::IAMPolicy = match serde_json::from_str(body_str) {
+            Ok(p) => p,
+            Err(e) => {
+                return Ok(self.build_json_response(serde_json::json!({
+                    "success": false,
+                    "error": format!("Invalid JSON: {}", e)
+                }))?);
+            }
+        };
 
         // Update policy
         self.policy_store
@@ -1428,16 +1464,12 @@ impl WebHandler {
             .await?;
 
         // Return success
-        let json = serde_json::to_string(&serde_json::json!({
+        let json = serde_json::json!({
             "success": true,
             "name": policy_name
-        }))?;
+        });
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(json)))
-            .map_err(CrabCakesError::from)
+        self.build_json_response(json)
     }
 
     /// DELETE /admin/api/policies/{name} - Delete a policy

@@ -32,15 +32,6 @@
   - [ ] POST /admin/api/credentials - Create credential (requires CSRF token)
   - [ ] PUT /admin/api/credentials/{access_key} - Update credential (requires CSRF token)
   - [ ] DELETE /admin/api/credentials/{access_key} - Delete credential (requires CSRF token)
-- [ ] **Frontend Templates & JavaScript**
-  - [ ] Create static/js/csrf.js - CSRF token fetch and caching
-  - [ ] Create static/js/policy-crud.js - Policy CRUD with CSRF
-  - [ ] Create static/js/credential-crud.js - Credential CRUD with CSRF
-  - [ ] Create templates/policy_form.html - Create/edit policy form
-  - [ ] Create templates/credential_form.html - Create/edit credential form
-  - [ ] Update templates/policies.html - Add Create button
-  - [ ] Update templates/policy_detail.html - Add Edit/Delete buttons
-  - [ ] Update templates/credentials.html - Add Create and Delete buttons
 
 ### Phase 8: Admin UI Implementation
 

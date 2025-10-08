@@ -17,6 +17,7 @@ check:
 build-js:
     echo "Bundling files..."
     pnpm run build
+    echo "Finished at $(date)"
 
 # lint JavaScript and CSS files
 lint-web:

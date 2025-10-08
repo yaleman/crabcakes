@@ -30,6 +30,11 @@ async function deletePolicy(policyName: string): Promise<void> {
     }
 }
 
+interface ErrorMessage {
+    error?: string;
+    success?: boolean;
+}
+
 async function savePolicy(policyName: string, policyData: any): Promise<PolicyResponse> {
     try {
         const isUpdate = policyName && policyName !== '';
@@ -44,8 +49,8 @@ async function savePolicy(policyName: string, policyData: any): Promise<PolicyRe
         });
 
         if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Failed to save policy: ${error}`);
+            const error = await response.json() as ErrorMessage;
+            throw new Error(`Failed to save policy: ${error.error}`);
         }
 
         const result: PolicyResponse = await response.json();
@@ -73,11 +78,21 @@ function initPolicyForm(): void {
         try {
             const policyData = JSON.parse(policyJson);
             await savePolicy(policyName, policyData);
-            alert('Policy saved successfully!');
             window.location.href = `/admin/policies/${policyName}`;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            alert(`Error: ${message}`);
+
+            const errorNotification = document.getElementById('error-notification') as HTMLDivElement | null;
+
+            if (errorNotification) {
+                errorNotification.textContent = message;
+                while (errorNotification.classList.contains('error-notification-hide')) {
+                    errorNotification.classList.remove('error-notification-hide');
+                }
+                errorNotification.classList.remove('error-notification-empty');
+            } else {
+                console.error("Error notification element not found");
+            }
         }
     });
 }
@@ -98,8 +113,19 @@ function initPolicyDetail(): void {
 
 // Initialize on page load
 function initPolicyPages(): void {
+    const errors = document.getElementsByClassName('error-notification');
+    Array.from(errors).forEach((errorNotification) => {
+        console.debug(errorNotification.textContent.trim().length);
+        if (errorNotification.textContent.trim().length == 0) {
+            console.debug("empty");
+            errorNotification.classList.add('error-notification-hide');
+        } else {
+            errorNotification.classList.remove('error-notification-hide');
+        }
+    });
     initPolicyForm();
     initPolicyDetail();
+    console.debug("Finished startup");
 }
 
 if (document.readyState === 'loading') {

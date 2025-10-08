@@ -11,7 +11,7 @@ interface SessionData {
 // Fetch credentials from API and store in localStorage
 
 async function sessionCredentials(): Promise<SessionData | null> {
-    return fetch('/api/session')
+    return fetch('/admin//api/session')
         .then((response: Response) => {
             if (!response.ok) {
                 throw new Error('Failed to fetch credentials');
