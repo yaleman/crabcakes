@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.18.1",
   "scripts": {
-    "build-ts": "swc src/js --delete-dir-on-start --strip-leading-paths --out-dir target/ *.ts",
+    "build-ts": "swc src/js --delete-dir-on-start --strip-leading-paths --out-dir target/js/ *.ts",
     "build": "pnpm build-ts && node build-js.js",
     "lint:css": "stylelint 'static/css/**/*.css'",
     "lint": "pnpm run lint:css",
@@ -25,8 +25,7 @@
     "jsdom": "^27.0.0",
     "stylelint": "^16.25.0",
     "stylelint-config-standard": "^39.0.1",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.901.0"

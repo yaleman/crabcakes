@@ -1774,13 +1774,20 @@ impl WebHandler {
 
         let form: TroubleShooterForm = serde_json::from_str(body_str)?;
         // build the iam request
+
+        let mut arnstr = form.bucket.to_string();
+        if !form.key.is_empty() {
+            arnstr.push_str(&format!("/{}", form.key));
+        };
+
         let iam_request = IAMRequest {
             action: form.action.clone(),
             principal: iam_rs::Principal::Aws(PrincipalId::String(format!(
                 "arn:aws:iam:::user/{}",
                 form.user
             ))),
-            resource: Arn::from_str(&format!("arn:aws:s3:::{}/{}", form.bucket, form.key))?,
+
+            resource: Arn::from_str(&format!("arn:aws:s3:::{arnstr}"))?,
             context: Context::new(),
         };
 

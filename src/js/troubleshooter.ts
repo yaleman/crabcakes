@@ -30,13 +30,8 @@ function checkPolicy(): void {
     document.querySelectorAll<HTMLInputElement>(".form-control").forEach((input) => {
         if (input.value.length > 0) {
             data[input.id] = input.value;
-
         } else {
-            if (input.id != "policy") {
-                data[input.id] = "*";
-            } else {
-                data[input.id] = "";
-            }
+            data[input.id] = "";
         }
     });
 
@@ -73,27 +68,27 @@ function checkPolicy(): void {
             const principal = document.createElement("div");
             var arn = "";
             Object.entries(result.decision.context.Principal).forEach(([key, value]) => {
-                arn += `${key}(${value})<br />`;
+                arn += `${key}(${value}) `;
             });
-            principal.innerText = `Principal: ${arn}`;
+            principal.innerText = `Principal: ${arn} `;
             contextParagraph.appendChild(principal);
 
             const actionParagraph = document.createElement("p");
             const action = document.createElement("div");
-            action.innerText = `Action: ${result.decision.context.Action}`;
+            action.innerText = `Action: ${result.decision.context.Action} `;
             actionParagraph.appendChild(action);
             contextParagraph.appendChild(actionParagraph);
 
             const resourceParagraph = document.createElement("p");
             const resource = document.createElement("div");
-            resource.innerText = `Resource: ${result.decision.context.Resource}`;
+            resource.innerText = `Resource: ${result.decision.context.Resource} `;
             resourceParagraph.appendChild(resource);
             contextParagraph.appendChild(resourceParagraph);
 
             if (result.decision.context.Context && Object.keys(result.decision.context.Context).length > 0) {
                 const contextJSONParagraph = document.createElement("p");
                 const contextJSON = document.createElement("div");
-                contextJSON.innerText = `Context: ${JSON.stringify(result.decision.context.Context, null, 2)}`;
+                contextJSON.innerText = `Context: ${JSON.stringify(result.decision.context.Context, null, 2)} `;
                 contextJSONParagraph.appendChild(contextJSON);
                 contextParagraph.appendChild(contextJSONParagraph);
             }
@@ -117,11 +112,11 @@ function checkPolicy(): void {
                 subList.classList = ["no-list-style"].join(" ");
                 const statementHeading = document.createElement("li");
                 statementHeading.className = "font-weight-bold";
-                statementHeading.textContent = `Statement ID: ${statement.sid}`;
+                statementHeading.textContent = `Statement ID: ${statement.sid} `;
                 subList.appendChild(statementHeading);
 
                 const conditionsItem = document.createElement("li");
-                conditionsItem.innerHTML = `Conditions Satisfied: <span class="badge badge-${statement.conditions_satisfied.toString().toLowerCase()}">${statement.conditions_satisfied}</span>`;
+                conditionsItem.innerHTML = `Conditions Satisfied: <span class="badge badge-${statement.conditions_satisfied.toString().toLowerCase()}" > ${statement.conditions_satisfied} </span>`;
                 subList.appendChild(conditionsItem);
 
                 if (statement.conditions_satisfied) {
