@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use super::entities::{oauth_pkce_state, object_tags, temporary_credentials};
-use crate::error::CrabCakesError;
+use crate::{constants::MAX_TEMP_CREDS_DURATION, error::CrabCakesError};
 
 const MAX_TAGS: usize = 10;
 const MAX_KEY_LENGTH: usize = 128;
@@ -220,9 +220,85 @@ impl DBService {
     ) -> Result<Vec<temporary_credentials::Model>, CrabCakesError> {
         let creds = temporary_credentials::Entity::find()
             .filter(temporary_credentials::Column::SessionId.eq(session_id))
+            .filter(temporary_credentials::Column::ExpiresAt.gt(Utc::now()))
             .all(&*self.db)
             .await?;
         Ok(creds)
+    }
+
+    /// Get valid credentials for a session, or create new ones if none exist or are expired
+    /// Returns (credentials, was_created) where was_created is true if new credentials were generated
+    pub async fn get_or_create_credentials_for_session(
+        &self,
+        session_id: &str,
+        user_email: &str,
+        user_id: &str,
+        credential_generator: impl Fn() -> (String, String),
+    ) -> Result<(temporary_credentials::Model, bool), CrabCakesError> {
+        let now = chrono::Utc::now();
+
+        // Get all credentials for this session
+        let session_creds = self.get_credentials_by_session(session_id).await?;
+
+        // Find valid (non-expired) credentials
+        let valid_creds: Vec<_> = session_creds
+            .iter()
+            .filter(|c| c.expires_at > now)
+            .collect();
+
+        // Delete any expired credentials for this session
+        for cred in session_creds.iter().filter(|c| c.expires_at <= now) {
+            debug!(
+                access_key_id = %cred.access_key_id,
+                session_id = %session_id,
+                "Deleting expired credential for session"
+            );
+            self.delete_temporary_credentials(&cred.access_key_id)
+                .await?;
+        }
+
+        // If we have a valid credential, return it
+        if let Some(cred) = valid_creds.first() {
+            debug!(
+                access_key_id = %cred.access_key_id,
+                session_id = %session_id,
+                "Found valid existing credential for session"
+            );
+            return Ok(((*cred).clone(), false));
+        }
+
+        // No valid credentials - create new ones
+        let (access_key_id, secret_access_key) = credential_generator();
+
+        // Set credentials to expire in 1 hour
+        let expires_at = now + *MAX_TEMP_CREDS_DURATION;
+
+        // Store in database
+        self.store_temporary_credentials(
+            &access_key_id,
+            &secret_access_key,
+            session_id,
+            user_email,
+            user_id,
+            expires_at,
+        )
+        .await?;
+
+        debug!(
+            access_key_id = %access_key_id,
+            session_id = %session_id,
+            "Created new temporary credentials for session"
+        );
+
+        // Retrieve and return the newly created credentials
+        let creds = self
+            .get_temporary_credentials(&access_key_id)
+            .await?
+            .ok_or_else(|| {
+                CrabCakesError::other(&"Failed to retrieve newly created credentials".to_string())
+            })?;
+
+        Ok((creds, true))
     }
 
     pub async fn get_all_temporary_credentials(
@@ -230,9 +306,8 @@ impl DBService {
         order_by: Option<temporary_credentials::Column>,
         direction: Option<Order>,
     ) -> Result<Vec<temporary_credentials::Model>, CrabCakesError> {
-        let now = chrono::Utc::now();
         let creds = temporary_credentials::Entity::find()
-            .filter(temporary_credentials::Column::ExpiresAt.gt(now))
+            .filter(temporary_credentials::Column::ExpiresAt.gt(chrono::Utc::now()))
             .order_by(
                 order_by.unwrap_or(temporary_credentials::Column::CreatedAt),
                 direction.unwrap_or(Order::Desc),

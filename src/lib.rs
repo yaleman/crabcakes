@@ -15,10 +15,13 @@
 #![deny(clippy::needless_pass_by_value)]
 #![deny(clippy::trivially_copy_pass_by_ref)]
 
+use rand::Rng;
+
 pub mod auth;
 pub mod body_buffer;
 pub mod cleanup;
 pub mod cli;
+pub mod constants;
 pub mod credentials;
 pub mod db;
 pub mod error;
@@ -50,4 +53,31 @@ pub fn setup_test_logging() {
         )
         .with(tracing_subscriber::EnvFilter::new("debug,russh::client=info,russh::sshbuffer=info,russh::keys::agent::client=info,russh::keys::agent=info,h2::codec=warn"))
         .try_init();
+}
+
+pub(crate) fn generate_temp_credentials() -> (String, String) {
+    let mut rng = rand::rng();
+
+    // Generate random access key (20 chars, alphanumeric)
+    let access_key_id: String = (0..20)
+        .map(|_| {
+            let idx = rng.random_range(0..62);
+            match idx {
+                0..=25 => (b'A' + idx) as char,
+                26..=51 => (b'a' + (idx - 26)) as char,
+                _ => (b'0' + (idx - 52)) as char,
+            }
+        })
+        .collect();
+
+    // Generate random secret key (40 chars, alphanumeric + special)
+    let secret_chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let secret_access_key: String = (0..40)
+        .map(|_| {
+            let idx = rng.random_range(0..secret_chars.len());
+            secret_chars[idx] as char
+        })
+        .collect();
+
+    (access_key_id, secret_access_key)
 }

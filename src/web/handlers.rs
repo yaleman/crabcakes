@@ -28,13 +28,13 @@ use tokio::sync::RwLock;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
-use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::policy_analyzer;
 use crate::{auth::OAuthClient, db::entities::temporary_credentials};
+use crate::{credentials::CredentialStore, generate_temp_credentials};
 
 /// Error page template
 #[derive(Template)]
@@ -523,7 +523,7 @@ impl WebHandler {
         let (user_email, user_id) = self.oauth_client.exchange_code(code, state).await?;
 
         // Generate temporary AWS credentials
-        let (access_key_id, secret_access_key) = self.oauth_client.generate_temp_credentials();
+        let (access_key_id, secret_access_key) = generate_temp_credentials();
 
         // Set credentials to expire in 8 hours
         let expires_at = chrono::Utc::now()
@@ -1353,26 +1353,40 @@ impl WebHandler {
             })?
             .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
 
-        let access_key_id: String = session
-            .get("access_key_id")
+        // Save the session to ensure we have a session ID
+        session
+            .save()
             .await
-            .map_err(|e| {
-                CrabCakesError::other(&format!("Failed to get access_key_id from session: {}", e))
-            })?
-            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
+            .map_err(|e| CrabCakesError::other(&format!("Failed to save session: {}", e)))?;
 
-        // Look up credentials in database to get secret key and expiry
-        let creds = self
+        // Get session ID
+        let session_id = session
+            .id()
+            .map(|id| id.to_string())
+            .ok_or_else(|| CrabCakesError::other(&"Failed to get session ID".to_string()))?;
+
+        // Get or create credentials for this session
+        let (creds, was_created) = self
             .db
-            .get_temporary_credentials(&access_key_id)
-            .await?
-            .ok_or_else(|| {
-                CrabCakesError::other(&"Credentials not found or expired".to_string())
-            })?;
+            .get_or_create_credentials_for_session(
+                &session_id,
+                &user_email,
+                &user_id,
+                generate_temp_credentials,
+            )
+            .await?;
 
-        // Check if credentials are expired
-        if creds.expires_at < chrono::Utc::now() {
-            return Err(CrabCakesError::other(&"Credentials expired".to_string()));
+        // If new credentials were created, store the access_key_id in session
+        if was_created {
+            session
+                .insert("access_key_id", creds.access_key_id.clone())
+                .await
+                .map_err(|e| {
+                    CrabCakesError::other(&format!(
+                        "Failed to store access_key_id in session: {}",
+                        e
+                    ))
+                })?;
         }
 
         // Build session info response

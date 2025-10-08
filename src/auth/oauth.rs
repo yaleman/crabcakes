@@ -7,7 +7,6 @@ use openidconnect::{
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
 };
-use rand::Rng;
 use reqwest;
 use tracing::{debug, error, trace};
 
@@ -249,34 +248,5 @@ impl OAuthClient {
         self.db.delete_pkce_state(state).await?;
 
         Ok((user_email, user_id))
-    }
-
-    /// Generate temporary AWS credentials
-    /// Returns (access_key_id, secret_access_key)
-    pub fn generate_temp_credentials(&self) -> (String, String) {
-        let mut rng = rand::rng();
-
-        // Generate random access key (20 chars, alphanumeric)
-        let access_key_id: String = (0..20)
-            .map(|_| {
-                let idx = rng.random_range(0..62);
-                match idx {
-                    0..=25 => (b'A' + idx) as char,
-                    26..=51 => (b'a' + (idx - 26)) as char,
-                    _ => (b'0' + (idx - 52)) as char,
-                }
-            })
-            .collect();
-
-        // Generate random secret key (40 chars, alphanumeric + special)
-        let secret_chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let secret_access_key: String = (0..40)
-            .map(|_| {
-                let idx = rng.random_range(0..secret_chars.len());
-                secret_chars[idx] as char
-            })
-            .collect();
-
-        (access_key_id, secret_access_key)
     }
 }

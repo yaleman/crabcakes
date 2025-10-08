@@ -69,7 +69,7 @@ impl CleanupTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::initialize_in_memory_database;
+    use crate::{constants::MAX_TEMP_CREDS_DURATION, db::initialize_in_memory_database};
 
     #[tokio::test]
     async fn test_cleanup_task_no_expired_data() {
@@ -93,7 +93,7 @@ mod tests {
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired PKCE state (expired 1 hour ago)
-        let expired_at = chrono::Utc::now() - chrono::Duration::try_hours(1).unwrap();
+        let expired_at = chrono::Utc::now() - *MAX_TEMP_CREDS_DURATION;
         db_service
             .store_pkce_state(
                 "expired_state",
@@ -143,7 +143,7 @@ mod tests {
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired credentials (expired 1 hour ago)
-        let expired_at = chrono::Utc::now() - chrono::Duration::try_hours(1).unwrap();
+        let expired_at = chrono::Utc::now() - *MAX_TEMP_CREDS_DURATION;
         db_service
             .store_temporary_credentials(
                 "EXPIRED_KEY_123",
@@ -204,7 +204,7 @@ mod tests {
         let db = initialize_in_memory_database().await.unwrap();
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
-        let expired_at = chrono::Utc::now() - chrono::Duration::try_hours(1).unwrap();
+        let expired_at = chrono::Utc::now() - *MAX_TEMP_CREDS_DURATION;
 
         // Store expired PKCE state
         db_service
