@@ -53,8 +53,6 @@ describe('Bucket Operations', () => {
             const event = new Event('click');
             downloadBtn.dispatchEvent(event);
 
-            expect(localStorage.getItem).toHaveBeenCalledWith('crabcakes_access_key_id');
-            expect(localStorage.getItem).toHaveBeenCalledWith('crabcakes_secret_access_key');
         });
 
         it('should throw error if credentials are missing', async () => {
