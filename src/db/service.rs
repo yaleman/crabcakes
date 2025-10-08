@@ -306,8 +306,9 @@ impl DBService {
         order_by: Option<temporary_credentials::Column>,
         direction: Option<Order>,
     ) -> Result<Vec<temporary_credentials::Model>, CrabCakesError> {
+        let now = chrono::Utc::now();
         let creds = temporary_credentials::Entity::find()
-            .filter(temporary_credentials::Column::ExpiresAt.gt(chrono::Utc::now()))
+            .filter(temporary_credentials::Column::ExpiresAt.gt(now))
             .order_by(
                 order_by.unwrap_or(temporary_credentials::Column::CreatedAt),
                 direction.unwrap_or(Order::Desc),
