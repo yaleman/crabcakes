@@ -27,15 +27,19 @@ fn decode_aws_chunks(data: &[u8]) -> Result<Vec<u8>, CrabCakesError> {
             .windows(2)
             .position(|w| w == b"\r\n")
             .ok_or_else(|| {
-                CrabCakesError::other(&"Invalid AWS chunk format: missing \\r\\n after chunk size")
+                CrabCakesError::Sigv4Verification(
+                    "Invalid AWS chunk format: missing \\r\\n after chunk size".into(),
+                )
             })?;
 
         // Parse the chunk size (hex string)
-        let size_str = std::str::from_utf8(&data[pos..pos + size_line_end])
-            .map_err(|e| CrabCakesError::other(&format!("Invalid chunk size encoding: {}", e)))?;
+        let size_str = std::str::from_utf8(&data[pos..pos + size_line_end]).map_err(|e| {
+            CrabCakesError::Sigv4Verification(format!("Invalid chunk size encoding: {}", e))
+        })?;
 
-        let chunk_size = usize::from_str_radix(size_str, 16)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid chunk size hex: {}", e)))?;
+        let chunk_size = usize::from_str_radix(size_str, 16).map_err(|e| {
+            CrabCakesError::Sigv4Verification(format!("Invalid chunk size hex: {}", e))
+        })?;
 
         // Move past the chunk size line
         pos += size_line_end + 2; // +2 for \r\n
@@ -47,8 +51,8 @@ fn decode_aws_chunks(data: &[u8]) -> Result<Vec<u8>, CrabCakesError> {
 
         // Read the chunk data
         if pos + chunk_size > data.len() {
-            return Err(CrabCakesError::other(
-                &"Invalid AWS chunk: chunk size exceeds remaining data",
+            return Err(CrabCakesError::Sigv4Verification(
+                "Invalid AWS chunk: chunk size exceeds remaining data".to_string(),
             ));
         }
 
@@ -57,8 +61,8 @@ fn decode_aws_chunks(data: &[u8]) -> Result<Vec<u8>, CrabCakesError> {
 
         // Skip the trailing \r\n
         if pos + 2 > data.len() || &data[pos..pos + 2] != b"\r\n" {
-            return Err(CrabCakesError::other(
-                &"Invalid AWS chunk: missing \\r\\n after chunk data",
+            return Err(CrabCakesError::Sigv4Verification(
+                "Invalid AWS chunk: missing \\r\\n after chunk data".to_string(),
             ));
         }
         pos += 2;

@@ -1624,7 +1624,7 @@ impl WebHandler {
         self.credentials_store
             .write()
             .await
-            .add_credential(request.access_key_id.clone(), request.secret_access_key)
+            .write_credential(request.access_key_id.clone(), request.secret_access_key)
             .await?;
 
         // Return success
