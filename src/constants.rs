@@ -7,6 +7,9 @@ use chrono::Duration;
 use enum_iterator::Sequence;
 use serde::Deserialize;
 
+/// This is related to the AWS secret access key length
+pub(crate) static SECRET_ACCESS_KEY_LENGTH: usize = 40;
+
 /// How long a OAuth-provided temporary credential will live
 pub(crate) static MAX_TEMP_CREDS_DURATION: LazyLock<Duration> =
     LazyLock::new(|| Duration::seconds(3600));

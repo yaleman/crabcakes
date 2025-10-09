@@ -26,6 +26,10 @@ pub enum CrabCakesError {
     NoPolicies,
     NoAuthenticationSupplied(String),
     InvalidCredential,
+    InvalidPath,
+    InvalidPolicyName,
+    InvalidAccessKeyId,
+    InvalidSecretLength,
     Rustls(String),
     Sigv4Verification(String),
     NoUserIdInPrincipal,
@@ -94,6 +98,12 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::UnknownAction => {
                 f.write_str("Could not identify S3 Action for Request")
+            }
+            CrabCakesError::InvalidPath => f.write_str("Invalid path"),
+            CrabCakesError::InvalidPolicyName => f.write_str("Invalid policy name"),
+            CrabCakesError::InvalidAccessKeyId => f.write_str("Invalid Access Key ID"),
+            CrabCakesError::InvalidSecretLength => {
+                f.write_str("Invalid Secret Length, should be 40 characters")
             }
         }
     }
