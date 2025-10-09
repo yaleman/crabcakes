@@ -456,7 +456,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_required() {
-        let cred_store = Arc::new(RwLock::new(CredentialStore::new_test()));
+        let cred_store = CredentialStore::new_test().await;
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
@@ -483,7 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_not_required() {
-        let cred_store = Arc::new(RwLock::new(CredentialStore::new_test()));
+        let cred_store = CredentialStore::new_test().await;
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
@@ -510,7 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_with_malformed_auth_header() {
-        let cred_store = Arc::new(RwLock::new(CredentialStore::new_test()));
+        let cred_store = CredentialStore::new_test().await;
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 

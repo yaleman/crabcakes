@@ -268,8 +268,20 @@ impl PolicyStore {
         names
     }
 
-    pub fn is_valid_name(name: &str) -> bool {
+    pub fn policy_path(&self, name: &str) -> Result<PathBuf, CrabCakesError> {
+        if !self.is_valid_name(name) {
+            return Err(CrabCakesError::InvalidPolicyName);
+        }
+        Ok(self.policy_dir.join(format!("{}.json", name)))
+    }
+
+    /// Validate a policy name to prevent path traversal
+    pub fn is_valid_name(&self, name: &str) -> bool {
         !(name.contains("..") || name.contains('/') || name.contains('\\'))
+            && self
+                .policy_dir
+                .join(format!("{}.json", name))
+                .starts_with(&self.policy_dir)
     }
 
     /// Get a policy by name
@@ -280,8 +292,8 @@ impl PolicyStore {
     /// Add a new policy
     pub async fn add_policy(&self, name: String, policy: IAMPolicy) -> Result<(), CrabCakesError> {
         // Validate policy name (no path traversal)
-        if !Self::is_valid_name(&name) {
-            return Err(CrabCakesError::other(&"Invalid policy name"));
+        if !self.is_valid_name(&name) {
+            return Err(CrabCakesError::InvalidPolicyName);
         }
 
         // Check if policy already exists
@@ -327,8 +339,8 @@ impl PolicyStore {
         policy: IAMPolicy,
     ) -> Result<(), CrabCakesError> {
         // Validate policy name (no path traversal)
-        if !Self::is_valid_name(&name) {
-            return Err(CrabCakesError::other(&"Invalid policy name"));
+        if !self.is_valid_name(&name) {
+            return Err(CrabCakesError::InvalidPolicyName);
         }
 
         // Check if policy exists
@@ -344,10 +356,7 @@ impl PolicyStore {
 
         // Write to file
         let policy_path = self.policy_dir.join(format!("{}.json", name));
-        if !policy_path.starts_with(&self.policy_dir) {
-            error!("Attempted path traversal in policy update: {}", name);
-            return Err(CrabCakesError::other(&"Invalid policy path"));
-        }
+
         let policy_json = serde_json::to_string_pretty(&policy)?;
         fs::write(&policy_path, policy_json)?;
 
@@ -370,7 +379,7 @@ impl PolicyStore {
     /// Delete a policy
     pub async fn delete_policy(&self, name: &str) -> Result<(), CrabCakesError> {
         // Validate policy name (no path traversal)
-        if !Self::is_valid_name(name) {
+        if !self.is_valid_name(name) {
             return Err(CrabCakesError::InvalidPolicyName);
         }
 

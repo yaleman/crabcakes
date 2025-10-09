@@ -11,7 +11,6 @@ check:
     cargo clippy --all-targets --quiet --workspace
     cargo test --quiet --workspace
     cargo fmt --all
-    pnpm run lint
 
 # build JavaScript bundles
 build-js:

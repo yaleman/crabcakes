@@ -426,7 +426,6 @@ just build-js                           # Same as above
 cargo clippy --all-targets --quiet      # Lint Rust code (must pass with no warnings)
 cargo fmt                               # Format Rust code
 pnpm run lint                           # Lint JavaScript and CSS
-pnpm run lint:js                        # Lint JavaScript only
 pnpm run lint:css                       # Lint CSS only
 just check                              # Run comprehensive checks (Rust + JS/CSS)
 just lint-web                           # Lint JavaScript and CSS only

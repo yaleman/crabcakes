@@ -20,9 +20,7 @@ use hyper::{
     Request, Response, StatusCode,
     body::{Bytes, Incoming},
 };
-use iam_rs::{
-    Arn, Context, EvaluationOptions, EvaluationResult, IAMRequest, PolicyEvaluator, PrincipalId,
-};
+use iam_rs::{Arn, EvaluationOptions, EvaluationResult, IAMRequest, PolicyEvaluator, PrincipalId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::RwLock;
@@ -1843,16 +1841,14 @@ impl WebHandler {
             arnstr.push_str(&format!("/{}", form.key));
         };
 
-        let iam_request = IAMRequest {
-            action: form.action.clone(),
-            principal: iam_rs::Principal::Aws(PrincipalId::String(format!(
+        let iam_request = IAMRequest::new(
+            iam_rs::Principal::Aws(PrincipalId::String(format!(
                 "arn:aws:iam:::user/{}",
                 form.user
             ))),
-
-            resource: Arn::from_str(&format!("arn:aws:s3:::{arnstr}"))?,
-            context: Context::new(),
-        };
+            form.action.clone(),
+            Arn::from_str(&format!("arn:aws:s3:::{arnstr}"))?,
+        );
 
         // look for a policy that matches the bucket and key
         let policies = self.policy_store.policies.read().await;
