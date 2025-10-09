@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 use crate::error::CrabCakesError;
 
+static MULTIPART_PREFIX: &str = "part-";
+
 /// Metadata for a multipart upload session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultipartUploadMetadata {
@@ -147,15 +149,15 @@ impl MultipartManager {
         let part_path = self.part_path(bucket, upload_id, part_number);
         let mut file = fs::File::create(&part_path)
             .await
-            .inspect_err(|e| error!("Failed to create part file: {}", e))?;
+            .inspect_err(|e| error!("Failed to create multipart file: {}", e))?;
 
         file.write_all(data)
             .await
-            .inspect_err(|e| error!("Failed to write part data: {}", e))?;
+            .inspect_err(|e| error!("Failed to write multipart data: {}", e))?;
 
         file.sync_all()
             .await
-            .inspect_err(|e| error!("Failed to sync part file: {}", e))?;
+            .inspect_err(|e| error!("Failed to sync multipart file: {}", e))?;
 
         // Generate ETag (MD5 hash of content)
         let etag = format!("\"{:x}\"", md5::compute(data));
@@ -201,8 +203,7 @@ impl MultipartManager {
             let file_name = entry.file_name();
             let name_str = file_name.to_string_lossy();
 
-            if name_str.starts_with("part-")
-                && let Some(part_num_str) = name_str.strip_prefix("part-")
+            if let Some(part_num_str) = name_str.strip_prefix(MULTIPART_PREFIX)
                 && let Ok(part_number) = part_num_str.parse::<u32>()
             {
                 let metadata = entry

@@ -3,9 +3,9 @@
 //! Loads and manages AWS access key credentials from JSON files for signature verification.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::fs;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -42,14 +42,12 @@ impl TryFrom<(&str, &str)> for Credential {
     }
 }
 
-impl TryFrom<&PathBuf> for Credential {
-    type Error = CrabCakesError;
-
-    fn try_from(path: &PathBuf) -> Result<Self, Self::Error> {
-        let contents = fs::read_to_string(path)?;
+impl Credential {
+    async fn async_try_from(path: &PathBuf) -> Result<Self, CrabCakesError> {
+        let contents = fs::read_to_string(path).await?;
         let credential: Credential = serde_json::from_str(&contents)?;
         // this also implements name checks
-        Self::try_from((
+        Credential::try_from((
             credential.access_key_id.as_ref(),
             credential.secret_access_key.as_ref(),
         ))
@@ -63,20 +61,22 @@ pub struct CredentialStore {
 
 impl CredentialStore {
     /// Create a new CredentialStore by loading credentials from the given directory
-    pub fn new(credentials_dir: &PathBuf) -> Result<Self, CrabCakesError> {
+    pub async fn new(credentials_dir: &PathBuf) -> Result<Self, CrabCakesError> {
         let mut credentials = HashMap::new();
 
         info!(credentials_dir = ?credentials_dir, "Loading credentials");
 
         if !credentials_dir.exists() {
             warn!(credentials_dir = ?credentials_dir, "Credentials directory does not exist, starting with no credentials");
-            fs::create_dir_all(credentials_dir).inspect_err(|err| {
-                error!(
-                    credentials_dir = ?credentials_dir,
-                    error = %err,
-                    "Failed to create credentials directory"
-                )
-            })?;
+            fs::create_dir_all(credentials_dir)
+                .await
+                .inspect_err(|err| {
+                    error!(
+                        credentials_dir = ?credentials_dir,
+                        error = %err,
+                        "Failed to create credentials directory"
+                    )
+                })?;
             return Ok(Self {
                 credentials: Arc::new(RwLock::new(credentials)),
                 credentials_dir: credentials_dir.clone(),
@@ -87,14 +87,19 @@ impl CredentialStore {
             error!(credentials_dir = ?credentials_dir, "Credentials path is not a directory");
             return Err(CrabCakesError::InvalidPath);
         }
-
+        let mut dir_entries = fs::read_dir(credentials_dir).await.inspect_err(|err| {
+            error!(
+                credentials_dir = ?credentials_dir,
+                error = %err,
+                "Failed to read credentials directory"
+            )
+        })?;
         // Read all JSON files from the credentials directory
-        for entry in fs::read_dir(credentials_dir)? {
-            let entry = entry.inspect_err(|err| debug!("Failed to read {:?}", err))?;
+        while let Ok(Some(entry)) = dir_entries.next_entry().await {
             let path = entry.path();
 
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-                let credential = Credential::try_from(&path).inspect_err(
+                let credential = Credential::async_try_from(&path).await.inspect_err(
                     |e| error!(path = ?path, error = %e, "Failed to load credential"),
                 )?;
 
@@ -187,7 +192,7 @@ impl CredentialStore {
         let credential_path = self.credential_path(&access_key_id)?;
         let credential =
             Credential::try_from((access_key_id.as_ref(), secret_access_key.as_ref()))?;
-        fs::write(&credential_path, serde_json::to_string_pretty(&credential)?)?;
+        fs::write(&credential_path, serde_json::to_string_pretty(&credential)?).await?;
 
         // Update in-memory store
         {
@@ -222,7 +227,8 @@ impl CredentialStore {
         fs::write(
             &self.credential_path(&access_key_id)?,
             serde_json::to_string_pretty(&credential)?,
-        )?;
+        )
+        .await?;
 
         // Update in-memory store
         {
@@ -250,7 +256,7 @@ impl CredentialStore {
         // Delete file
         let cred_path = &self.credential_path(access_key_id)?;
         if cred_path.exists() {
-            fs::remove_file(cred_path)?;
+            fs::remove_file(cred_path).await?;
         } else {
             debug!("Credential file does not exist: {:?}", cred_path);
         }
@@ -261,14 +267,14 @@ impl CredentialStore {
 
     /// Create an empty credential store (for testing)
     #[cfg(test)]
-    pub fn new_test() -> Self {
+    pub async fn new_test() -> Arc<RwLock<Self>> {
         let random_number = rand::random::<u32>();
         let temp_dir =
             std::env::temp_dir().join(format!("crabcakes_test_credentials{random_number}"));
-        fs::create_dir_all(&temp_dir).ok();
-        Self {
+        fs::create_dir_all(&temp_dir).await.ok();
+        Arc::new(RwLock::new(Self {
             credentials: Arc::new(RwLock::new(HashMap::new())),
             credentials_dir: temp_dir,
-        }
+        }))
     }
 }

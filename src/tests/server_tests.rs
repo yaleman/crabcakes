@@ -10,6 +10,7 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 
 use crate::server::Server;
+use crate::setup_test_logging;
 
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
     fs::create_dir_all(&dst)?;
@@ -635,6 +636,7 @@ async fn test_delete_nonexistent_object() {
 
 #[tokio::test]
 async fn test_bucket_already_exists() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
@@ -645,7 +647,11 @@ async fn test_bucket_already_exists() {
         .bucket("test-duplicate-bucket")
         .send()
         .await;
-    assert!(create_result.is_ok());
+    assert!(
+        create_result.is_ok(),
+        "initial CreateBucket failed: {:?}",
+        create_result.err()
+    );
 
     // Try to create the same bucket again - should fail
     let create_result = client
