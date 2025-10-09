@@ -14,9 +14,9 @@
     --color-secondary: #666;
     --color-purple-light: #5a67d8;
     --color-purple-dark: #6f42c1;
-    --color-purple-95pct: rgba(102, 126, 234, 0.95);
-    --color-purple-50pct: rgba(102, 126, 234, 0.5);
-    --color-purple-30pct: rgba(102, 126, 234, 0.3);
+    --color-purple-95pct: #5a67d8;
+    --color-purple-50pct: #667eea80;
+    --color-purple-30pct: #667eea4d;
 
     --font-size-h1: 28px;
     --font-size-normal: 14px;
@@ -44,9 +44,9 @@ body {
 
 .sidebar {
     width: 15.0rem;
-    background: linear-gradient(180deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
+    background: linear-gradient(180deg, var(--color-purple-light) 0%, var(--color-purple-dark) 100%);
     padding: 1.0rem;
-    box-shadow: 4px 0 1.0rem var(--color-purple-30pct);
+    box-shadow: 0.4rem 0 1.0rem var(--color-purple-30pct);
 }
 
 .logo {
@@ -108,11 +108,11 @@ body {
 }
 
 .nav-link:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--color-purple-dark);
 }
 
 .nav-link.active {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--color-purple-light);
     color: var(--color-white);
     font-weight: var(--font-weight-bold);
 }
@@ -223,7 +223,7 @@ table {
 }
 
 th {
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, var(--color-purple-30pct) 100%);
     color: #5a67d8;
     padding: 12px;
     text-align: left;
