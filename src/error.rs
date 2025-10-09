@@ -39,6 +39,7 @@ pub enum CrabCakesError {
     CredentialAlreadyExists,
     SigV4AuthenticatorResponseBuilderError(String),
     TemplateRendering(String),
+    UnknownAction,
 }
 
 impl std::fmt::Display for CrabCakesError {
@@ -90,6 +91,9 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::TemplateRendering(msg) => {
                 write!(f, "Template Rendering Error: {}", msg)
+            }
+            CrabCakesError::UnknownAction => {
+                f.write_str("Could not identify S3 Action for Request")
             }
         }
     }

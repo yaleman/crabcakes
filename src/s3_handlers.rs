@@ -32,11 +32,13 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
 use crate::body_buffer::BufferedBody;
+use crate::constants::S3Action;
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
+use crate::web::handlers::respond_404;
 use crate::xml_responses::{
     CompleteMultipartUploadRequest, CompleteMultipartUploadResponse, CopyObjectResponse,
     CopyPartResponse, DeleteError, DeleteRequest, DeleteResponse, DeletedObject,
@@ -313,7 +315,11 @@ impl S3Handler {
         let key = key.to_string();
 
         // Determine S3 action and resource for authorization
-        let s3_action = http_method_to_s3_action(&method, &path, &query, is_bucket_operation);
+        let s3_action = match http_method_to_s3_action(&method, &path, &query, is_bucket_operation)
+        {
+            Some(val) => val,
+            None => return Ok(respond_404()),
+        };
         let (bucket, extracted_key) = extract_bucket_and_key(&path);
 
         // Use extracted bucket from path for path-style requests, fall back to host header
@@ -1323,7 +1329,7 @@ impl S3Handler {
 
         // Check s3:GetObject permission on source
         let source_iam_request = match auth_context.build_iam_request(
-            "s3:GetObject",
+            S3Action::GetObject,
             source_bucket.as_deref(),
             source_object_key.as_deref(),
         ) {
@@ -1345,7 +1351,7 @@ impl S3Handler {
             Ok(Decision::Deny) | Ok(Decision::NotApplicable) => {
                 warn!(
                     principal = ?source_iam_request.principal,
-                    action = "s3:GetObject",
+                    action = ?source_iam_request.action,
                     resource = ?source_iam_request.resource,
                     "Access denied for source object"
                 );
@@ -1599,7 +1605,7 @@ impl S3Handler {
 
         // Check s3:GetObject permission on source
         let source_iam_request = match auth_context.build_iam_request(
-            "s3:GetObject",
+            S3Action::GetObject,
             source_bucket.as_deref(),
             source_object_key.as_deref(),
         ) {
@@ -1621,7 +1627,7 @@ impl S3Handler {
             Ok(Decision::Deny) | Ok(Decision::NotApplicable) => {
                 warn!(
                     principal = ?source_iam_request.principal,
-                    action = "s3:GetObject",
+                    action = source_iam_request.action,
                     resource = ?source_iam_request.resource,
                     "Access denied for source object"
                 );

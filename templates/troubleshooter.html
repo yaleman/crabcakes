@@ -3,8 +3,8 @@
 {% block title %}Policy Troubleshooter - Crabcakes Admin{% endblock %}
 
 {% block content %}
-<h1>Troubleshooter</h1>
-<p class="subtitle">Help diagnose policy issues with Crabcakes</p>
+<h1>Policy Troubleshooter</h1>
+<p class="subtitle">Enter your action details to check the policy result.</p>
 
 <div class="horizontal-container">
     <div class="form-group">
@@ -19,9 +19,12 @@
                 <input type="text" id="user" name="user" class="form-control" placeholder="Enter user name" required value="{{user}}"></p>
 
             <p><label for="action">Action</label>
-                <input type="text" id="action" name="action" class="form-control" placeholder="Enter action (s3:GetObject or S3:PutObject etc)"
-                    value="{{action}}"
-                    required></p>
+                <select id="action" name="action" class="form-control" required>
+                    {% for act in s3_actions %}
+                    <option value="{{act}}" {% if action == *act %} selected {% endif %}>{{act}}</option>
+                    {% endfor %}
+                </select>
+            </p>
             <p><label for="policy">Select Policy</label>
                 <select id="policy" name="policy" class="form-control" required>
                     <option value selected>-- Check all --</option>

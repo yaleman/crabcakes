@@ -22,6 +22,7 @@ use tokio::sync::RwLock;
 use tower::BoxError;
 use tracing::{debug, trace};
 
+use crate::constants::S3Action;
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
@@ -236,7 +237,7 @@ impl AuthContext {
     /// Build an IAM Request for policy evaluation
     pub fn build_iam_request(
         &self,
-        action: &str,
+        action: S3Action,
         bucket: Option<&str>,
         key: Option<&str>,
     ) -> Result<IAMRequest, Box<dyn std::error::Error>> {
@@ -280,45 +281,55 @@ pub fn http_method_to_s3_action(
     path: &str,
     query: &str,
     is_bucket_operation: bool,
-) -> &'static str {
+) -> Option<S3Action> {
     match (method, path, query, is_bucket_operation) {
         // Multipart upload operations (must come before general POST cases)
         (&Method::POST, _, q, false) if q.contains("uploads") && !q.contains("uploadId") => {
-            "s3:PutObject" // InitiateMultipartUpload
+            Some(S3Action::PutObject) // InitiateMultipartUpload
         }
         (&Method::PUT, _, q, false) if q.contains("uploadId") && q.contains("partNumber") => {
-            "s3:PutObject" // UploadPart
+            Some(S3Action::PutObject) // UploadPart
         }
-        (&Method::DELETE, _, q, false) if q.contains("uploadId") => "s3:AbortMultipartUpload",
-        (&Method::GET, _, q, true) if q.contains("uploads") => "s3:ListBucketMultipartUploads",
-        (&Method::GET, _, q, false) if q.contains("uploadId") => "s3:ListMultipartUploadParts",
-        (&Method::POST, _, q, false) if q.contains("uploadId") => "s3:PutObject", // CompleteMultipartUpload
+        (&Method::DELETE, _, q, false) if q.contains("uploadId") => {
+            Some(S3Action::AbortMultipartUpload)
+        }
+        (&Method::GET, _, q, true) if q.contains("uploads") => {
+            Some(S3Action::ListBucketMultipartUploads)
+        }
+        (&Method::GET, _, q, false) if q.contains("uploadId") => {
+            Some(S3Action::ListMultipartUploadParts)
+        }
+        (&Method::POST, _, q, false) if q.contains("uploadId") => Some(S3Action::PutObject), // CompleteMultipartUpload
 
         // Object tagging operations
-        (&Method::GET, _, q, false) if q.contains("tagging") => "s3:GetObjectTagging",
-        (&Method::PUT, _, q, false) if q.contains("tagging") => "s3:PutObjectTagging",
-        (&Method::DELETE, _, q, false) if q.contains("tagging") => "s3:DeleteObjectTagging",
-        (&Method::GET, _, q, false) if q.contains("attributes") => "s3:GetObjectAttributes",
+        (&Method::GET, _, q, false) if q.contains("tagging") => Some(S3Action::GetObjectTagging),
+        (&Method::PUT, _, q, false) if q.contains("tagging") => Some(S3Action::PutObjectTagging),
+        (&Method::DELETE, _, q, false) if q.contains("tagging") => {
+            Some(S3Action::DeleteObjectTagging)
+        }
+        (&Method::GET, _, q, false) if q.contains("attributes") => {
+            Some(S3Action::GetObjectAttributes)
+        }
 
         // Special cases
-        (&Method::GET, _, q, _) if q.contains("list-type=2") => "s3:ListBucket",
-        (&Method::GET, _, q, _) if q.contains("location") => "s3:GetBucketLocation",
-        (&Method::GET, "/", _, _) => "s3:ListAllMyBuckets",
-        (&Method::POST, _, q, _) if q.contains("delete") => "s3:DeleteObject", // DeleteObjects batch
+        (&Method::GET, _, q, _) if q.contains("list-type=2") => Some(S3Action::ListBucket),
+        (&Method::GET, _, q, _) if q.contains("location") => Some(S3Action::GetBucketLocation),
+        (&Method::GET, "/", _, _) => Some(S3Action::ListAllMyBuckets),
+        (&Method::POST, _, q, _) if q.contains("delete") => Some(S3Action::DeleteObject), // DeleteObjects batch
 
         // Bucket operations
-        (&Method::GET, _, _, true) => "s3:ListBucket", // GET on bucket (list operation)
-        (&Method::HEAD, _, _, true) => "s3:ListBucket", // HeadBucket uses ListBucket permission
-        (&Method::PUT, _, _, true) => "s3:CreateBucket",
-        (&Method::DELETE, _, _, true) => "s3:DeleteBucket",
+        (&Method::GET, _, _, true) => Some(S3Action::ListBucket), // GET on bucket (list operation)
+        (&Method::HEAD, _, _, true) => Some(S3Action::ListBucket), // HeadBucket uses ListBucket permission
+        (&Method::PUT, _, _, true) => Some(S3Action::CreateBucket),
+        (&Method::DELETE, _, _, true) => Some(S3Action::DeleteBucket),
 
         // Object operations
-        (&Method::GET, _, _, false) => "s3:GetObject",
-        (&Method::HEAD, _, _, false) => "s3:GetObject", // HeadObject uses GetObject permission
-        (&Method::PUT, _, _, false) => "s3:PutObject",
-        (&Method::DELETE, _, _, false) => "s3:DeleteObject",
+        (&Method::GET, _, _, false) => Some(S3Action::GetObject),
+        (&Method::HEAD, _, _, false) => Some(S3Action::GetObject), // HeadObject uses GetObject permission
+        (&Method::PUT, _, _, false) => Some(S3Action::PutObject),
+        (&Method::DELETE, _, _, false) => Some(S3Action::DeleteObject),
 
-        _ => "s3:Unknown",
+        _ => None, //"s3:Unknown",
     }
 }
 
@@ -391,46 +402,55 @@ mod tests {
     #[test]
     fn test_http_method_to_s3_action() {
         assert_eq!(
-            http_method_to_s3_action(&Method::GET, "/", "", false),
-            "s3:ListAllMyBuckets"
+            http_method_to_s3_action(&Method::GET, "/", "", false).expect("Failed to convert"),
+            S3Action::ListAllMyBuckets
         );
         assert_eq!(
-            http_method_to_s3_action(&Method::GET, "/bucket1", "list-type=2", false),
-            "s3:ListBucket"
+            http_method_to_s3_action(&Method::GET, "/bucket1", "list-type=2", false)
+                .expect("Failed to convert"),
+            S3Action::ListBucket
         );
         assert_eq!(
-            http_method_to_s3_action(&Method::GET, "/bucket1/test.txt", "", false),
-            "s3:GetObject"
+            http_method_to_s3_action(&Method::GET, "/bucket1/test.txt", "", false)
+                .expect("Failed to convert"),
+            S3Action::GetObject,
         );
         assert_eq!(
-            http_method_to_s3_action(&Method::HEAD, "/bucket1/test.txt", "", false),
-            "s3:GetObject"
+            http_method_to_s3_action(&Method::HEAD, "/bucket1/test.txt", "", false)
+                .expect("Failed to convert"),
+            S3Action::GetObject
         );
         assert_eq!(
-            http_method_to_s3_action(&Method::PUT, "/bucket1/test.txt", "", false),
-            "s3:PutObject"
+            http_method_to_s3_action(&Method::PUT, "/bucket1/test.txt", "", false)
+                .expect("Failed to convert"),
+            S3Action::PutObject
         );
         assert_eq!(
-            http_method_to_s3_action(&Method::DELETE, "/bucket1/test.txt", "", false),
-            "s3:DeleteObject"
+            http_method_to_s3_action(&Method::DELETE, "/bucket1/test.txt", "", false)
+                .expect("Failed to convert"),
+            S3Action::DeleteObject
         );
         // Bucket operations
         assert_eq!(
-            http_method_to_s3_action(&Method::HEAD, "/bucket1", "", true),
-            "s3:ListBucket"
+            http_method_to_s3_action(&Method::HEAD, "/bucket1", "", true)
+                .expect("Failed to convert"),
+            S3Action::ListBucket
         );
         assert_eq!(
-            http_method_to_s3_action(&Method::PUT, "/bucket1", "", true),
-            "s3:CreateBucket"
+            http_method_to_s3_action(&Method::PUT, "/bucket1", "", true)
+                .expect("Failed to convert"),
+            S3Action::CreateBucket
         );
         assert_eq!(
-            http_method_to_s3_action(&Method::DELETE, "/bucket1", "", true),
-            "s3:DeleteBucket"
+            http_method_to_s3_action(&Method::DELETE, "/bucket1", "", true)
+                .expect("Failed to convert"),
+            S3Action::DeleteBucket
         );
         // GetBucketLocation
         assert_eq!(
-            http_method_to_s3_action(&Method::GET, "/bucket1", "location", true),
-            "s3:GetBucketLocation"
+            http_method_to_s3_action(&Method::GET, "/bucket1", "location", true)
+                .expect("Failed to convert"),
+            S3Action::GetBucketLocation
         );
     }
 

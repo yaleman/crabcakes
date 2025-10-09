@@ -1,6 +1,7 @@
 // troubleshooter.ts
 
 import { context } from "esbuild";
+import { ErrorMessage } from "./shared";
 
 interface PolicyCheckData {
     [key: string]: string;
@@ -43,125 +44,109 @@ function checkPolicy(): void {
         body: JSON.stringify(data)
     })
         .then(response => response.json())
-        .then((result: PolicyCheckResult) => {
-            console.log("Policy check result:", result);
-            const resultsDiv = document.getElementById("results");
-            if (!resultsDiv) return;
+        .then((result: PolicyCheckResult | ErrorMessage) => {
+            if ('decision' in result && typeof result.decision === 'object') {
 
-            // Clear previous results
-            while (resultsDiv.firstChild) {
-                resultsDiv.removeChild(resultsDiv.firstChild);
-            }
+                console.log("Policy check result:", result);
+                const resultsDiv = document.getElementById("results");
+                if (!resultsDiv) return;
 
-            // Create and append decision heading
-            const decisionHeading = document.createElement("h3");
-            decisionHeading.innerHTML = `Decision: <span class="badge badge-${result.decision.decision.toLowerCase()}">${result.decision.decision}</span>`;
-            resultsDiv.appendChild(decisionHeading);
-
-            // Create and append context heading
-            const contextHeading = document.createElement("h3");
-            contextHeading.textContent = "Context:";
-            resultsDiv.appendChild(contextHeading);
-
-
-            const contextParagraph = document.createElement("p");
-            const principal = document.createElement("div");
-            var arn = "";
-            Object.entries(result.decision.context.Principal).forEach(([key, value]) => {
-                arn += `${key}(${value}) `;
-            });
-            principal.innerText = `Principal: ${arn} `;
-            contextParagraph.appendChild(principal);
-
-            const actionParagraph = document.createElement("p");
-            const action = document.createElement("div");
-            action.innerText = `Action: ${result.decision.context.Action} `;
-            actionParagraph.appendChild(action);
-            contextParagraph.appendChild(actionParagraph);
-
-            const resourceParagraph = document.createElement("p");
-            const resource = document.createElement("div");
-            resource.innerText = `Resource: ${result.decision.context.Resource} `;
-            resourceParagraph.appendChild(resource);
-            contextParagraph.appendChild(resourceParagraph);
-
-            if (result.decision.context.Context && Object.keys(result.decision.context.Context).length > 0) {
-                const contextJSONParagraph = document.createElement("p");
-                const contextJSON = document.createElement("div");
-                contextJSON.innerText = `Context: ${JSON.stringify(result.decision.context.Context, null, 2)} `;
-                contextJSONParagraph.appendChild(contextJSON);
-                contextParagraph.appendChild(contextJSONParagraph);
-            }
-
-            resultsDiv.appendChild(contextParagraph);
-
-            const matched_statements = document.createElement("h3");
-            matched_statements.textContent = "Matched Statements";
-            resultsDiv.appendChild(matched_statements);
-
-            // Create and append matched statements list
-            const matchedStatementsParagraph = document.createElement("div");
-
-            const matchedStatementsList = document.createElement("ul");
-            matchedStatementsList.classList = ["no-list-style ", "list-item-padded"].join(" ");
-
-            result.decision.matched_statements.forEach(statement => {
-                const listItem = document.createElement("li");
-
-                const subList = document.createElement("ul");
-                subList.classList = ["no-list-style"].join(" ");
-                const statementHeading = document.createElement("li");
-                statementHeading.className = "font-weight-bold";
-                statementHeading.textContent = `Statement ID: ${statement.sid} `;
-                subList.appendChild(statementHeading);
-
-                const conditionsItem = document.createElement("li");
-                conditionsItem.innerHTML = `Conditions Satisfied: <span class="badge badge-${statement.conditions_satisfied.toString().toLowerCase()}" > ${statement.conditions_satisfied} </span>`;
-                subList.appendChild(conditionsItem);
-
-                if (statement.conditions_satisfied) {
-                    const effectItem = document.createElement("li");
-                    effectItem.innerHTML = `Policy Effect: <span class="badge badge-${statement.effect.toLowerCase()}">${statement.effect}</span>`;
-                    subList.appendChild(effectItem);
+                // Clear previous results
+                while (resultsDiv.firstChild) {
+                    resultsDiv.removeChild(resultsDiv.firstChild);
                 }
 
+                // Create and append decision heading
+                const decisionHeading = document.createElement("h3");
+                decisionHeading.innerHTML = `Decision: <span class="badge badge-${result.decision.decision.toLowerCase()}">${result.decision.decision}</span>`;
+                resultsDiv.appendChild(decisionHeading);
 
-                if (statement.reason.trim() !== "" && statement.reason) {
-                    const reasonItem = document.createElement("li");
-                    reasonItem.innerText = `Reason: ${statement.reason}`;
-                    subList.appendChild(reasonItem);
+                // Create and append context heading
+                const contextHeading = document.createElement("h3");
+                contextHeading.textContent = "Context:";
+                resultsDiv.appendChild(contextHeading);
 
+
+                const contextParagraph = document.createElement("p");
+                const principal = document.createElement("div");
+                var arn = "";
+                Object.entries(result.decision.context.Principal).forEach(([key, value]) => {
+                    arn += `${key}(${value}) `;
+                });
+                principal.innerText = `Principal: ${arn} `;
+                contextParagraph.appendChild(principal);
+
+                const actionParagraph = document.createElement("p");
+                const action = document.createElement("div");
+                action.innerText = `Action: ${result.decision.context.Action} `;
+                actionParagraph.appendChild(action);
+                contextParagraph.appendChild(actionParagraph);
+
+                const resourceParagraph = document.createElement("p");
+                const resource = document.createElement("div");
+                resource.innerText = `Resource: ${result.decision.context.Resource} `;
+                resourceParagraph.appendChild(resource);
+                contextParagraph.appendChild(resourceParagraph);
+
+                if (result.decision.context.Context && Object.keys(result.decision.context.Context).length > 0) {
+                    const contextJSONParagraph = document.createElement("p");
+                    const contextJSON = document.createElement("div");
+                    contextJSON.innerText = `Context: ${JSON.stringify(result.decision.context.Context, null, 2)} `;
+                    contextJSONParagraph.appendChild(contextJSON);
+                    contextParagraph.appendChild(contextJSONParagraph);
                 }
 
-                listItem.appendChild(subList);
-                matchedStatementsList.appendChild(listItem);
-            });
-            matchedStatementsParagraph.appendChild(matchedStatementsList);
-            resultsDiv.appendChild(matchedStatementsParagraph);
+                resultsDiv.appendChild(contextParagraph);
 
+                const matched_statements = document.createElement("h3");
+                matched_statements.textContent = "Matched Statements";
+                resultsDiv.appendChild(matched_statements);
+
+                // Create and append matched statements list
+                const matchedStatementsParagraph = document.createElement("div");
+
+                const matchedStatementsList = document.createElement("ul");
+                matchedStatementsList.classList = ["no-list-style ", "list-item-padded"].join(" ");
+
+                result.decision.matched_statements.forEach(statement => {
+                    const listItem = document.createElement("li");
+
+                    const subList = document.createElement("ul");
+                    subList.classList = ["no-list-style"].join(" ");
+                    const statementHeading = document.createElement("li");
+                    statementHeading.className = "font-weight-bold";
+                    statementHeading.textContent = `Statement ID: ${statement.sid} `;
+                    subList.appendChild(statementHeading);
+
+                    const conditionsItem = document.createElement("li");
+                    conditionsItem.innerHTML = `Conditions Satisfied: <span class="badge badge-${statement.conditions_satisfied.toString().toLowerCase()}" > ${statement.conditions_satisfied} </span>`;
+                    subList.appendChild(conditionsItem);
+
+                    if (statement.conditions_satisfied) {
+                        const effectItem = document.createElement("li");
+                        effectItem.innerHTML = `Policy Effect: <span class="badge badge-${statement.effect.toLowerCase()}">${statement.effect}</span>`;
+                        subList.appendChild(effectItem);
+                    }
+
+
+                    if (statement.reason.trim() !== "" && statement.reason) {
+                        const reasonItem = document.createElement("li");
+                        reasonItem.innerText = `Reason: ${statement.reason}`;
+                        subList.appendChild(reasonItem);
+
+                    }
+
+                    listItem.appendChild(subList);
+                    matchedStatementsList.appendChild(listItem);
+                });
+                matchedStatementsParagraph.appendChild(matchedStatementsList);
+                resultsDiv.appendChild(matchedStatementsParagraph);
+            } else if ('error' in result) {
+                showError(result as ErrorMessage);
+            }
         })
         .catch(error => {
-            console.error("Error checking policy:", error);
-            const resultsDiv = document.getElementById("results");
-            if (!resultsDiv) return;
-
-            // Clear previous results
-            while (resultsDiv.firstChild) {
-                resultsDiv.removeChild(resultsDiv.firstChild);
-            }
-            const errorContainer = document.createElement("div");
-            errorContainer.className = "error-container";
-
-            const errorHeading = document.createElement("h1");
-            errorHeading.textContent = "Error checking policy. Please try again.";
-            errorContainer.appendChild(errorHeading);
-            const errorMessage = document.createElement("p");
-            errorMessage.textContent = error.toString();
-            errorContainer.appendChild(errorMessage);
-            resultsDiv.appendChild(errorContainer);
-
-
-
+            showError(error)
         });
 }
 
@@ -178,9 +163,34 @@ function debouncedCheck(debounce_timer: number): void {
     }
 }
 
+function showError(error: ErrorMessage | string): void {
+    console.error("Error checking policy:", error);
+    const resultsDiv = document.getElementById("results");
+    if (!resultsDiv) return;
+
+    // Clear previous results
+    while (resultsDiv.firstChild) {
+        resultsDiv.removeChild(resultsDiv.firstChild);
+    }
+    const errorContainer = document.createElement("div");
+    errorContainer.className = "error-container";
+
+    const errorHeading = document.createElement("h1");
+    errorHeading.textContent = "Error checking policy. Please try again.";
+    errorContainer.appendChild(errorHeading);
+    const errorMessage = document.createElement("p");
+    if (typeof error === "string") {
+        errorMessage.textContent = error;
+    } else {
+
+        errorMessage.textContent = JSON.stringify(error.error);
+    }
+    errorContainer.appendChild(errorMessage);
+    resultsDiv.appendChild(errorContainer);
+}
+
 document.querySelectorAll<HTMLInputElement>(".form-control").forEach((input) => {
     input.addEventListener("input", () => {
-        console.debug(`Input changed: ${input.id} = ${input.value}`);
         // update the URL parameters
         const url = new URL(window.location.href);
         url.searchParams.set(input.id, input.value);

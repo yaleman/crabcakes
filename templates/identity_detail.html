@@ -8,6 +8,31 @@ endblock %}
     <h1><a href="/admin/identities">Identities</a> / {{ identity.display_name
         }}</h1>
 </div>
+<div class="button-group-right">
+    <ul class="no-list-style button-list">
+        {% if has_credential %}
+        <li>
+            <a href="/admin/identities/{{ identity.display_name }}/edit"
+                class="btn btn-primary">
+                Edit
+            </a>
+        </li>
+        <li>
+            <button id="delete-credential-btn" data-access-key-id="{{ identity.display_name }}"
+                class="btn btn-danger">
+                Delete
+            </button>
+        </li>
+        {% else %}
+        <li>
+            <a href="/admin/identities/new?access_key_id={{ identity.display_name }}"
+                class="btn btn-primary">
+                Create Credential
+            </a>
+        </li>
+        {% endif %}
+    </ul>
+</div>
 
 <div class="identity-info-card">
     <h2>Identity Information</h2>
@@ -39,33 +64,6 @@ endblock %}
             </td>
         </tr>
     </table>
-</div>
-
-<div>
-    <h3>Credential Management</h3>
-    <ul class="no-list-style button-list">
-        {% if has_credential %}
-        <li>
-            <a href="/admin/identities/{{ identity.display_name }}/edit"
-                class="btn btn-primary">
-                Edit Credential
-            </a>
-        </li>
-        <li>
-            <button id="delete-credential-btn" data-access-key-id="{{ identity.display_name }}"
-                class="btn btn-danger">
-                Delete Credential
-            </button>
-        </li>
-        {% else %}
-        <li>
-            <a href="/admin/identities/new?access_key_id={{ identity.display_name }}"
-                class="btn btn-primary">
-                Create Credential
-            </a>
-        </li>
-        {% endif %}
-    </ul>
 </div>
 
 <h2>Policies Granting Access</h2>

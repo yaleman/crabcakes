@@ -15,9 +15,9 @@ check:
 
 # build JavaScript bundles
 build-js:
-    echo "Bundling files..."
+    @echo "Bundling files..."
     pnpm run build
-    echo "Finished at $(date)"
+    @echo "Finished at $(date)"
 
 # lint JavaScript and CSS files
 lint-web:
