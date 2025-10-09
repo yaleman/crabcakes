@@ -1,5 +1,6 @@
 // Policy CRUD operations
 import { authenticatedFetch } from './csrf';
+import { ErrorMessage } from './shared';
 
 interface PolicyResponse {
     name?: string;
@@ -30,10 +31,6 @@ async function deletePolicy(policyName: string): Promise<void> {
     }
 }
 
-interface ErrorMessage {
-    error?: string;
-    success?: boolean;
-}
 
 async function savePolicy(policyName: string, policyData: any): Promise<PolicyResponse> {
     try {

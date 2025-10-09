@@ -13,21 +13,7 @@ use tokio::fs as async_fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 
-/// Reserved bucket names that cannot be used as S3 buckets
-/// These are reserved for the admin UI and API endpoints
-const RESERVED_BUCKET_NAMES: &[&str] = &[
-    "admin",
-    "api",
-    "login",
-    "logout",
-    "oauth2",
-    ".well-known",
-    "config",
-    "oidc",
-    "crabcakes",
-    "docs",
-    "help",
-];
+use crate::constants::RESERVED_BUCKET_NAMES;
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {

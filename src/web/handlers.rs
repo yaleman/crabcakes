@@ -29,6 +29,7 @@ use tokio::sync::RwLock;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
+use crate::constants::S3Action;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
@@ -193,6 +194,7 @@ struct PolicyTroubleshooterTemplate {
     action: String,
     policy_name: String,
     policy_names: Vec<String>,
+    s3_actions: Vec<String>,
 }
 
 impl Default for PolicyTroubleshooterTemplate {
@@ -205,6 +207,9 @@ impl Default for PolicyTroubleshooterTemplate {
             action: String::new(),
             policy_names: Vec::new(),
             policy_name: String::new(),
+            s3_actions: enum_iterator::all::<S3Action>()
+                .map(|a| a.to_string())
+                .collect::<Vec<_>>(),
         }
     }
 }
@@ -226,7 +231,7 @@ fn login_redirect() -> Result<Response<Full<Bytes>>, CrabCakesError> {
 }
 
 /// Return with a 404 Not Found response
-fn respond_404() -> Response<Full<Bytes>> {
+pub(crate) fn respond_404() -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from("Not Found")));
     *response.status_mut() = StatusCode::NOT_FOUND;
     response
@@ -1830,6 +1835,10 @@ impl WebHandler {
         // build the iam request
 
         let mut arnstr = form.bucket.to_string();
+        if arnstr.is_empty() {
+            arnstr.push('*');
+        }
+
         if !form.key.is_empty() {
             arnstr.push_str(&format!("/{}", form.key));
         };

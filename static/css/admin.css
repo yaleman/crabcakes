@@ -43,10 +43,10 @@ body {
 }
 
 .sidebar {
-    width: 250px;
+    width: 15.0rem;
     background: linear-gradient(180deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
-    padding: 20px;
-    box-shadow: 4px 0 20px var(--color-purple-30pct);
+    padding: 1.0rem;
+    box-shadow: 4px 0 1.0rem var(--color-purple-30pct);
 }
 
 .logo {
@@ -61,6 +61,20 @@ body {
 .logo a {
     text-decoration: none;
     color: var(--color-white);
+}
+
+@media (width <=800px) {
+    .logo-collapse {
+        display: none;
+    }
+
+    .collapsible {
+        display: none;
+    }
+
+    .sidebar {
+        width: 10.0rem;
+    }
 }
 
 
@@ -271,10 +285,20 @@ ul.button-list {
     color: white;
 }
 
-.btn-primary:hover {
-    background: linear-gradient(135deg, var(--color-purple-light) 50%, var(--color-purple-dark) 100%);
+.btn-primary a {
+    color: white;
+    text-decoration: none;
 }
 
+.btn-primary:hover {
+    background: linear-gradient(135deg, var(--color-purple-light) 50%, var(--color-purple-dark) 100%);
+    color: white;
+    text-decoration: none;
+}
+
+.button-group-right {
+    float: right;
+}
 
 .btn-secondary {
     background: var(--bgcolor-purple);

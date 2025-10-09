@@ -1,7 +1,7 @@
 use iam_rs::Decision;
 use tracing::debug;
 
-use crate::{policy::PolicyStore, setup_test_logging};
+use crate::{constants::S3Action, policy::PolicyStore, setup_test_logging};
 use std::path::PathBuf;
 
 #[tokio::test]
@@ -24,7 +24,7 @@ async fn test_wildcard_principal() {
     // Create a simple request with anonymous principal
     let iam_request = iam_rs::IAMRequest::new(
         iam_rs::Principal::Wildcard,
-        "s3:ListBucket",
+        S3Action::ListBucket,
         iam_rs::Arn::parse("arn:aws:s3:::bucket1").expect("Failed to generate ARN"),
     );
 
@@ -53,7 +53,7 @@ async fn test_alice_policy() {
         iam_rs::Principal::Aws(iam_rs::PrincipalId::String(
             "arn:aws:iam:::user/alice".to_string(),
         )),
-        "s3:GetObject",
+        S3Action::GetObject,
         iam_rs::Arn::parse("arn:aws:s3:::bucket1/alice/test.txt").unwrap(),
     );
     debug!("Evaluating request for alice: {:?}", iam_request);

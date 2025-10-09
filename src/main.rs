@@ -41,6 +41,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             res = server.run(false) => {
                 if let Err(err) = res {
                     eprintln!("Server error: {}", err);
+                    break
                 };
             }
             _ = hangup_waiter.recv() => {

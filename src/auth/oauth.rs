@@ -8,6 +8,7 @@ use openidconnect::{
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
 };
 use reqwest;
+use tokio::sync::RwLock;
 use tracing::{debug, error, trace};
 
 use crate::db::DBService;
@@ -15,7 +16,8 @@ use crate::error::CrabCakesError;
 
 /// OAuth client for OIDC authentication with PKCE
 pub struct OAuthClient {
-    provider_metadata: CoreProviderMetadata,
+    // TODO: make this an optional thing to support the delayed task/retries
+    provider_metadata: Arc<RwLock<CoreProviderMetadata>>,
     client_id: ClientId,
     redirect_uri: RedirectUrl,
     db: Arc<DBService>,
@@ -40,8 +42,9 @@ impl OAuthClient {
             .map_err(|e| CrabCakesError::other(&format!("Invalid OIDC issuer URL: {}", e)))?;
 
         let http_client_clone = http_client.clone();
-        let provider_metadata = CoreProviderMetadata::discover_async(
-            issuer_url,
+        // TODO: make this a delayed task that can retry
+        let provider_metadata = Arc::new(RwLock::new( CoreProviderMetadata::discover_async(
+            issuer_url.clone(),
             &(move |http_request: http::Request<Vec<u8>>| {
                 let http_client = http_client_clone.clone();
                 async move {
@@ -57,24 +60,23 @@ impl OAuthClient {
                     let body = response.bytes().await?.to_vec();
 
                     // This should never fail as we're providing valid status and body
-                    Ok(http::Response::builder()
-                        .status(status)
-                        .body(body)
-                        .unwrap_or_else(|_| {
-                            // If Response::builder somehow fails (which should never happen),
-                            // return a basic error response
-                            http::Response::new(b"Internal Server Error".to_vec())
-                        }))
+                    let mut res = http::Response::new(body);
+                    *res.status_mut() = status;
+                    Ok(res)
+
                 }
             }),
         )
         .await
         .map_err(|e: openidconnect::DiscoveryError<reqwest::Error>| {
-            CrabCakesError::other(&format!("Failed to discover OIDC provider: {}", e))
-        })?;
+            CrabCakesError::OidcDiscovery(format!(
+                "Failed to query OIDC provider, can't start up! error={e} issuer_url={issuer_url}",
+            ))
+        })?));
 
-        let redirect_url = RedirectUrl::new(redirect_uri.to_string())
-            .map_err(|e| CrabCakesError::other(&format!("Invalid OIDC redirect URI: {}", e)))?;
+        let redirect_url = RedirectUrl::new(redirect_uri.to_string()).map_err(|e| {
+            CrabCakesError::OidcDiscovery(format!("Invalid OIDC redirect URI: {}", e))
+        })?;
 
         Ok(Self {
             provider_metadata,
@@ -90,8 +92,9 @@ impl OAuthClient {
     pub async fn generate_auth_url(&self) -> Result<(String, String), CrabCakesError> {
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
+        let provider_metadata = self.provider_metadata.read().await.clone();
         let client = CoreClient::from_provider_metadata(
-            self.provider_metadata.clone(),
+            provider_metadata,
             self.client_id.clone(),
             None, // No client secret (public client with PKCE)
         )
@@ -149,8 +152,10 @@ impl OAuthClient {
         }
 
         // Exchange code for tokens
+
+        let provider_metadata = self.provider_metadata.read().await.clone();
         let client = CoreClient::from_provider_metadata(
-            self.provider_metadata.clone(),
+            provider_metadata,
             self.client_id.clone(),
             None, // No client secret (public client with PKCE)
         )

@@ -27,4 +27,10 @@ async function sessionCredentials(): Promise<SessionData | null> {
         });
 }
 
-export { sessionCredentials, SessionData }
+
+interface ErrorMessage {
+    error?: string;
+    success?: boolean;
+}
+
+export { sessionCredentials, SessionData, ErrorMessage }

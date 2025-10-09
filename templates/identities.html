@@ -93,7 +93,6 @@
         <tr>
             <th>Access Key ID</th>
             <th>User Email</th>
-            <th>User ID</th>
             <th>Created At</th>
             <th>Expires At</th>
             <th>Actions</th>
@@ -103,8 +102,8 @@
         {% for cred in temporary_credentials %}
         <tr>
             <td><code>{{ cred.access_key_id }}</code></td>
-            <td>{{ cred.user_email }}</td>
-            <td>{{ cred.user_id }}</td>
+            <td title="Backend ID: {{ cred.user_id }}">{{ cred.user_email }}</td>
+
             <td>{{ cred.created_at }}</td>
             <td>{{ cred.expires_at }}</td>
             <td>
