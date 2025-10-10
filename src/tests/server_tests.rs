@@ -199,6 +199,7 @@ async fn test_head_object() {
 
 #[tokio::test]
 async fn test_get_object() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
@@ -206,7 +207,7 @@ async fn test_get_object() {
     let result = client
         .get_object()
         .bucket(TEST_ALLOWED_BUCKET)
-        .key("test.txt")
+        .key("testuser/test.txt")
         .send()
         .await;
     assert!(result.is_ok(), "GetObject failed: {:?}", result.err());
