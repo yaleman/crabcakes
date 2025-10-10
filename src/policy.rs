@@ -2,6 +2,7 @@
 //!
 //! Loads JSON IAM policies and evaluates requests against them with caching support.
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
@@ -52,6 +53,12 @@ pub struct PolicyStore {
     policy_dir: PathBuf,
     expiry_secs: Arc<RwLock<u32>>,
 }
+
+static NAME_VALIDATOR: LazyLock<regex::Regex> = LazyLock::new(|| {
+    #[allow(clippy::expect_used)]
+    regex::Regex::new(r"^[a-zA-Z0-9]{1}[a-zA-Z0-9-_]*[a-zA-Z0-9]{1}$")
+        .expect("Failed to compile policy name regex")
+});
 
 impl PolicyStore {
     /// Create a new PolicyStore by loading policies from the given directory
@@ -282,6 +289,7 @@ impl PolicyStore {
                 .policy_dir
                 .join(format!("{}.json", name))
                 .starts_with(&self.policy_dir)
+            && NAME_VALIDATOR.is_match(name)
     }
 
     /// Get a policy by name
@@ -311,7 +319,7 @@ impl PolicyStore {
         let policy_path = self.policy_dir.join(format!("{}.json", name));
         if !policy_path.starts_with(&self.policy_dir) {
             error!("Attempted path traversal in policy creation: {}", name);
-            return Err(CrabCakesError::other(&"Invalid policy path"));
+            return Err(CrabCakesError::InvalidPath);
         }
         let policy_json = serde_json::to_string_pretty(&policy)?;
         fs::write(&policy_path, policy_json)?;
@@ -347,10 +355,7 @@ impl PolicyStore {
         {
             let policies = self.policies.read().await;
             if !policies.contains_key(&name) {
-                return Err(CrabCakesError::other(&format!(
-                    "Policy '{}' not found",
-                    name
-                )));
+                return Err(CrabCakesError::InvalidPolicyName);
             }
         }
 
@@ -416,5 +421,40 @@ impl PolicyStore {
 
         info!(policy_name = %name, "Deleted policy");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_invalid_name() {
+        let tempdir = tempfile::tempdir().expect("failed to create temp dir");
+        let store = super::PolicyStore::new(&tempdir.path().to_path_buf())
+            .expect("failed to create policystore");
+        for name in [
+            "valid-name",
+            "another_valid_name123",
+            "validName",
+            "validname",
+            "valid123Name",
+        ] {
+            assert!(store.is_valid_name(name), "should be a valid name");
+        }
+        for name in [
+            "-another_invalid_name123",
+            "another_invalid_name123*",
+            "another_invalid_name123*",
+            "another_invalid_name123-",
+            "a",
+            "../etc/passwd",
+            "valid/../name",
+            "valid\\..\\name",
+        ] {
+            assert!(
+                !store.is_valid_name(name),
+                "name '{}' should be invalid",
+                name
+            );
+        }
     }
 }

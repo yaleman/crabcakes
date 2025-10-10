@@ -14,6 +14,10 @@ pub(crate) static SECRET_ACCESS_KEY_LENGTH: usize = 40;
 pub(crate) static MAX_TEMP_CREDS_DURATION: LazyLock<Duration> =
     LazyLock::new(|| Duration::seconds(3600));
 
+pub(crate) static S3: &str = "s3";
+
+pub(crate) static DEFAULT_REGION: &str = "crabcakes";
+
 /// Reserved bucket names that cannot be used as S3 buckets
 /// These are reserved for the admin UI and API endpoints
 pub(crate) static RESERVED_BUCKET_NAMES: &[&str] = &[

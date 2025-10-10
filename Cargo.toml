@@ -97,8 +97,9 @@ scratchstack-arn = "0.4.9"
 futures = "0.3.31"
 serde_with = { version = "3.15.0", features = ["json"] }
 enum-iterator = "2.3.0"
+regex = "1.11.3"
 
 [dev-dependencies]
-aws-config = "1.8.7"
-aws-sdk-s3 = "1.107"
+aws-config = "1.8.8"
+aws-sdk-s3 = "1.108.0"
 tokio-test = "0.4"

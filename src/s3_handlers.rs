@@ -32,7 +32,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
 use crate::body_buffer::BufferedBody;
-use crate::constants::S3Action;
+use crate::constants::{RESERVED_BUCKET_NAMES, S3, S3Action};
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::filesystem::FilesystemService;
@@ -167,7 +167,7 @@ impl S3Handler {
             match sigv4_validate_streaming_request(
                 parts,
                 &self.region,
-                "s3",
+                S3,
                 &mut get_signing_key_svc,
                 chrono::Utc::now(),
                 &NO_ADDITIONAL_SIGNED_HEADERS,
@@ -227,8 +227,8 @@ impl S3Handler {
         };
 
         debug!(
-            "Request signature verified successfully authenticator_response={:?}",
-            authenticatorresponse
+            authenticator_response = ?authenticatorresponse,
+            "Request signature verified successfully",
         );
 
         Ok((parts, buffered_body, authenticatorresponse))
@@ -330,22 +330,6 @@ impl S3Handler {
                 bucket_name.as_str()
             }
         };
-
-        // Check if bucket name is reserved (admin UI paths)
-        const RESERVED_BUCKET_NAMES: &[&str] = &[
-            "admin",
-            "api",
-            "login",
-            "logout",
-            "oauth2",
-            ".well-known",
-            "config",
-            "oidc",
-            "crabcakes",
-            "docs",
-            "help",
-            "lost+found",
-        ];
 
         if !bucket_for_operation.is_empty() && RESERVED_BUCKET_NAMES.contains(&bucket_for_operation)
         {

@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+use crate::constants::DEFAULT_REGION;
+
 #[derive(Parser, Debug)]
 pub struct Cli {
     #[clap(short, long, default_value = "9000", env = "CRABCAKES_PORT")]
@@ -21,7 +23,7 @@ pub struct Cli {
     #[clap(short, long, default_value = "./config", env = "CRABCAKES_CONFIG_DIR")]
     pub config_dir: PathBuf,
 
-    #[clap(long, default_value = "crabcakes", env = "CRABCAKES_REGION")]
+    #[clap(long, default_value = DEFAULT_REGION, env = "CRABCAKES_REGION")]
     pub region: String,
 
     #[clap(long, env = "CRABCAKES_TLS_CERT")]
