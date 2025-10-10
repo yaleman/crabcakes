@@ -4,12 +4,14 @@ use std::path::Path;
 use std::str::FromStr;
 use tempfile::TempDir;
 use tokio::time::{Duration, sleep};
+use tracing::debug;
 
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 
-use crate::constants::{DEFAULT_REGION, RESERVED_BUCKET_NAMES, S3};
+use crate::constants::{DEFAULT_REGION, RESERVED_BUCKET_NAMES, S3, TEST_ALLOWED_BUCKET};
+use crate::credentials::Credential;
 use crate::server::Server;
 use crate::setup_test_logging;
 
@@ -91,13 +93,20 @@ fn test_sigv4_key() {
 
 async fn create_s3_client(port: u16) -> Client {
     // Use testuser's test credentials that match test_config/credentials/testuser.json
+    let test_creds: Credential = serde_json::from_str(
+        &fs::read_to_string("test_config/credentials/testuser.json")
+            .expect("Failed to read test credentials"),
+    )
+    .expect("Failed to deserialize test credentials");
+
     let creds = Credentials::new(
-        "testuser",
-        "test123456789012345678901234567890123456",
+        test_creds.access_key_id,
+        test_creds.secret_access_key,
         None,
         None,
         "test",
     );
+    debug!(creds = ?creds, "Test client using these creds");
     let config = aws_config::defaults(BehaviorVersion::latest())
         .credentials_provider(creds)
         .region(Region::new(DEFAULT_REGION))
@@ -128,7 +137,7 @@ async fn test_list_buckets() {
     // Verify both bucket1 and bucket2 are listed
     let bucket_names: Vec<_> = buckets.iter().filter_map(|b| b.name()).collect();
     assert!(
-        bucket_names.contains(&"bucket1"),
+        bucket_names.contains(&TEST_ALLOWED_BUCKET),
         "Expected bucket1 in listing"
     );
     assert!(
@@ -145,7 +154,11 @@ async fn test_list_objects() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let result = client.list_objects_v2().bucket("bucket1").send().await;
+    let result = client
+        .list_objects_v2()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .send()
+        .await;
     assert!(result.is_ok(), "ListObjectsV2 failed: {:?}", result.err());
 
     let output = result.unwrap();
@@ -169,7 +182,7 @@ async fn test_head_object() {
 
     let result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key("test.txt")
         .send()
         .await;
@@ -192,7 +205,7 @@ async fn test_get_object() {
 
     let result = client
         .get_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key("test.txt")
         .send()
         .await;
@@ -219,7 +232,7 @@ async fn test_get_nonexistent_object() {
 
     let result = client
         .get_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key("nonexistent.txt")
         .send()
         .await;
@@ -236,7 +249,7 @@ async fn test_list_objects_with_prefix() {
 
     let result = client
         .list_objects_v2()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .prefix("test")
         .send()
         .await;
@@ -265,7 +278,11 @@ async fn test_path_style_bucket_listing() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let result = client.list_objects_v2().bucket("bucket1").send().await;
+    let result = client
+        .list_objects_v2()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .send()
+        .await;
     assert!(result.is_ok(), "ListObjectsV2 failed: {:?}", result.err());
 
     let output = result.unwrap();
@@ -282,7 +299,7 @@ async fn test_list_with_file_prefix() {
 
     let result = client
         .list_objects_v2()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .prefix("test.txt")
         .send()
         .await;
@@ -352,17 +369,18 @@ async fn test_bucket2_json_file() {
 
 #[tokio::test]
 async fn test_put_object() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     let test_content = b"This is a test file uploaded via PutObject";
-    let test_key = "uploaded-file.txt";
+    let test_key = "testuser/uploaded-file.txt";
 
     // Test PutObject
     let put_result = client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .body(test_content.to_vec().into())
         .send()
@@ -379,7 +397,7 @@ async fn test_put_object() {
     // Verify we can retrieve the uploaded file
     let get_result = client
         .get_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -399,7 +417,7 @@ async fn test_put_object() {
     // Verify HeadObject works
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -536,7 +554,11 @@ async fn test_head_bucket() {
     let client = create_s3_client(port).await;
 
     // Test existing bucket (bucket1 from setup)
-    let head_result = client.head_bucket().bucket("bucket1").send().await;
+    let head_result = client
+        .head_bucket()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .send()
+        .await;
     assert!(
         head_result.is_ok(),
         "HeadBucket failed on existing bucket: {:?}",
@@ -569,7 +591,7 @@ async fn test_delete_object() {
     // Put an object
     let put_result = client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .body(test_content.to_vec().into())
         .send()
@@ -579,7 +601,7 @@ async fn test_delete_object() {
     // Verify object exists
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -588,7 +610,7 @@ async fn test_delete_object() {
     // Delete the object
     let delete_result = client
         .delete_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -601,7 +623,7 @@ async fn test_delete_object() {
     // Verify object is gone
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -622,7 +644,7 @@ async fn test_delete_nonexistent_object() {
     // Delete a non-existent object - should succeed per S3 spec
     let delete_result = client
         .delete_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key("nonexistent-file.txt")
         .send()
         .await;
@@ -687,7 +709,7 @@ async fn test_delete_objects_batch() {
     // Upload test objects
     client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key1)
         .body("content1".as_bytes().to_vec().into())
         .send()
@@ -696,7 +718,7 @@ async fn test_delete_objects_batch() {
 
     client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key2)
         .body("content2".as_bytes().to_vec().into())
         .send()
@@ -705,7 +727,7 @@ async fn test_delete_objects_batch() {
 
     client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key3)
         .body("content3".as_bytes().to_vec().into())
         .send()
@@ -715,7 +737,7 @@ async fn test_delete_objects_batch() {
     // Delete objects in batch
     let delete_result = client
         .delete_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .delete(
             aws_sdk_s3::types::Delete::builder()
                 .objects(
@@ -772,7 +794,12 @@ async fn test_delete_objects_batch() {
 
     // Verify all objects are deleted
     for key in [test_key1, test_key2, test_key3] {
-        let head_result = client.head_object().bucket("bucket1").key(key).send().await;
+        let head_result = client
+            .head_object()
+            .bucket(TEST_ALLOWED_BUCKET)
+            .key(key)
+            .send()
+            .await;
         assert!(
             head_result.is_err(),
             "Object {} should not exist after batch delete",
@@ -792,7 +819,7 @@ async fn test_delete_objects_nonexistent() {
     // Delete non-existent objects (should succeed per S3 idempotency)
     let delete_result = client
         .delete_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .delete(
             aws_sdk_s3::types::Delete::builder()
                 .objects(
@@ -842,7 +869,7 @@ async fn test_copy_object() {
     // Copy existing object
     let copy_result = client
         .copy_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(dest_key)
         .copy_source(format!("bucket1/{}", source_key))
         .send()
@@ -857,7 +884,7 @@ async fn test_copy_object() {
     // Verify destination object exists
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(dest_key)
         .send()
         .await;
@@ -867,7 +894,7 @@ async fn test_copy_object() {
     // Verify content matches
     let get_result = client
         .get_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(dest_key)
         .send()
         .await;
@@ -886,7 +913,7 @@ async fn test_copy_object_nonexistent_source() {
     // Try to copy non-existent object
     let copy_result = client
         .copy_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key("dest.txt")
         .copy_source("bucket1/nonexistent.txt")
         .send()
@@ -907,7 +934,11 @@ async fn test_get_bucket_location() {
     let client = create_s3_client(port).await;
 
     // Get bucket location
-    let location_result = client.get_bucket_location().bucket("bucket1").send().await;
+    let location_result = client
+        .get_bucket_location()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .send()
+        .await;
 
     assert!(
         location_result.is_ok(),
@@ -958,7 +989,7 @@ async fn test_list_objects_v1() {
     // ListObjectsV1 with prefix parameter (V1 API)
     let list_result = client
         .list_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .prefix("test")
         .send()
         .await;
@@ -1007,7 +1038,7 @@ async fn test_list_objects_v1_pagination() {
     // ListObjectsV1 with max_keys for pagination
     let list_result = client
         .list_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .max_keys(1)
         .send()
         .await;
@@ -1146,22 +1177,24 @@ async fn test_admin_ui_delete_bucket_without_csrf_fails() {
 async fn test_admin_ui_bucket_delete_confirmation_page() {
     // Test that bucket delete confirmation page is properly routed
     // Note: In test mode, admin UI is disabled, so this returns 404
+    setup_test_logging();
     let temp_dir = setup_test_files();
+
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let s3_client = create_s3_client(port).await;
 
     // Create a bucket with some objects
-    s3_client
-        .create_bucket()
-        .bucket("test-confirm-page")
-        .send()
-        .await
-        .unwrap();
+    // s3_client
+    //     .create_bucket()
+    //     .bucket(TEST_ALLOWED_BUCKET)
+    //     .send()
+    //     .await
+    //     .unwrap();
 
     s3_client
         .put_object()
-        .bucket("test-confirm-page")
-        .key("file1.txt")
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/file1.txt")
         .body("content1".as_bytes().to_vec().into())
         .send()
         .await
@@ -1169,8 +1202,8 @@ async fn test_admin_ui_bucket_delete_confirmation_page() {
 
     s3_client
         .put_object()
-        .bucket("test-confirm-page")
-        .key("file2.txt")
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/file2.txt")
         .body("content2".as_bytes().to_vec().into())
         .send()
         .await
@@ -1181,8 +1214,7 @@ async fn test_admin_ui_bucket_delete_confirmation_page() {
     let http_client = reqwest::Client::new();
     let response = http_client
         .get(format!(
-            "http://localhost:{}/admin/buckets/test-confirm-page/delete",
-            port
+            "http://localhost:{port}/admin/buckets/{TEST_ALLOWED_BUCKET}/delete",
         ))
         .send()
         .await

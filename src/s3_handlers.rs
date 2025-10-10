@@ -10,7 +10,7 @@ use std::sync::Arc;
 use http::HeaderValue;
 use http::header::{
     ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST, LAST_MODIFIED,
-    LOCATION, WWW_AUTHENTICATE,
+    LOCATION, RANGE, WWW_AUTHENTICATE,
 };
 use http::request::Parts;
 use http_body_util::Full;
@@ -52,7 +52,7 @@ pub struct S3Handler {
     server_addr: String,
     filesystem: Arc<FilesystemService>,
     policy_store: Arc<PolicyStore>,
-    credentials_store: Arc<RwLock<CredentialStore>>,
+    credentials_store: Arc<CredentialStore>,
     multipart_manager: Arc<RwLock<MultipartManager>>,
     db_service: Arc<DBService>,
     region: String,
@@ -62,7 +62,7 @@ impl S3Handler {
     pub fn new(
         filesystem: Arc<FilesystemService>,
         policy_store: Arc<PolicyStore>,
-        credentials_store: Arc<RwLock<CredentialStore>>,
+        credentials_store: Arc<CredentialStore>,
         multipart_manager: Arc<RwLock<MultipartManager>>,
         db_service: Arc<DBService>,
         region: String,
@@ -135,8 +135,7 @@ impl S3Handler {
         let (parts, authenticatorresponse) = if is_streaming {
             debug!("Using streaming signature verification");
 
-            let credentials_store = self.credentials_store.clone();
-            let creds = credentials_store.read().await.credentials.clone();
+            let creds = self.credentials_store.credentials.clone();
 
             let get_signing_key_fn = move |req: GetSigningKeyRequest| {
                 let creds = creds.clone();
@@ -374,6 +373,7 @@ impl S3Handler {
                 }
                 Ok(Decision::NotApplicable) | Ok(Decision::Deny) => {
                     warn!(
+                        request = ?iam_request,
                         principal = ?iam_request.principal,
                         action = %s3_action,
                         "Authorization denied"
@@ -987,7 +987,7 @@ impl S3Handler {
         key: &str,
         parts: &http::request::Parts,
     ) -> Response<Full<Bytes>> {
-        let range_header = parts.headers.get("range").and_then(|h| h.to_str().ok());
+        let range_header = parts.headers.get(RANGE).and_then(|h| h.to_str().ok());
         self.handle_get_object_with_range(key, range_header).await
     }
 

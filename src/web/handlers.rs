@@ -23,11 +23,10 @@ use hyper::{
 use iam_rs::{Arn, EvaluationOptions, EvaluationResult, IAMRequest, PolicyEvaluator, PrincipalId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::RwLock;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
-use crate::constants::S3Action;
+use crate::constants::{CSRF_TOKEN_LENGTH, S3Action, SessionKey};
 use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
@@ -100,6 +99,16 @@ struct CredentialFormTemplate {
     page: String,
     access_key_id: String,
     is_edit: bool,
+}
+
+impl Default for CredentialFormTemplate {
+    fn default() -> Self {
+        Self {
+            page: "identities".to_string(),
+            access_key_id: String::new(),
+            is_edit: false,
+        }
+    }
 }
 
 /// Buckets list template
@@ -246,7 +255,7 @@ fn respond_500(msg: &impl ToString) -> Response<Full<Bytes>> {
 pub struct WebHandler {
     oauth_client: Arc<OAuthClient>,
     db: Arc<DBService>,
-    credentials_store: Arc<RwLock<CredentialStore>>,
+    credentials_store: Arc<CredentialStore>,
     policy_store: Arc<PolicyStore>,
     filesystem: Arc<FilesystemService>,
 }
@@ -269,7 +278,7 @@ impl WebHandler {
     pub fn new(
         oauth_client: Arc<OAuthClient>,
         db: Arc<DBService>,
-        credentials_store: Arc<RwLock<CredentialStore>>,
+        credentials_store: Arc<CredentialStore>,
         policy_store: Arc<PolicyStore>,
         filesystem: Arc<FilesystemService>,
     ) -> Self {
@@ -282,27 +291,13 @@ impl WebHandler {
         }
     }
 
-    /// Main request handler - routes to appropriate endpoint
-    #[instrument(
-        level = "info",
-        skip_all,
-        fields(method, uri, remote_addr, status_code, user, bucket, key)
-    )]
-    pub async fn handle_request(
+    pub async fn handle_api_request(
         &self,
         req: Request<Incoming>,
+        path: &str,
         session: Session,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
-        let method = req.method().clone();
-        let path = req.uri().path().to_string();
-        let is_api_request = path.starts_with("/admin/api/");
-        let result = match (method, path.as_str()) {
-            (Method::GET, "/") => self.handle_root().await,
-            (Method::GET, "/login") => self.handle_login().await,
-            (Method::GET, path) if path.starts_with("/oauth2/callback") => {
-                self.handle_oauth_callback(req, session).await
-            }
-            (Method::POST, "/logout") => self.handle_logout(session).await,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        match (req.method().clone(), path) {
             (Method::GET, "/admin/api/session") => self.handle_get_session(session).await,
             (Method::GET, "/admin/api/csrf-token") => self.handle_csrf_token(session).await,
             (Method::GET, "/admin/api/policies") => self.handle_api_list_policies(session).await,
@@ -328,16 +323,14 @@ impl WebHandler {
             (Method::POST, path)
                 if path.split("?").next().unwrap_or("") == "/admin/api/policy_troubleshooter" =>
             {
-                self.handle_api_policy_troubleshooter(req, session).await
+                self.post_api_policy_troubleshooter(req, session).await
             }
-            (Method::GET, "/admin/api/credentials") => {
-                self.handle_api_list_credentials(session).await
-            }
+            (Method::GET, "/admin/api/credentials") => self.get_api_credentials(session).await,
             (Method::POST, "/admin/api/credentials") => {
-                self.handle_api_create_credential(req, session).await
+                self.post_api_credential(req, session).await
             }
             (Method::PUT, path) if path.starts_with("/admin/api/credentials/") => {
-                self.handle_api_update_credential(
+                self.put_api_credential(
                     req,
                     session,
                     path.strip_prefix("/admin/api/credentials/").unwrap_or(""),
@@ -350,114 +343,139 @@ impl WebHandler {
                 if access_key_id.is_empty() {
                     return Ok(respond_404());
                 }
-                self.handle_api_delete_credential(req, session, access_key_id)
+                self.delete_api_credential(req, session, access_key_id)
                     .await
             }
             (Method::DELETE, path) if path.starts_with("/admin/api/temp_creds/") => {
                 match path.strip_prefix("/admin/api/temp_creds/") {
                     Some(access_key_id) => {
-                        self.handle_api_delete_temp_credential(req, session, access_key_id)
+                        self.delete_api_temp_credential(req, session, access_key_id)
                             .await
                     }
                     None => Ok(respond_404()),
                 }
             }
-            (Method::GET, "/admin") | (Method::GET, "/admin/") => self.handle_root().await,
-            (Method::GET, "/admin/profile") => self.handle_profile(session).await,
-            (Method::GET, "/admin/policies") => self.handle_policies(session).await,
-            (Method::GET, "/admin/policies/new") => self.handle_policy_new_form(session).await,
-            (Method::GET, "/admin/policy_troubleshooter") => {
-                self.handle_policy_troubleshooter(req, session).await
-            }
-            (Method::GET, path)
-                if path.starts_with("/admin/policies/") && path.ends_with("/edit") =>
-            {
-                let policy_name = path
-                    .strip_prefix("/admin/policies/")
-                    .and_then(|s| s.strip_suffix("/edit"))
-                    .unwrap_or("");
-                self.handle_policy_edit_form(session, policy_name).await
-            }
-            (Method::GET, path) if path.starts_with("/admin/policies/") => {
-                let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
-                self.handle_policy_detail(session, policy_name).await
-            }
-            (Method::GET, "/admin/identities") => {
-                self.handle_identities(
-                    session,
-                    form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes())
-                        .filter_map(|(k, v)| {
-                            ["order_by", "direction"]
-                                .contains(&k.as_ref())
-                                .then_some((k.to_string(), v.to_string()))
-                        })
-                        .collect(),
-                )
-                .await
-            }
-            (Method::GET, "/admin/identities/new") => {
-                let access_key_id = req
-                    .uri()
-                    .query()
-                    .filter(|query| query.contains("access_key_id"))
-                    .and_then(|query| {
-                        form_urlencoded::parse(query.as_bytes())
-                            .into_owned()
-                            .find(|(k, _)| k == "access_key_id")
-                            .map(|(_, v)| v)
-                    })
-                    .unwrap_or_default();
-                self.handle_credential_new_form(session, access_key_id)
-                    .await
-            }
-            (Method::GET, path)
-                if path.starts_with("/admin/identities/") && path.ends_with("/edit") =>
-            {
-                let access_key_id = path
-                    .strip_prefix("/admin/identities/")
-                    .and_then(|s| s.strip_suffix("/edit"))
-                    .unwrap_or("");
-
-                if access_key_id.is_empty() {
-                    return Ok(respond_404());
-                }
-                self.handle_credential_edit_form(session, access_key_id)
-                    .await
-            }
-            (Method::GET, path) if path.starts_with("/admin/identities/") => {
-                let access_key_id = path.strip_prefix("/admin/identities/").unwrap_or("");
-                if access_key_id.is_empty() {
-                    return Ok(respond_404());
-                }
-                self.handle_identity_detail(session, access_key_id).await
-            }
-            (Method::GET, "/admin/buckets") => self.handle_buckets(session).await,
-            (Method::GET, "/admin/buckets/new") => self.handle_bucket_new_form(session).await,
-            (Method::POST, "/admin/api/buckets") => {
-                self.handle_api_create_bucket(req, session).await
-            }
-            (Method::GET, path)
-                if path.starts_with("/admin/buckets/") && path.ends_with("/delete") =>
-            {
-                let bucket_name = path
-                    .strip_prefix("/admin/buckets/")
-                    .and_then(|s| s.strip_suffix("/delete"))
-                    .unwrap_or("");
-                self.handle_bucket_delete_form(session, bucket_name).await
-            }
-            (Method::DELETE, path) if path.starts_with("/admin/api/buckets/") => {
-                let bucket_name = path.strip_prefix("/admin/api/buckets/").unwrap_or("");
-                self.handle_api_delete_bucket(req, session, bucket_name)
-                    .await
-            }
-            (Method::GET, path) if path.starts_with("/admin/buckets/") => {
-                let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
-                self.handle_bucket_detail(session, bucket_path).await
-            }
-            (Method::GET, path) if path.starts_with("/admin/static/") => {
-                self.handle_static_file(path).await
-            }
             _ => Ok(respond_404()),
+        }
+    }
+
+    /// Main request handler - routes to appropriate endpoint
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(method, uri, remote_addr, status_code, user, bucket, key)
+    )]
+    pub async fn handle_request(
+        &self,
+        req: Request<Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, Infallible> {
+        let method = req.method().clone();
+        let path = req.uri().path().to_string();
+        let is_api_request = path.starts_with("/admin/api/");
+        let result = if is_api_request {
+            self.handle_api_request(req, &path, session).await
+        } else {
+            match (method, path.as_str()) {
+                (Method::GET, "/") => self.get_admin().await,
+                (Method::GET, "/login") => self.handle_login().await,
+                (Method::GET, path) if path.starts_with("/oauth2/callback") => {
+                    self.handle_oauth_callback(req, session).await
+                }
+                (Method::POST, "/logout") => self.handle_logout(session).await,
+
+                (Method::GET, "/admin") | (Method::GET, "/admin/") => self.get_admin().await,
+                (Method::GET, "/admin/profile") => self.get_profile(session).await,
+                (Method::GET, "/admin/policies") => self.get_policies(session).await,
+                (Method::GET, "/admin/policies/new") => self.get_policy_new_form(session).await,
+                (Method::GET, "/admin/policy_troubleshooter") => {
+                    self.get_policy_troubleshooter(req, session).await
+                }
+                (Method::GET, path)
+                    if path.starts_with("/admin/policies/") && path.ends_with("/edit") =>
+                {
+                    let policy_name = path
+                        .strip_prefix("/admin/policies/")
+                        .and_then(|s| s.strip_suffix("/edit"))
+                        .unwrap_or("");
+                    self.get_policy_edit(session, policy_name).await
+                }
+                (Method::GET, path) if path.starts_with("/admin/policies/") => {
+                    let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
+                    self.get_policy_detail(session, policy_name).await
+                }
+                (Method::GET, "/admin/identities") => {
+                    self.get_identities(
+                        session,
+                        form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes())
+                            .filter_map(|(k, v)| {
+                                ["order_by", "direction"]
+                                    .contains(&k.as_ref())
+                                    .then_some((k.to_string(), v.to_string()))
+                            })
+                            .collect(),
+                    )
+                    .await
+                }
+                (Method::GET, "/admin/identities/new") => {
+                    let access_key_id = req
+                        .uri()
+                        .query()
+                        .filter(|query| query.contains("access_key_id"))
+                        .and_then(|query| {
+                            form_urlencoded::parse(query.as_bytes())
+                                .into_owned()
+                                .find(|(k, _)| k == "access_key_id")
+                                .map(|(_, v)| v)
+                        })
+                        .unwrap_or_default();
+                    self.get_identities_new(session, &access_key_id).await
+                }
+                (Method::GET, path)
+                    if path.starts_with("/admin/identities/") && path.ends_with("/edit") =>
+                {
+                    let access_key_id = path
+                        .strip_prefix("/admin/identities/")
+                        .and_then(|s| s.strip_suffix("/edit"))
+                        .unwrap_or("");
+
+                    if access_key_id.is_empty() {
+                        return Ok(respond_404());
+                    }
+                    self.get_identities_edit(session, access_key_id).await
+                }
+                (Method::GET, path) if path.starts_with("/admin/identities/") => {
+                    let access_key_id = path.strip_prefix("/admin/identities/").unwrap_or("");
+                    if access_key_id.is_empty() {
+                        return Ok(respond_404());
+                    }
+                    self.get_identity_detail(session, access_key_id).await
+                }
+                (Method::GET, "/admin/buckets") => self.get_admin_buckets(session).await,
+                (Method::GET, "/admin/buckets/new") => self.get_admin_buckets_new(session).await,
+                (Method::POST, "/admin/api/buckets") => self.post_api_bucket(req, session).await,
+                (Method::GET, path)
+                    if path.starts_with("/admin/buckets/") && path.ends_with("/delete") =>
+                {
+                    let bucket_name = path
+                        .strip_prefix("/admin/buckets/")
+                        .and_then(|s| s.strip_suffix("/delete"))
+                        .unwrap_or("");
+                    self.get_bucket_delete_form(session, bucket_name).await
+                }
+                (Method::DELETE, path) if path.starts_with("/admin/api/buckets/") => {
+                    let bucket_name = path.strip_prefix("/admin/api/buckets/").unwrap_or("");
+                    self.delete_api_bucket(req, session, bucket_name).await
+                }
+                (Method::GET, path) if path.starts_with("/admin/buckets/") => {
+                    let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
+                    self.get_bucket_detail(session, bucket_path).await
+                }
+                (Method::GET, path) if path.starts_with("/admin/static/") => {
+                    self.get_static_file(path).await
+                }
+                _ => Ok(respond_404()),
+            }
         };
         let span = tracing::Span::current();
 
@@ -488,7 +506,7 @@ impl WebHandler {
     }
 
     /// GET / - Redirect to profile page
-    async fn handle_root(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    async fn get_admin(&self) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         Response::builder()
             .status(StatusCode::TEMPORARY_REDIRECT)
             .header(LOCATION, "/admin/profile")
@@ -546,19 +564,19 @@ impl WebHandler {
 
         // Store session data
         session
-            .insert("user_email", user_email.clone())
+            .insert(SessionKey::UserEmail.as_ref(), user_email.clone())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to store user_email in session: {}", e))
             })?;
         session
-            .insert("user_id", user_id.clone())
+            .insert(SessionKey::UserId.as_ref(), user_id.clone())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to store user_id in session: {}", e))
             })?;
         session
-            .insert("access_key_id", access_key_id.clone())
+            .insert(SessionKey::AccessKeyId.as_ref(), access_key_id.clone())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to store access_key_id in session: {}", e))
@@ -623,9 +641,13 @@ impl WebHandler {
 
     /// Helper: Check if user is authenticated
     async fn check_auth(&self, session: &Session) -> Result<(String, String), CrabCakesError> {
-        let user_id: Option<String> = session.get("user_id").await.map_err(|e| {
-            CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
-        })?;
+        let user_id: Option<String> =
+            session
+                .get(SessionKey::UserId.as_ref())
+                .await
+                .map_err(|e| {
+                    CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
+                })?;
 
         if user_id.is_none() {
             return Err(CrabCakesError::other(&"Not authenticated"));
@@ -633,7 +655,7 @@ impl WebHandler {
 
         let user_id = user_id.ok_or_else(|| CrabCakesError::other(&"User ID not found"))?;
         let user_email: String = session
-            .get("user_email")
+            .get(SessionKey::UserEmail.as_ref())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
@@ -647,16 +669,16 @@ impl WebHandler {
     async fn generate_csrf_token(&self, session: &Session) -> Result<String, CrabCakesError> {
         use rand::Rng;
 
-        // Generate a random 32-byte token
+        // Generate a random [CSRF_TOKEN_LENGTH]-byte token
         let token: String = rand::rng()
             .sample_iter(rand::distr::Alphanumeric)
-            .take(32)
+            .take(CSRF_TOKEN_LENGTH)
             .map(char::from)
             .collect();
 
         // Store in session
         session
-            .insert("csrf_token", token.clone())
+            .insert(SessionKey::CsrfToken.as_ref(), token.clone())
             .await
             .map_err(|e| CrabCakesError::other(&format!("Failed to store CSRF token: {}", e)))?;
 
@@ -664,7 +686,6 @@ impl WebHandler {
     }
 
     /// Helper: Validate CSRF token from request header
-    #[allow(dead_code)]
     async fn validate_csrf_token(
         &self,
         session: &Session,
@@ -678,7 +699,7 @@ impl WebHandler {
 
         // Get token from session
         let session_token: Option<String> = session
-            .get("csrf_token")
+            .get(SessionKey::CsrfToken.as_ref())
             .await
             .map_err(|e| CrabCakesError::other(&format!("Failed to get CSRF token: {}", e)))?;
 
@@ -694,7 +715,10 @@ impl WebHandler {
     }
 
     /// Helper: Build HTML response with security headers including CSP
-    fn build_html_response(&self, html: String) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    fn build_html_response(
+        &self,
+        html: impl Template,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
@@ -705,7 +729,7 @@ impl WebHandler {
             .header(X_CONTENT_TYPE_OPTIONS, "nosniff")
             .header(X_FRAME_OPTIONS, "DENY")
             .header(REFERRER_POLICY, "strict-origin-when-cross-origin")
-            .body(Full::new(Bytes::from(html)))
+            .body(Full::new(Bytes::from(html.render()?)))
             .map_err(CrabCakesError::from)
     }
 
@@ -736,17 +760,14 @@ impl WebHandler {
     }
 
     /// GET /admin/profile - User profile page
-    async fn handle_profile(
-        &self,
-        session: Session,
-    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    async fn get_profile(&self, session: Session) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         let (user_id, user_email) = match self.check_auth(&session).await {
             Ok(auth) => auth,
             Err(_) => return login_redirect(),
         };
 
         let access_key_id: String = session
-            .get("access_key_id")
+            .get(SessionKey::AccessKeyId.as_ref())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get access_key_id from session: {}", e))
@@ -774,11 +795,11 @@ impl WebHandler {
             expires_at: creds.expires_at.to_string(),
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/policies - List all policies
-    async fn handle_policies(
+    async fn get_policies(
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -801,11 +822,11 @@ impl WebHandler {
             policies,
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/policies/{name} - View policy details
-    async fn handle_policy_detail(
+    async fn get_policy_detail(
         &self,
         session: Session,
         policy_name: &str,
@@ -899,11 +920,11 @@ impl WebHandler {
             policy_principal_permissions,
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/policies/new - Show form for creating a new policy
-    async fn handle_policy_new_form(
+    async fn get_policy_new_form(
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -917,11 +938,11 @@ impl WebHandler {
             policy_json: String::new(),
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/policies/{name}/edit - Show form for editing a policy
-    async fn handle_policy_edit_form(
+    async fn get_policy_edit(
         &self,
         session: Session,
         policy_name: &str,
@@ -945,14 +966,14 @@ impl WebHandler {
             policy_json,
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/identities/new - Show form for creating a new credential
-    async fn handle_credential_new_form(
+    async fn get_identities_new(
         &self,
         session: Session,
-        access_key_id: String,
+        access_key_id: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         if self.check_auth(&session).await.is_err() {
             return login_redirect();
@@ -960,26 +981,22 @@ impl WebHandler {
         // check if the akid already exists and reject the request if so
         if self
             .credentials_store
-            .read()
-            .await
-            .get_credential(&access_key_id)
+            .get_credential(access_key_id)
             .await
             .is_some()
         {
             return Err(CrabCakesError::CredentialAlreadyExists);
         }
 
-        let template = CredentialFormTemplate {
-            page: "identities".to_string(),
-            access_key_id,
+        self.build_html_response(CredentialFormTemplate {
+            access_key_id: access_key_id.to_string(),
             is_edit: false,
-        };
-
-        self.build_html_response(template.render()?)
+            ..Default::default()
+        })
     }
 
     /// GET /admin/credentials/{id}/edit - Show form for editing a credential
-    async fn handle_credential_edit_form(
+    async fn get_identities_edit(
         &self,
         session: Session,
         access_key_id: &str,
@@ -991,8 +1008,6 @@ impl WebHandler {
         // Verify credential exists
         if self
             .credentials_store
-            .read()
-            .await
             .get_credential(access_key_id)
             .await
             .is_none()
@@ -1001,16 +1016,16 @@ impl WebHandler {
         }
 
         let template = CredentialFormTemplate {
-            page: "identities".to_string(),
             access_key_id: access_key_id.to_string(),
             is_edit: true,
+            ..Default::default()
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/identities - List all identities (credentials)
-    async fn handle_identities(
+    async fn get_identities(
         &self,
         session: Session,
         query_params: Vec<(String, String)>,
@@ -1020,8 +1035,7 @@ impl WebHandler {
         };
 
         // Get all credentials
-        let credential_store = self.credentials_store.read().await;
-        let credentials = credential_store.get_access_key_ids().await;
+        let credentials = self.credentials_store.get_access_key_ids().await;
 
         // Build identity summaries for each credential
         let mut identities: Vec<IdentitySummary> = Vec::new();
@@ -1034,7 +1048,8 @@ impl WebHandler {
                     .await;
 
             // Check if credential exists
-            let has_credential = credential_store
+            let has_credential = self
+                .credentials_store
                 .get_credential(&access_key_id)
                 .await
                 .is_some();
@@ -1088,11 +1103,11 @@ impl WebHandler {
             temporary_credentials,
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/identities/{access_key_id} - View identity details
-    async fn handle_identity_detail(
+    async fn get_identity_detail(
         &self,
         session: Session,
         access_key_id: &str,
@@ -1113,8 +1128,6 @@ impl WebHandler {
         // Check if credential exists
         let has_credential = self
             .credentials_store
-            .read()
-            .await
             .get_credential(access_key_id)
             .await
             .is_some();
@@ -1125,11 +1138,11 @@ impl WebHandler {
             has_credential,
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/buckets - List all buckets
-    async fn handle_buckets(
+    async fn get_admin_buckets(
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1147,11 +1160,11 @@ impl WebHandler {
             buckets,
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/buckets/{bucket} - View bucket contents
-    async fn handle_bucket_detail(
+    async fn get_bucket_detail(
         &self,
         session: Session,
         bucket_path: &str,
@@ -1195,11 +1208,11 @@ impl WebHandler {
             objects,
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// GET /admin/buckets/new - Show form for creating a new bucket
-    async fn handle_bucket_new_form(
+    async fn get_admin_buckets_new(
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1211,11 +1224,11 @@ impl WebHandler {
             page: "buckets".to_string(),
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// POST /admin/api/buckets - Create a new bucket
-    async fn handle_api_create_bucket(
+    async fn post_api_bucket(
         &self,
         req: Request<Incoming>,
         session: Session,
@@ -1257,7 +1270,7 @@ impl WebHandler {
     }
 
     /// GET /admin/buckets/{name}/delete - Show bucket deletion confirmation page
-    async fn handle_bucket_delete_form(
+    async fn get_bucket_delete_form(
         &self,
         session: Session,
         bucket_name: &str,
@@ -1278,11 +1291,11 @@ impl WebHandler {
             object_count: entries.len(),
         };
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
     /// DELETE /admin/api/buckets/{name} - Delete a bucket
-    async fn handle_api_delete_bucket(
+    async fn delete_api_bucket(
         &self,
         req: Request<Incoming>,
         session: Session,
@@ -1339,7 +1352,7 @@ impl WebHandler {
         self.check_auth(&session).await?;
 
         let user_id: String = session
-            .get("user_id")
+            .get(SessionKey::UserId.as_ref())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
@@ -1347,7 +1360,7 @@ impl WebHandler {
             .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
 
         let user_email: String = session
-            .get("user_email")
+            .get(SessionKey::UserEmail.as_ref())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
@@ -1380,7 +1393,10 @@ impl WebHandler {
         // If new credentials were created, store the access_key_id in session
         if was_created {
             session
-                .insert("access_key_id", creds.access_key_id.clone())
+                .insert(
+                    SessionKey::AccessKeyId.as_ref(),
+                    creds.access_key_id.clone(),
+                )
                 .await
                 .map_err(|e| {
                     CrabCakesError::other(&format!(
@@ -1414,10 +1430,19 @@ impl WebHandler {
         // Generate or retrieve CSRF token
         let token = self.generate_csrf_token(&session).await?;
 
+        #[derive(Serialize)]
+        struct CsrfTokenResponse {
+            csrf_token: String,
+        }
+
+        impl CsrfTokenResponse {
+            fn new(csrf_token: String) -> Self {
+                Self { csrf_token }
+            }
+        }
+
         // Return JSON response
-        self.build_json_response(json!({
-            "csrf_token": token
-        }))
+        self.build_json_response(CsrfTokenResponse::new(token))
     }
 
     /// GET /admin/api/policies - List all policies (JSON)
@@ -1430,15 +1455,20 @@ impl WebHandler {
 
         // Get all policy names
         let policy_names = self.policy_store.get_policy_names().await;
+        #[derive(Serialize)]
+        struct PolicySummary {
+            name: String,
+            statement_count: usize,
+        }
 
         // Build response with policy names and statement counts
         let mut policies = Vec::new();
         for name in policy_names {
             if let Some(policy) = self.policy_store.get_policy(&name).await {
-                policies.push(json!({
-                    "name": name,
-                    "statement_count": policy.statement.len()
-                }));
+                policies.push(PolicySummary {
+                    name,
+                    statement_count: policy.statement.len(),
+                });
             }
         }
 
@@ -1560,7 +1590,7 @@ impl WebHandler {
     }
 
     /// GET /admin/api/credentials - List all credentials (JSON)
-    async fn handle_api_list_credentials(
+    async fn get_api_credentials(
         &self,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1568,12 +1598,7 @@ impl WebHandler {
         self.check_auth(&session).await?;
 
         // Get all access key IDs (NOT secret keys)
-        let access_key_ids = self
-            .credentials_store
-            .read()
-            .await
-            .get_access_key_ids()
-            .await;
+        let access_key_ids = self.credentials_store.get_access_key_ids().await;
 
         // Build response with just access key IDs
         let credentials: Vec<serde_json::Value> = access_key_ids
@@ -1589,7 +1614,7 @@ impl WebHandler {
     }
 
     /// POST /admin/api/credentials - Create a new credential
-    async fn handle_api_create_credential(
+    async fn post_api_credential(
         &self,
         req: Request<Incoming>,
         session: Session,
@@ -1620,8 +1645,6 @@ impl WebHandler {
 
         // Add credential
         self.credentials_store
-            .write()
-            .await
             .write_credential(request.access_key_id.clone(), request.secret_access_key)
             .await?;
 
@@ -1633,7 +1656,7 @@ impl WebHandler {
     }
 
     /// PUT /admin/api/credentials/{access_key_id} - Update an existing credential
-    async fn handle_api_update_credential(
+    async fn put_api_credential(
         &self,
         req: Request<Incoming>,
         session: Session,
@@ -1664,8 +1687,6 @@ impl WebHandler {
 
         // Update credential
         self.credentials_store
-            .write()
-            .await
             .update_credential(access_key_id.to_string(), request.secret_access_key)
             .await?;
 
@@ -1677,7 +1698,7 @@ impl WebHandler {
     }
 
     /// DELETE /admin/api/credentials/{access_key_id} - Delete a credential
-    async fn handle_api_delete_credential(
+    async fn delete_api_credential(
         &self,
         req: Request<Incoming>,
         session: Session,
@@ -1694,8 +1715,6 @@ impl WebHandler {
 
         // Delete credential
         self.credentials_store
-            .write()
-            .await
             .delete_credential(access_key_id)
             .await?;
 
@@ -1707,7 +1726,7 @@ impl WebHandler {
     }
 
     /// DELETE /admin/api/temp_creds/{access_key_id} - Delete a temporary credential
-    async fn handle_api_delete_temp_credential(
+    async fn delete_api_temp_credential(
         &self,
         req: Request<Incoming>,
         session: Session,
@@ -1733,10 +1752,7 @@ impl WebHandler {
     }
 
     /// Serve static files (CSS, JS)
-    async fn handle_static_file(
-        &self,
-        path: &str,
-    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    async fn get_static_file(&self, path: &str) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         use std::path::PathBuf;
         use tokio::fs;
 
@@ -1778,7 +1794,7 @@ impl WebHandler {
             .map_err(CrabCakesError::from)
     }
 
-    async fn handle_policy_troubleshooter(
+    async fn get_policy_troubleshooter(
         &self,
         req: Request<Incoming>,
         session: Session,
@@ -1812,10 +1828,10 @@ impl WebHandler {
             });
         }
 
-        self.build_html_response(template.render()?)
+        self.build_html_response(template)
     }
 
-    async fn handle_api_policy_troubleshooter(
+    async fn post_api_policy_troubleshooter(
         &self,
         req: Request<Incoming>,
         session: Session,

@@ -11,25 +11,20 @@ use http::request::Parts;
 use http::{HeaderValue, Method};
 use hyper::body::Bytes;
 use hyper::{Request, header::AUTHORIZATION};
-use iam_rs::{Arn, Context, ContextValue, IAMRequest, Principal, PrincipalId};
+use iam_rs::{Arn, Context, IAMRequest, Principal, PrincipalId};
 use scratchstack_aws_principal::{self, SessionData};
 use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
 use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
     SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
-use tokio::sync::RwLock;
 use tower::BoxError;
 use tracing::{debug, trace};
 
-use crate::constants::{S3, S3Action};
+use crate::constants::{MOCK_ACCOUNT_ID, S3, S3Action};
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
-
-/// Mock AWS Account ID for generated principals
-const MOCK_ACCOUNT_ID: &str = "000000000000";
-
 /// Extract authentication context from HTTP request
 pub struct AuthContext {
     pub principal: Principal,
@@ -46,7 +41,7 @@ pub struct VerifiedRequest {
 /// Verify AWS Signature V4 for a request
 pub async fn verify_sigv4(
     req: http::Request<Vec<u8>>,
-    credentials_store: Arc<RwLock<CredentialStore>>,
+    credentials_store: Arc<CredentialStore>,
     db: Arc<DBService>,
     region: &str,
 ) -> Result<(Parts, Bytes, SigV4AuthenticatorResponse), CrabCakesError> {
@@ -71,15 +66,15 @@ pub async fn verify_sigv4(
                 debug!(access_key = %access_key, "Looking up signing key");
 
                 // Try to get the credential from the permanent store first
-                let secret_access_key = if let Some(secret) =
-                    cred_store.read().await.get_credential(&access_key).await
-                {
-                    debug!(access_key = %access_key, "Found credential in permanent store");
-                    secret
-                } else {
-                    // Try the database for temporary credentials
-                    debug!(access_key = %access_key, "Checking database for temporary credentials");
-                    let temp_cred = db_service
+                let secret_access_key = match cred_store.get_credential(&access_key).await {
+                    Some(secret) => {
+                        debug!(access_key = %access_key, "Found credential in permanent store");
+                        secret
+                    }
+                    None => {
+                        // Try the database for temporary credentials
+                        debug!(access_key = %access_key, "Checking database for temporary credentials");
+                        let temp_cred = db_service
                         .get_temporary_credentials(&access_key)
                         .await
                         .map_err(|e| {
@@ -91,14 +86,17 @@ pub async fn verify_sigv4(
                             BoxError::from("Invalid credential identifier".to_string())
                         })?;
 
-                    // Check if temporary credentials are expired
-                    if temp_cred.expires_at < Utc::now() {
-                        debug!(access_key = %access_key, "Temporary credentials have expired");
-                        return Err(BoxError::from("Temporary credentials expired".to_string()));
-                    }
+                        // Check if temporary credentials are expired
+                        if temp_cred.expires_at < Utc::now() {
+                            debug!(access_key = %access_key, "Temporary credentials have expired");
+                            return Err(BoxError::from(
+                                "Temporary credentials expired".to_string(),
+                            ));
+                        }
 
-                    debug!(access_key = %access_key, "Found valid temporary credential in database");
-                    temp_cred.secret_access_key
+                        debug!(access_key = %access_key, "Found valid temporary credential in database");
+                        temp_cred.secret_access_key
+                    }
                 };
 
                 // Convert secret key to KSecretKey
@@ -262,7 +260,7 @@ impl AuthContext {
         if let Some(username) = &self.username {
             context.insert(
                 "aws:username".to_string(),
-                ContextValue::String(username.clone()),
+                iam_rs::ContextValue::String(username.clone()),
             );
         }
 
@@ -367,7 +365,7 @@ pub fn extract_bucket_and_key(path: &str) -> (Option<String>, Option<String>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::constants::DEFAULT_REGION;
+    use crate::constants::{DEFAULT_REGION, TEST_ALLOWED_BUCKET};
 
     use super::*;
 
@@ -384,15 +382,18 @@ mod tests {
     fn test_extract_bucket_and_key() {
         assert_eq!(
             extract_bucket_and_key("/bucket1/test.txt"),
-            (Some("bucket1".to_string()), Some("test.txt".to_string()))
+            (
+                Some(TEST_ALLOWED_BUCKET.to_string()),
+                Some("test.txt".to_string())
+            )
         );
         assert_eq!(
             extract_bucket_and_key("/bucket1/"),
-            (Some("bucket1".to_string()), None)
+            (Some(TEST_ALLOWED_BUCKET.to_string()), None)
         );
         assert_eq!(
             extract_bucket_and_key("/bucket1"),
-            (Some("bucket1".to_string()), None)
+            (Some(TEST_ALLOWED_BUCKET.to_string()), None)
         );
         assert_eq!(
             extract_bucket_and_key("/test.txt"),

@@ -132,8 +132,7 @@ impl Server {
         let policy_store = Arc::new(PolicyStore::new(&policy_dir)?);
 
         // Load credentials
-        let credentials_store =
-            Arc::new(RwLock::new(CredentialStore::new(&credentials_dir).await?));
+        let credentials_store = Arc::new(CredentialStore::new(&credentials_dir).await?);
 
         // Create multipart manager
         let multipart_manager = Arc::new(RwLock::new(MultipartManager::new(&self.root_dir)));

@@ -12,9 +12,12 @@ use iam_rs::{
 };
 use sha2::{Digest, Sha256};
 use std::fs;
+#[cfg(test)]
+use tempfile::TempDir;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+use crate::constants::MOCK_ACCOUNT_ID;
 use crate::error::CrabCakesError;
 
 fn hash_request(request: &IAMRequest) -> String {
@@ -27,6 +30,16 @@ fn hash_request(request: &IAMRequest) -> String {
         serde_json::to_string(&request.context).unwrap_or(format!("{:?}", request.context))
     ));
     format!("{:x}", hasher.finalize())
+}
+
+pub(crate) fn fix_mock_id(input: &impl ToString) -> String {
+    input
+        .to_string()
+        .replace(
+            "arn:aws:iam:::",
+            &format!("arn:aws:iam::{MOCK_ACCOUNT_ID}:"),
+        )
+        .replace("arn:aws:s3:::", &format!("arn:aws:s3::{MOCK_ACCOUNT_ID}:"))
 }
 
 struct CachedResult {
@@ -120,9 +133,28 @@ impl PolicyStore {
         })
     }
 
+    #[cfg(test)]
+    /// Make sure you don't accidentally drop the tempdir, so do something like this:
+    /// ```
+    /// use crate::policy::PolicyStore;
+    /// let (_tempdir, policy_store) = PolicyStore::test_empty_store();
+    /// ```
+    pub fn test_empty_store() -> (TempDir, Self) {
+        let tempdir = tempfile::tempdir().expect("failed to create temp dir");
+
+        let path = tempdir.path().to_path_buf();
+        (
+            tempdir,
+            Self::new(&path).expect("failed to create policystore"),
+        )
+    }
+
     /// Load a single policy from a JSON file
     fn load_policy(path: &PathBuf) -> Result<IAMPolicy, CrabCakesError> {
-        let contents = fs::read_to_string(path)?;
+        let contents = fs::read_to_string(path).inspect_err(
+            |err| error!(policy_path = path.display().to_string(), error = ?err, "Failed to read policy file"),
+        )?;
+        debug!(contents = contents, "Loaded policy JSON",);
         let policy: IAMPolicy = serde_json::from_str(&contents)?;
         Ok(policy)
     }
@@ -153,6 +185,10 @@ impl PolicyStore {
         &self,
         request: &IAMRequest,
     ) -> Result<(Option<EvaluationResult>, Decision), CrabCakesError> {
+        // serialise the request then replace the account ID with the mock one
+        let request_json = fix_mock_id(&serde_json::to_string(request)?);
+        let request: IAMRequest = serde_json::from_str(&request_json)?;
+
         debug!(
             principal = ?request.principal,
             action = %request.action,
@@ -226,9 +262,9 @@ impl PolicyStore {
         }
 
         // check for a result in the cache
-        let hashed_request = hash_request(request);
+        let hashed_request = hash_request(&request);
         let res = {
-            let cached_result = self.get_cached_result(request).await;
+            let cached_result = self.get_cached_result(&request).await;
             match cached_result {
                 Some(decision) => {
                     debug!("Cache hit for request");
@@ -238,7 +274,7 @@ impl PolicyStore {
                     let evaluator = PolicyEvaluator::with_policies(self.policies().await);
 
                     let res = evaluator
-                        .evaluate(request)
+                        .evaluate(&request)
                         .inspect_err(|e| error!(error = %e, "Error evaluating policies"))?;
                     // store the result in the cache
                     {
@@ -321,13 +357,15 @@ impl PolicyStore {
             error!("Attempted path traversal in policy creation: {}", name);
             return Err(CrabCakesError::InvalidPath);
         }
-        let policy_json = serde_json::to_string_pretty(&policy)?;
-        fs::write(&policy_path, policy_json)?;
+        let policy_json = fix_mock_id(&serde_json::to_string_pretty(&policy)?);
+
+        fs::write(&policy_path, &policy_json)
+        .inspect_err(|e| error!(policy_path = policy_path.display().to_string(), error = %e, "Failed to write policy to file!"))?;
 
         // Update in-memory store
         {
             let mut policies = self.policies.write().await;
-            policies.insert(name.clone(), policy);
+            policies.insert(name.clone(), serde_json::from_str(&policy_json)?);
         }
 
         // Clear cache

@@ -15,8 +15,8 @@ use crate::{constants::SECRET_ACCESS_KEY_LENGTH, error::CrabCakesError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Credential {
-    access_key_id: String,
-    secret_access_key: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
 }
 
 impl TryFrom<(&str, &str)> for Credential {
@@ -267,14 +267,14 @@ impl CredentialStore {
 
     /// Create an empty credential store (for testing)
     #[cfg(test)]
-    pub async fn new_test() -> Arc<RwLock<Self>> {
+    pub async fn new_test() -> Arc<Self> {
         let random_number = rand::random::<u32>();
         let temp_dir =
             std::env::temp_dir().join(format!("crabcakes_test_credentials{random_number}"));
         fs::create_dir_all(&temp_dir).await.ok();
-        Arc::new(RwLock::new(Self {
+        Arc::new(Self {
             credentials: Arc::new(RwLock::new(HashMap::new())),
             credentials_dir: temp_dir,
-        }))
+        })
     }
 }

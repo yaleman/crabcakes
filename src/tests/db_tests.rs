@@ -3,7 +3,10 @@
 use std::sync::Arc;
 use tempfile::TempDir;
 
-use crate::db::{DBService, initialize_database, initialize_in_memory_database};
+use crate::{
+    constants::TEST_ALLOWED_BUCKET,
+    db::{DBService, initialize_database, initialize_in_memory_database},
+};
 
 /// Create an in-memory test database
 async fn setup_test_db() -> Arc<DBService> {
@@ -49,13 +52,13 @@ async fn test_get_tags_existing() {
         ("Owner".to_string(), "Alice".to_string()),
     ];
     db_service
-        .put_tags("bucket1", "file.txt", tags.clone())
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags.clone())
         .await
         .expect("Should store tags");
 
     // Get tags
     let retrieved = db_service
-        .get_tags("bucket1", "file.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "file.txt")
         .await
         .expect("Should retrieve tags");
 
@@ -75,7 +78,7 @@ async fn test_get_tags_nonexistent() {
     let db_service = setup_test_db().await;
 
     let tags = db_service
-        .get_tags("bucket1", "nonexistent.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "nonexistent.txt")
         .await
         .expect("Should return empty tag set");
 
@@ -93,17 +96,19 @@ async fn test_delete_tags() {
     // Put tags first
     let tags = vec![("Key1".to_string(), "Value1".to_string())];
     db_service
-        .put_tags("bucket1", "file.txt", tags)
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags)
         .await
         .expect("Should store tags");
 
     // Delete tags
-    let result = db_service.delete_tags("bucket1", "file.txt").await;
+    let result = db_service
+        .delete_tags(TEST_ALLOWED_BUCKET, "file.txt")
+        .await;
     assert!(result.is_ok(), "Should delete tags successfully");
 
     // Verify tags are deleted
     let retrieved = db_service
-        .get_tags("bucket1", "file.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "file.txt")
         .await
         .expect("Should retrieve tags");
     assert_eq!(retrieved.len(), 0, "Tags should be deleted");
@@ -119,20 +124,20 @@ async fn test_put_tags_replaces_existing() {
         ("Tag2".to_string(), "Value2".to_string()),
     ];
     db_service
-        .put_tags("bucket1", "file.txt", initial_tags)
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", initial_tags)
         .await
         .expect("Should store initial tags");
 
     // Replace with new tags
     let new_tags = vec![("NewTag".to_string(), "NewValue".to_string())];
     db_service
-        .put_tags("bucket1", "file.txt", new_tags)
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", new_tags)
         .await
         .expect("Should replace tags");
 
     // Verify only new tags exist
     let retrieved = db_service
-        .get_tags("bucket1", "file.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "file.txt")
         .await
         .expect("Should retrieve tags");
     assert_eq!(retrieved.len(), 1, "Should have only 1 tag");
@@ -152,7 +157,9 @@ async fn test_put_tags_too_many() {
         .map(|i| (format!("Tag{}", i), format!("Value{}", i)))
         .collect();
 
-    let result = db_service.put_tags("bucket1", "file.txt", tags).await;
+    let result = db_service
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags)
+        .await;
     assert!(result.is_err(), "Should reject more than 10 tags");
     assert!(
         result.unwrap_err().to_string().contains("Too many tags"),
@@ -165,7 +172,9 @@ async fn test_put_tags_empty_key() {
     let db_service = setup_test_db().await;
 
     let tags = vec![("".to_string(), "Value".to_string())];
-    let result = db_service.put_tags("bucket1", "file.txt", tags).await;
+    let result = db_service
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags)
+        .await;
 
     assert!(result.is_err(), "Should reject empty tag key");
     assert!(
@@ -181,7 +190,9 @@ async fn test_put_tags_key_too_long() {
     // Create a key with 129 characters (exceeds limit of 128)
     let long_key = "a".repeat(129);
     let tags = vec![(long_key, "Value".to_string())];
-    let result = db_service.put_tags("bucket1", "file.txt", tags).await;
+    let result = db_service
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags)
+        .await;
 
     assert!(result.is_err(), "Should reject tag key > 128 characters");
     assert!(
@@ -197,7 +208,9 @@ async fn test_put_tags_value_too_long() {
     // Create a value with 257 characters (exceeds limit of 256)
     let long_value = "b".repeat(257);
     let tags = vec![("Key".to_string(), long_value)];
-    let result = db_service.put_tags("bucket1", "file.txt", tags).await;
+    let result = db_service
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags)
+        .await;
 
     assert!(result.is_err(), "Should reject tag value > 256 characters");
     assert!(
@@ -218,12 +231,14 @@ async fn test_put_tags_max_valid_lengths() {
     let max_value = "v".repeat(256);
     let tags = vec![(max_key.clone(), max_value.clone())];
 
-    let result = db_service.put_tags("bucket1", "file.txt", tags).await;
+    let result = db_service
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags)
+        .await;
     assert!(result.is_ok(), "Should accept max valid tag lengths");
 
     // Verify tags were stored
     let retrieved = db_service
-        .get_tags("bucket1", "file.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "file.txt")
         .await
         .expect("Should retrieve tags");
     assert_eq!(retrieved.len(), 1);
@@ -241,11 +256,11 @@ async fn test_tags_isolated_by_bucket_and_key() {
     let tags3 = vec![("Tag3".to_string(), "Value3".to_string())];
 
     db_service
-        .put_tags("bucket1", "file1.txt", tags1)
+        .put_tags(TEST_ALLOWED_BUCKET, "file1.txt", tags1)
         .await
         .expect("Should store tags1");
     db_service
-        .put_tags("bucket1", "file2.txt", tags2)
+        .put_tags(TEST_ALLOWED_BUCKET, "file2.txt", tags2)
         .await
         .expect("Should store tags2");
     db_service
@@ -254,8 +269,14 @@ async fn test_tags_isolated_by_bucket_and_key() {
         .expect("Should store tags3");
 
     // Verify tags are isolated
-    let retrieved1 = db_service.get_tags("bucket1", "file1.txt").await.unwrap();
-    let retrieved2 = db_service.get_tags("bucket1", "file2.txt").await.unwrap();
+    let retrieved1 = db_service
+        .get_tags(TEST_ALLOWED_BUCKET, "file1.txt")
+        .await
+        .unwrap();
+    let retrieved2 = db_service
+        .get_tags(TEST_ALLOWED_BUCKET, "file2.txt")
+        .await
+        .unwrap();
     let retrieved3 = db_service.get_tags("bucket2", "file1.txt").await.unwrap();
 
     assert_eq!(retrieved1.len(), 1);
@@ -271,11 +292,15 @@ async fn test_delete_tags_idempotent() {
     let db_service = setup_test_db().await;
 
     // Delete tags for non-existent object (should succeed)
-    let result = db_service.delete_tags("bucket1", "nonexistent.txt").await;
+    let result = db_service
+        .delete_tags(TEST_ALLOWED_BUCKET, "nonexistent.txt")
+        .await;
     assert!(result.is_ok(), "Delete should be idempotent");
 
     // Delete again (should still succeed)
-    let result2 = db_service.delete_tags("bucket1", "nonexistent.txt").await;
+    let result2 = db_service
+        .delete_tags(TEST_ALLOWED_BUCKET, "nonexistent.txt")
+        .await;
     assert!(result2.is_ok(), "Delete should be idempotent");
 }
 
@@ -308,11 +333,14 @@ async fn test_unicode_in_tags() {
     ];
 
     let result = db_service
-        .put_tags("bucket1", "file.txt", tags.clone())
+        .put_tags(TEST_ALLOWED_BUCKET, "file.txt", tags.clone())
         .await;
     assert!(result.is_ok(), "Should handle Unicode in tag values");
 
-    let retrieved = db_service.get_tags("bucket1", "file.txt").await.unwrap();
+    let retrieved = db_service
+        .get_tags(TEST_ALLOWED_BUCKET, "file.txt")
+        .await
+        .unwrap();
     assert_eq!(retrieved.len(), 2);
     assert!(
         retrieved

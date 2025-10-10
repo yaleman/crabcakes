@@ -9,7 +9,7 @@
   - [ ] Add CSRF token generation (using session storage)
   - [ ] Add CSRF token validation on all POST/PUT/DELETE requests
   - [ ] GET /admin/api/csrf-token - Get CSRF token for current session
-  - [ ] Add X-CSRF-Token header validation to all mutating endpointstoken)
+  - [ ] Add X-CSRF-Token header validation to all mutating endpoints
 
 ---
 

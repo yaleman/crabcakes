@@ -1,0 +1,28 @@
+{
+    "Version": "2012-10-17",
+    "Id": "S3BucketPolicy",
+    "Statement": [
+        {
+            "Sid": "AllowS3All",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:*"
+            ],
+            "Resource": "arn:aws:s3:::bucket1/testuser/*"
+        },
+        {
+            "Sid": "AllowS3AllTestUserBucket",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:*"
+            ],
+            "Resource": "arn:aws:s3:::bucket1/testuser"
+        }
+    ]
+}
