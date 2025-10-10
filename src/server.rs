@@ -91,6 +91,8 @@ impl Server {
         let addr = format!("{host}:0");
         // Try to bind to the port
         if let Ok(listener) = TcpListener::bind(&addr).await {
+            use crate::constants::DEFAULT_REGION;
+
             let port = listener.local_addr()?.port();
             let server = Server::new(Cli {
                 host,
@@ -99,13 +101,13 @@ impl Server {
                 })?,
                 root_dir,
                 config_dir,
-                region: "crabcakes".to_string(), // Use default region for tests
-                tls_cert: None,                  // No TLS cert in test mode
-                tls_key: None,                   // No TLS key in test mode
-                disable_api: true,               // Disable API in test mode
-                oidc_client_id: None,            // No OIDC in test mode
-                oidc_discovery_url: None,        // No OIDC in test mode
-                frontend_url: None,              // No frontend URL in test mode
+                region: DEFAULT_REGION.to_string(), // Use default region for tests
+                tls_cert: None,                     // No TLS cert in test mode
+                tls_key: None,                      // No TLS key in test mode
+                disable_api: true,                  // Disable API in test mode
+                oidc_client_id: None,               // No OIDC in test mode
+                oidc_discovery_url: None,           // No OIDC in test mode
+                frontend_url: None,                 // No frontend URL in test mode
             });
             return Ok((server, port));
         }

@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 use tower::BoxError;
 use tracing::{debug, trace};
 
-use crate::constants::S3Action;
+use crate::constants::{S3, S3Action};
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::error::CrabCakesError;
@@ -156,7 +156,7 @@ pub async fn verify_sigv4(
     let (parts, body, auth) = sigv4_validate_request(
         req,
         region,
-        "s3",
+        S3,
         &mut service,
         Utc::now(),
         &NO_ADDITIONAL_SIGNED_HEADERS,
@@ -367,6 +367,8 @@ pub fn extract_bucket_and_key(path: &str) -> (Option<String>, Option<String>) {
 
 #[cfg(test)]
 mod tests {
+    use crate::constants::DEFAULT_REGION;
+
     use super::*;
 
     #[test]
@@ -468,7 +470,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature required - should fail
-        let result = verify_sigv4(request, cred_store, db, "crabcakes").await;
+        let result = verify_sigv4(request, cred_store, db, DEFAULT_REGION).await;
 
         assert!(
             result.is_err(),
@@ -495,7 +497,7 @@ mod tests {
             .unwrap();
 
         // Verify with signature not required - should return error indicating no auth
-        let result = verify_sigv4(request, cred_store, db, "crabcakes").await;
+        let result = verify_sigv4(request, cred_store, db, DEFAULT_REGION).await;
 
         assert!(
             result.is_err(),
@@ -523,7 +525,7 @@ mod tests {
             .unwrap();
 
         // Verify - should fail
-        let result = verify_sigv4(request, cred_store, db, "crabcakes").await;
+        let result = verify_sigv4(request, cred_store, db, DEFAULT_REGION).await;
 
         assert!(
             result.is_err(),

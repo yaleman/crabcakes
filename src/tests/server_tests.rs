@@ -9,6 +9,7 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 
+use crate::constants::{DEFAULT_REGION, RESERVED_BUCKET_NAMES, S3};
 use crate::server::Server;
 use crate::setup_test_logging;
 
@@ -73,7 +74,7 @@ fn test_sigv4_key() {
 
     let date = NaiveDate::default();
 
-    let _signing_key = secret_key.to_ksigning(date, "crabcakes", "s3");
+    let _signing_key = secret_key.to_ksigning(date, DEFAULT_REGION, S3);
 
     assert_eq!(
         KSecretKey::from_str("tooshort"),
@@ -99,7 +100,7 @@ async fn create_s3_client(port: u16) -> Client {
     );
     let config = aws_config::defaults(BehaviorVersion::latest())
         .credentials_provider(creds)
-        .region(Region::new("crabcakes"))
+        .region(Region::new(DEFAULT_REGION))
         .load()
         .await;
 
@@ -920,7 +921,7 @@ async fn test_get_bucket_location() {
     assert!(constraint.is_some(), "LocationConstraint should be present");
     let constraint_value = constraint.unwrap().as_str();
     assert_eq!(
-        constraint_value, "crabcakes",
+        constraint_value, DEFAULT_REGION,
         "Expected region to be 'crabcakes'"
     );
 
@@ -1053,23 +1054,8 @@ async fn test_reserved_bucket_names() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    // List of reserved bucket names that should be rejected
-    let reserved_names = vec![
-        "admin",
-        "api",
-        "login",
-        "logout",
-        "oauth2",
-        ".well-known",
-        "config",
-        "oidc",
-        "crabcakes",
-        "docs",
-        "help",
-    ];
-
-    for bucket_name in reserved_names {
-        let create_result = client.create_bucket().bucket(bucket_name).send().await;
+    for bucket_name in RESERVED_BUCKET_NAMES {
+        let create_result = client.create_bucket().bucket(*bucket_name).send().await;
 
         assert!(
             create_result.is_err(),
