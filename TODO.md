@@ -47,7 +47,6 @@
   - [ ] this stores all actions while it's running (maybe in the database?) for later reference
 - [ ] regular database vacuum with a record of when it was last done, so if it's overdue or really needs it, then just run the task
 - [ ] turn on consistency features for sqlite to handle crashes better if there are some
-- [ ] possibly look at offering postgresql as a database backend
 
 ---
 
