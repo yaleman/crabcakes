@@ -1902,7 +1902,7 @@ async fn handle_troubleshooter_request(
             max_statements: usize::MAX,
             ignore_resource_constraints: false,
         });
-    let mut evaluation_result = policyevaluator.evaluate(&iam_request)?;
+    let evaluation_result = policyevaluator.evaluate(&iam_request)?;
 
     let response = TroubleShooterResponse {
         decision: evaluation_result,
