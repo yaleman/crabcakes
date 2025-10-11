@@ -39,7 +39,6 @@ pub(crate) fn fix_mock_id(input: &impl ToString) -> String {
             "arn:aws:iam:::",
             &format!("arn:aws:iam::{MOCK_ACCOUNT_ID}:"),
         )
-        .replace("arn:aws:s3:::", &format!("arn:aws:s3::{MOCK_ACCOUNT_ID}:"))
 }
 
 struct CachedResult {
@@ -155,7 +154,9 @@ impl PolicyStore {
             |err| error!(policy_path = path.display().to_string(), error = ?err, "Failed to read policy file"),
         )?;
         debug!(contents = contents, "Loaded policy JSON",);
-        let policy: IAMPolicy = serde_json::from_str(&contents)?;
+        // Apply mock ID transformation to match request transformation
+        let transformed_contents = fix_mock_id(&contents);
+        let policy: IAMPolicy = serde_json::from_str(&transformed_contents)?;
         Ok(policy)
     }
 

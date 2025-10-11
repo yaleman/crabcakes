@@ -10,7 +10,9 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 
-use crate::constants::{DEFAULT_REGION, RESERVED_BUCKET_NAMES, S3, TEST_ALLOWED_BUCKET};
+use crate::constants::{
+    DEFAULT_REGION, RESERVED_BUCKET_NAMES, S3, TEST_ALLOWED_BUCKET, TEST_ALLOWED_BUCKET2,
+};
 use crate::credentials::Credential;
 use crate::server::Server;
 use crate::setup_test_logging;
@@ -275,13 +277,14 @@ async fn test_list_objects_with_prefix() {
 
 #[tokio::test]
 async fn test_path_style_bucket_listing() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     let result = client
         .list_objects_v2()
-        .bucket(TEST_ALLOWED_BUCKET)
+        .bucket(TEST_ALLOWED_BUCKET2)
         .send()
         .await;
     assert!(result.is_ok(), "ListObjectsV2 failed: {:?}", result.err());
@@ -294,14 +297,22 @@ async fn test_path_style_bucket_listing() {
 
 #[tokio::test]
 async fn test_list_with_file_prefix() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
-    let (handle, port) = start_test_server(temp_dir.path()).await;
+    std::fs::read_dir(temp_dir.path().join(TEST_ALLOWED_BUCKET2).join("testuser"))
+        .expect("Can't read temp dir")
+        .for_each(|entry| {
+            let entry = entry.unwrap();
+            debug!("Temp dir contains: {:?}", entry.path());
+        });
+    let (_handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
+    let prefix = "testuser";
     let result = client
         .list_objects_v2()
-        .bucket(TEST_ALLOWED_BUCKET)
-        .prefix("test.txt")
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .prefix(prefix)
         .send()
         .await;
     assert!(
@@ -311,17 +322,21 @@ async fn test_list_with_file_prefix() {
     );
 
     let output = result.unwrap();
-    assert_eq!(output.prefix(), Some("bucket1/test.txt"));
+    dbg!(&output);
+    assert_eq!(
+        output.prefix(),
+        Some(format!("{TEST_ALLOWED_BUCKET2}/{prefix}").as_str())
+    );
+
     let contents = output.contents();
     assert!(!contents.is_empty());
     assert!(
         contents
             .iter()
-            .any(|obj| obj.key() == Some("bucket1/test.txt")),
-        "Expected to find bucket1/test.txt in listing"
+            .any(|obj| obj.key() == Some("bucket2/testuser/test.txt")),
+        "Expected to find \"bucket2/testuser/test.txt\" in listing"
     );
-
-    handle.abort();
+    dbg!(&output);
 }
 
 #[tokio::test]

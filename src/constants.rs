@@ -130,3 +130,5 @@ impl AsRef<str> for SessionKey {
 
 #[cfg(test)]
 pub(crate) static TEST_ALLOWED_BUCKET: &str = "bucket1";
+#[cfg(test)]
+pub(crate) static TEST_ALLOWED_BUCKET2: &str = "bucket2";
