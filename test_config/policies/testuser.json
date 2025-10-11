@@ -51,6 +51,31 @@
             "Resource": [
                 "*"
             ]
+        },
+        {
+            "Sid": "AllowListBucket1",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::bucket1"
+        },
+        {
+            "Sid": "AllowCreateDeleteBucket21",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:CreateBucket",
+                "s3:HeadBucket",
+                "s3:ListBucket",
+                "s3:DeleteBucket"
+            ],
+            "Resource": "arn:aws:s3:::bucket21"
         }
     ]
 }

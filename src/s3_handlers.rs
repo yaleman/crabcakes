@@ -18,7 +18,7 @@ use hyper::body::Bytes;
 use hyper::{Method, Request, Response, StatusCode};
 use iam_rs::Decision;
 use scratchstack_arn::Arn;
-use scratchstack_aws_principal::PrincipalIdentity;
+use scratchstack_aws_principal::{PrincipalIdentity, User};
 use scratchstack_aws_signature::auth::SigV4AuthenticatorResponse;
 use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
@@ -32,7 +32,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
 use crate::body_buffer::BufferedBody;
-use crate::constants::{RESERVED_BUCKET_NAMES, S3, S3Action};
+use crate::constants::{MOCK_ACCOUNT_ID, RESERVED_BUCKET_NAMES, S3, S3Action};
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::filesystem::FilesystemService;
@@ -81,6 +81,7 @@ impl S3Handler {
 
     /// Verify AWS Signature V4 and buffer the request body
     /// Returns Ok with (parts, buffered_body, SigV4AuthenticatorResponse) or Err with error response
+    #[instrument(level = "debug", skip_all)]
     async fn verify_and_buffer_request(
         &self,
         request: Request<hyper::body::Incoming>,
@@ -149,9 +150,15 @@ impl S3Handler {
 
                         let signing_key =
                             secret_key.to_ksigning(req.request_date(), req.region(), req.service());
-
+                        let principal = PrincipalIdentity::User(User::new(
+                            "aws",
+                            MOCK_ACCOUNT_ID,
+                            "/",
+                            req.access_key(),
+                        )?);
                         Ok(GetSigningKeyResponse::builder()
                             .signing_key(signing_key)
+                            .principal(vec![principal])
                             .build()?)
                     } else {
                         Err(tower::BoxError::from(format!(
@@ -276,6 +283,7 @@ impl S3Handler {
                             return Some(self.internal_error_response());
                         }
                     };
+                debug!(request = ?iam_request, "asdfasfsEvaluating IAM policy for request");
 
                 match self.policy_store.evaluate_request(&iam_request).await {
                     Ok(Decision::Allow) => {
@@ -370,6 +378,7 @@ impl S3Handler {
             }
         } else {
             // Fallback to anonymous if signature not required
+            debug!("No principal found in authenticator response, treating as anonymous");
             AuthContext {
                 principal: iam_rs::Principal::Wildcard,
                 username: None,
@@ -690,8 +699,6 @@ impl S3Handler {
         if let Some(copy_source) = copy_source {
             span.record("copy_source", tracing::field::display(copy_source));
         }
-        eprintln!("S3 Action: {}", s3_action);
-
         span.record("s3_action", tracing::field::display(&s3_action));
 
         span.record("remote_addr", tracing::field::display(remote_addr));
@@ -763,13 +770,19 @@ impl S3Handler {
         for param in query.split('&') {
             if let Some((key, value)) = param.split_once('=') {
                 match key {
-                    "prefix" => query_prefix = Some(value.to_string()),
+                    "prefix" => {
+                        // URL-decode the prefix parameter
+                        query_prefix = urlencoding::decode(value).ok().map(|s| s.into_owned())
+                    }
                     "max-keys" => {
                         if let Ok(mk) = value.parse::<usize>() {
                             max_keys = mk.min(1000);
                         }
                     }
-                    "continuation-token" => continuation_token = Some(value),
+                    "continuation-token" => {
+                        // URL-decode the continuation token
+                        continuation_token = urlencoding::decode(value).ok().map(|s| s.into_owned())
+                    }
                     _ => {}
                 }
             }
@@ -820,10 +833,11 @@ impl S3Handler {
             prefix = Some(query_prefix);
         }
 
-        match self
-            .filesystem
-            .list_directory(prefix.as_deref(), max_keys, continuation_token)
-        {
+        match self.filesystem.list_directory(
+            prefix.as_deref(),
+            max_keys,
+            continuation_token.as_deref(),
+        ) {
             Ok((entries, next_token)) => {
                 debug!(
                     count = entries.len(),
@@ -876,13 +890,23 @@ impl S3Handler {
         for param in query.split('&') {
             if let Some((key, value)) = param.split_once('=') {
                 match key {
-                    "prefix" => query_prefix = Some(value.to_string()),
+                    "prefix" => {
+                        // URL-decode the prefix parameter
+                        query_prefix = urlencoding::decode(value).ok().map(|s| s.into_owned())
+                    }
                     "max-keys" => {
                         if let Ok(mk) = value.parse::<usize>() {
                             max_keys = mk.min(1000);
                         }
                     }
-                    "marker" => marker = value.to_string(),
+                    "marker" => {
+                        // URL-decode the marker parameter
+                        if let Some(query_marker) =
+                            urlencoding::decode(value).ok().map(|s| s.into_owned())
+                        {
+                            marker = query_marker;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1363,7 +1387,7 @@ impl S3Handler {
         let (source_bucket, source_object_key) =
             extract_bucket_and_key(&format!("/{}", source_key));
 
-        // Check s3:GetObject permission on source
+        // permission on source
         let source_iam_request = match auth_context.build_iam_request(
             S3Action::GetObject,
             source_bucket.as_deref(),
@@ -2317,14 +2341,19 @@ impl S3Handler {
     }
 
     fn invalid_bucket_name_response(&self, reason: &str) -> Response<Full<Bytes>> {
-        #[allow(clippy::expect_used)]
-        Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(CONTENT_TYPE, "application/xml")
-            .body(Full::new(Bytes::from(format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidBucketName</Code><Message>{}</Message></Error>",
-                reason
-            ))))
-            .expect("Failed to generate an invalid bucket name response")
+        let mut response = Response::new(Full::new(Bytes::from(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidBucketName</Code><Message>{}</Message></Error>",
+            reason
+        ))));
+        *response.status_mut() = StatusCode::BAD_REQUEST;
+        tracing::Span::current().record(
+            "status_code",
+            tracing::field::display(StatusCode::BAD_REQUEST.as_u16()),
+        );
+        response
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+
+        response
     }
 }

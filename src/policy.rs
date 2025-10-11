@@ -15,7 +15,7 @@ use std::fs;
 #[cfg(test)]
 use tempfile::TempDir;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::constants::MOCK_ACCOUNT_ID;
 use crate::error::CrabCakesError;
@@ -33,12 +33,10 @@ fn hash_request(request: &IAMRequest) -> String {
 }
 
 pub(crate) fn fix_mock_id(input: &impl ToString) -> String {
-    input
-        .to_string()
-        .replace(
-            "arn:aws:iam:::",
-            &format!("arn:aws:iam::{MOCK_ACCOUNT_ID}:"),
-        )
+    input.to_string().replace(
+        "arn:aws:iam:::",
+        &format!("arn:aws:iam::{MOCK_ACCOUNT_ID}:"),
+    )
 }
 
 struct CachedResult {
@@ -160,12 +158,13 @@ impl PolicyStore {
         Ok(policy)
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub async fn get_cached_result(&self, request: &IAMRequest) -> Option<EvaluationResult> {
         let hashed_request: String = hash_request(request);
         let mut cache = self.result_cache.write().await;
         if let Some(cached_result) = cache.get(&hashed_request) {
             if !cached_result.expired(*self.expiry_secs.read().await) {
-                debug!("Cache hit for request");
+                debug!("Found cached decision");
                 return Some(cached_result.evaluation_result.clone());
             } else {
                 debug!("Cache entry expired for request");
@@ -268,7 +267,7 @@ impl PolicyStore {
             let cached_result = self.get_cached_result(&request).await;
             match cached_result {
                 Some(decision) => {
-                    debug!("Cache hit for request");
+                    trace!("Cache hit for request");
                     decision
                 }
                 None => {

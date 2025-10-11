@@ -123,6 +123,8 @@ pub async fn verify_sigv4(
                             BoxError::from(format!("Failed to create principal: {}", e))
                         })?;
 
+                debug!("returning principal: {:?}", principal);
+
                 GetSigningKeyResponse::builder()
                     .principal(principal)
                     .signing_key(signing_key)
@@ -247,6 +249,8 @@ impl AuthContext {
         };
 
         debug!(
+            bucket = ?bucket,
+            key = ?key,
             principal = ?self.principal,
             action = %action,
             resource = %resource_arn_str,
@@ -264,12 +268,14 @@ impl AuthContext {
             );
         }
 
-        Ok(IAMRequest {
+        let res = IAMRequest {
             principal: self.principal.clone(),
             action: action.to_string(),
             resource: resource_arn,
             context,
-        })
+        };
+        debug!(?res, "Constructed IAM request");
+        Ok(res)
     }
 }
 
