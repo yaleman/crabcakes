@@ -1846,13 +1846,13 @@ impl WebHandler {
             .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
 
         let form: TroubleShooterForm = serde_json::from_str(body_str)?;
-        // build the iam request
 
         let response = handle_troubleshooter_request(form, &self.policy_store).await?;
         self.build_json_response(response)
     }
 }
 
+/// Inner caller for the troubleshooter logic, separated for testing
 async fn handle_troubleshooter_request(
     form: TroubleShooterForm,
     policy_store: &PolicyStore,
@@ -1902,7 +1902,7 @@ async fn handle_troubleshooter_request(
             max_statements: usize::MAX,
             ignore_resource_constraints: false,
         });
-    let evaluation_result = policyevaluator.evaluate(&iam_request)?;
+    let mut evaluation_result = policyevaluator.evaluate(&iam_request)?;
 
     let response = TroubleShooterResponse {
         decision: evaluation_result,
@@ -1924,7 +1924,13 @@ mod tests {
     }
 
     /// Helper to build TroubleShooterForm
-    fn build_form(bucket: &str, key: &str, user: &str, action: &str, policy: &str) -> TroubleShooterForm {
+    fn build_form(
+        bucket: &str,
+        key: &str,
+        user: &str,
+        action: &str,
+        policy: &str,
+    ) -> TroubleShooterForm {
         TroubleShooterForm {
             bucket: bucket.to_string(),
             key: key.to_string(),
@@ -1955,7 +1961,13 @@ mod tests {
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket1_testuser_prefix_allow() {
         let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "testuser/file.txt", "testuser", "s3:GetObject", "");
+        let form = build_form(
+            "bucket1",
+            "testuser/file.txt",
+            "testuser",
+            "s3:GetObject",
+            "",
+        );
 
         let response = handle_troubleshooter_request(form, &policy_store)
             .await
@@ -1967,7 +1979,13 @@ mod tests {
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket1_testuser_wildcard_allow() {
         let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "testuser/subdir/file.txt", "testuser", "s3:PutObject", "");
+        let form = build_form(
+            "bucket1",
+            "testuser/subdir/file.txt",
+            "testuser",
+            "s3:PutObject",
+            "",
+        );
 
         let response = handle_troubleshooter_request(form, &policy_store)
             .await
@@ -2094,7 +2112,13 @@ mod tests {
     #[tokio::test]
     async fn test_troubleshooter_otheruser_bucket1_deny() {
         let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "testuser/file.txt", "otheruser", "s3:GetObject", "");
+        let form = build_form(
+            "bucket1",
+            "testuser/file.txt",
+            "otheruser",
+            "s3:GetObject",
+            "",
+        );
 
         let response = handle_troubleshooter_request(form, &policy_store)
             .await
@@ -2150,7 +2174,13 @@ mod tests {
     #[tokio::test]
     async fn test_troubleshooter_specific_policy_filter() {
         let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "testuser/file.txt", "testuser", "s3:GetObject", "testuser");
+        let form = build_form(
+            "bucket1",
+            "testuser/file.txt",
+            "testuser",
+            "s3:GetObject",
+            "testuser",
+        );
 
         let response = handle_troubleshooter_request(form, &policy_store)
             .await
@@ -2163,7 +2193,13 @@ mod tests {
     #[tokio::test]
     async fn test_troubleshooter_all_policies_evaluated() {
         let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "testuser/file.txt", "testuser", "s3:GetObject", "");
+        let form = build_form(
+            "bucket1",
+            "testuser/file.txt",
+            "testuser",
+            "s3:GetObject",
+            "",
+        );
 
         let response = handle_troubleshooter_request(form, &policy_store)
             .await
