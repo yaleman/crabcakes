@@ -1848,55 +1848,63 @@ impl WebHandler {
         let form: TroubleShooterForm = serde_json::from_str(body_str)?;
         // build the iam request
 
-        let mut arnstr = form.bucket.to_string();
-        if arnstr.is_empty() {
-            arnstr.push('*');
-        }
-
-        if !form.key.is_empty() {
-            arnstr.push_str(&format!("/{}", form.key));
-        };
-
-        let iam_request = IAMRequest::new(
-            iam_rs::Principal::Aws(PrincipalId::String(format!(
-                "arn:aws:iam:::user/{}",
-                form.user
-            ))),
-            form.action.clone(),
-            Arn::from_str(&format!("arn:aws:s3:::{arnstr}"))?,
-        );
-
-        // look for a policy that matches the bucket and key
-        let policies = self.policy_store.policies.read().await;
-        let filtered_policies = policies
-            .iter()
-            .filter_map(|(name, policy)| match &form.policy.is_empty() {
-                false => {
-                    if name == &form.policy {
-                        Some(policy.clone())
-                    } else {
-                        None
-                    }
-                }
-                true => Some(policy.clone()),
-            })
-            .collect();
-
-        let policyevaluator =
-            PolicyEvaluator::with_policies(filtered_policies).with_options(EvaluationOptions {
-                stop_on_explicit_deny: false,
-                collect_match_details: true,
-                max_statements: usize::MAX,
-                ignore_resource_constraints: false,
-            });
-        let evaluation_result = policyevaluator.evaluate(&iam_request)?;
-
-        let response = TroubleShooterResponse {
-            decision: evaluation_result,
-        };
-        debug!("Troubleshooter response: {:?}", response);
+        let response = handle_troubleshooter_request(form, &self.policy_store).await?;
         self.build_json_response(response)
     }
+}
+
+async fn handle_troubleshooter_request(
+    form: TroubleShooterForm,
+    policy_store: &PolicyStore,
+) -> Result<TroubleShooterResponse, CrabCakesError> {
+    let mut arnstr = form.bucket.to_string();
+    if arnstr.is_empty() {
+        arnstr.push('*');
+    }
+
+    if !form.key.is_empty() {
+        arnstr.push_str(&format!("/{}", form.key));
+    };
+
+    let iam_request = IAMRequest::new(
+        iam_rs::Principal::Aws(PrincipalId::String(format!(
+            "arn:aws:iam:::user/{}",
+            form.user
+        ))),
+        form.action.clone(),
+        Arn::from_str(&format!("arn:aws:s3:::{arnstr}"))?,
+    );
+
+    // look for a policy that matches the bucket and key
+    let policies = policy_store.policies.read().await;
+    let filtered_policies = policies
+        .iter()
+        .filter_map(|(name, policy)| match &form.policy.is_empty() {
+            false => {
+                if name == &form.policy {
+                    Some(policy.clone())
+                } else {
+                    None
+                }
+            }
+            true => Some(policy.clone()),
+        })
+        .collect();
+
+    let policyevaluator =
+        PolicyEvaluator::with_policies(filtered_policies).with_options(EvaluationOptions {
+            stop_on_explicit_deny: false,
+            collect_match_details: true,
+            max_statements: usize::MAX,
+            ignore_resource_constraints: false,
+        });
+    let evaluation_result = policyevaluator.evaluate(&iam_request)?;
+
+    let response = TroubleShooterResponse {
+        decision: evaluation_result,
+    };
+    debug!("Troubleshooter response: {:?}", response);
+    Ok(response)
 }
 
 #[cfg(test)]

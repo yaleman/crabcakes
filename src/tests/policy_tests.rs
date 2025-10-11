@@ -9,7 +9,6 @@ async fn test_policy_loading() {
     let policy_store =
         PolicyStore::new(&PathBuf::from("test_config/policies")).expect("Failed to load policies");
 
-    // Should have loaded both alice.json and allow-all.json
     let count = policy_store.policy_count().await;
     assert!(count >= 1, "Expected at least 1 policy, got {}", count);
 }
