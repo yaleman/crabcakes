@@ -1875,6 +1875,10 @@ async fn handle_troubleshooter_request(
         Arn::from_str(&format!("arn:aws:s3:::{arnstr}"))?,
     );
 
+    // Apply the same transformation that PolicyStore uses
+    let request_json = crate::policy::fix_mock_id(&serde_json::to_string(&iam_request)?);
+    let iam_request: IAMRequest = serde_json::from_str(&request_json)?;
+
     // look for a policy that matches the bucket and key
     let policies = policy_store.policies.read().await;
     let filtered_policies = policies
@@ -1908,20 +1912,266 @@ async fn handle_troubleshooter_request(
 }
 
 #[cfg(test)]
-#[tokio::test]
-async fn test_error_response() {
-    let response: Response<Full<Bytes>> = CrabCakesError::other(&"Test error").into();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let mut body: Full<Bytes> = response.into_body();
-    let body_bytes = body
-        .frame()
-        .await
-        .expect("Couldn't get frame")
-        .expect("failed to get frame")
-        .into_data()
-        .expect("Failed to get bytes from frame");
-    let body_str = std::str::from_utf8(&body_bytes).expect("Body is not valid UTF-8");
-    assert!(body_str.contains("Test error"));
+mod tests {
+    use super::*;
+    use iam_rs::Decision;
+    use std::path::PathBuf;
+
+    /// Helper to load PolicyStore from test_config
+    fn load_test_policy_store() -> PolicyStore {
+        PolicyStore::new(&PathBuf::from("test_config/policies"))
+            .expect("Failed to load test policies")
+    }
+
+    /// Helper to build TroubleShooterForm
+    fn build_form(bucket: &str, key: &str, user: &str, action: &str, policy: &str) -> TroubleShooterForm {
+        TroubleShooterForm {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            user: user.to_string(),
+            action: action.to_string(),
+            policy: policy.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_error_response() {
+        let response: Response<Full<Bytes>> = CrabCakesError::other(&"Test error").into();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let mut body: Full<Bytes> = response.into_body();
+        let body_bytes = body
+            .frame()
+            .await
+            .expect("Couldn't get frame")
+            .expect("failed to get frame")
+            .into_data()
+            .expect("Failed to get bytes from frame");
+        let body_str = std::str::from_utf8(&body_bytes).expect("Body is not valid UTF-8");
+        assert!(body_str.contains("Test error"));
+    }
+
+    // Allow Scenario Tests
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_bucket1_testuser_prefix_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "testuser/file.txt", "testuser", "s3:GetObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_bucket1_testuser_wildcard_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "testuser/subdir/file.txt", "testuser", "s3:PutObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_bucket2_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket2", "file.txt", "testuser", "s3:PutObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_bucket2_root_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket2", "", "testuser", "s3:ListBucket", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_list_all_buckets_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("", "", "testuser", "s3:ListAllMyBuckets", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_list_bucket1_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "", "testuser", "s3:ListBucket", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_create_bucket21_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket21", "", "testuser", "s3:CreateBucket", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_delete_bucket21_allow() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket21", "", "testuser", "s3:DeleteBucket", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    // Deny Scenario Tests
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_bucket1_other_prefix_deny() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "other/file.txt", "testuser", "s3:GetObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // No matching policy = NotApplicable (implicit deny)
+        assert_eq!(response.decision.decision, Decision::NotApplicable);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_bucket3_deny() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket3", "file.txt", "testuser", "s3:GetObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // No matching policy = NotApplicable (implicit deny)
+        assert_eq!(response.decision.decision, Decision::NotApplicable);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_testuser_bucket1_root_putobject_deny() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "file.txt", "testuser", "s3:PutObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // No matching policy = NotApplicable (implicit deny)
+        assert_eq!(response.decision.decision, Decision::NotApplicable);
+    }
+
+    // Different User Tests
+
+    #[tokio::test]
+    async fn test_troubleshooter_otheruser_bucket1_deny() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "testuser/file.txt", "otheruser", "s3:GetObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // No matching policy = NotApplicable (implicit deny)
+        assert_eq!(response.decision.decision, Decision::NotApplicable);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_otheruser_bucket2_deny() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket2", "file.txt", "otheruser", "s3:PutObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // No matching policy = NotApplicable (implicit deny)
+        assert_eq!(response.decision.decision, Decision::NotApplicable);
+    }
+
+    // Edge Case Tests
+
+    #[tokio::test]
+    async fn test_troubleshooter_empty_bucket_becomes_wildcard() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("", "", "testuser", "s3:ListBucket", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // Empty bucket becomes wildcard, testuser has ListBucket on * via ListAllMyBuckets statement
+        // But ListBucket action specifically is NOT allowed on wildcard in the policy
+        // No matching policy = NotApplicable (implicit deny)
+        assert_eq!(response.decision.decision, Decision::NotApplicable);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_bucket_level_operation() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "", "testuser", "s3:ListBucket", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // Bucket-level operation with no key
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_specific_policy_filter() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "testuser/file.txt", "testuser", "s3:GetObject", "testuser");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // Should evaluate only the testuser policy
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_troubleshooter_all_policies_evaluated() {
+        let policy_store = load_test_policy_store();
+        let form = build_form("bucket1", "testuser/file.txt", "testuser", "s3:GetObject", "");
+
+        let response = handle_troubleshooter_request(form, &policy_store)
+            .await
+            .expect("Request should succeed");
+
+        // Empty policy name evaluates all policies
+        assert_eq!(response.decision.decision, Decision::Allow);
+    }
 }
 
 /// Session info returned to client
