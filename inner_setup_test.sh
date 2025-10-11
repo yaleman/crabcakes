@@ -59,7 +59,7 @@ while true; do
     else
         echo "Waiting for server to start... checking ${SERVER_ADDRESS}"
         COUNTER=$((COUNTER + 1))
-        if [ $COUNTER -ge 10 ]; then
+        if [ $COUNTER -ge 30 ]; then
             echo "Server did not start within expected time"
             exit 1
         fi

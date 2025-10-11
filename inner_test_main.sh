@@ -5,33 +5,6 @@
 # shellcheck disable=SC1091
 source ./inner_setup_test.sh
 
-# SERVER_PORT=19000
-
-
-# FRONTEND_WITHOUT_PORT="$(echo "${CRABCAKES_FRONTEND_URL:-http://localhost}" | awk -F':' '{print $1 ":" $2}')"
-# SERVER_ADDRESS="${FRONTEND_WITHOUT_PORT}:$SERVER_PORT"
-
-# echo "SERVER ADDRESS=$SERVER_ADDRESS"
-
-
-# TEST_BUCKET="bucket1"
-# TEST_BUCKET2="bucket2"
-# TEST_FILE="testuser/test.txt"
-
-# if [[ -z "$(which -a jq)" ]]; then
-#     echo "jq is required for this script"
-#     exit 1
-# fi
-
-# if [[ -z "$(which -a aws)" ]]; then
-#     echo "The AWS cli command (aws) is required for this script"
-#     exit 1
-# fi
-
-# pkill -f target/debug/crabcakes
-
-
-
 echo "########################################"
 echo "Testing ListObjectsV2 - list files in ${TEST_BUCKET2}"
 echo "########################################"
@@ -75,7 +48,7 @@ if [ ! -f "${TARGET_FILE}" ]; then
     exit 1
 fi
 
-LSTEXT="$(aws s3 ls s3://${TEST_BUCKET}/testuser/ --endpoint-url "$SERVER_ADDRESS")"
+LSTEXT="$(aws s3 ls "s3://${TEST_BUCKET}/testuser/" --endpoint-url "$SERVER_ADDRESS")"
 
 if [[ -z "$LSTEXT" ]]; then
     echo "The output is empty, expected to find something"
@@ -88,7 +61,7 @@ echo "########################################"
 echo "Testing HeadObject"
 echo "########################################"
 HEADRES="$(aws s3api head-object \
-    --bucket $TEST_BUCKET --key $TEST_FILE \
+    --bucket "$TEST_BUCKET" --key "$TEST_FILE" \
     --endpoint-url "$SERVER_ADDRESS")"
 
 if [[ -z "$HEADRES" ]]; then
@@ -175,7 +148,7 @@ echo "###############################################"
 echo "Testing GetBucketLocation on existing bucket $TEST_BUCKET2"
 echo "###############################################"
 LOCATION_RESULT="$(aws s3api get-bucket-location \
-    --bucket $TEST_BUCKET2 \
+    --bucket "$TEST_BUCKET2" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1)"
 
 if echo "$LOCATION_RESULT" | jq -e '.LocationConstraint == "crabcakes"' > /dev/null 2>&1; then
@@ -203,7 +176,7 @@ echo "################################################################"
 TEST_COPY_KEY="testuser/test-copy.txt"
 if aws s3api copy-object \
     --copy-source "$TEST_BUCKET2/$TEST_FILE" \
-    --bucket $TEST_BUCKET2 \
+    --bucket "$TEST_BUCKET2" \
     --key $TEST_COPY_KEY \
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
     echo "CopyObject successful"
@@ -234,14 +207,14 @@ fi
 
 echo "Cleaning up copied object"
 aws s3 rm \
-    s3://$TEST_BUCKET/$TEST_COPY_KEY \
+    "s3://$TEST_BUCKET/$TEST_COPY_KEY" \
     --endpoint-url "$SERVER_ADDRESS" > /dev/null 2>&1
 
 echo "############################################################"
 echo "Testing CopyObject with non-existent source (should fail)"
 echo "############################################################"
 if aws s3api copy-object \
-    --bucket $TEST_BUCKET \
+    --bucket "$TEST_BUCKET" \
     --key "copy-dest.txt" \
     --copy-source "$TEST_BUCKET/nonexistent-source.txt" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
@@ -265,7 +238,7 @@ fi
 
 # Verify the file was deleted
 if aws s3api head-object \
-    --bucket $TEST_BUCKET --key $TEST_UPLOAD_FILE \
+    --bucket "$TEST_BUCKET" --key "$TEST_UPLOAD_FILE" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
     echo "File still exists after delete - should have been deleted"
     exit 1
@@ -293,7 +266,7 @@ echo "Test batch 2" > "$TEMPDIR2/$TEST_BATCH_FILE2"
 echo "Test batch 3" > "$TEMPDIR2/$TEST_BATCH_FILE3"
 
 if aws s3 cp "$TEMPDIR2/$TEST_BATCH_FILE1" \
-    s3://$TEST_BUCKET2/$TEST_BATCH_FILE1 \
+    "s3://$TEST_BUCKET2/$TEST_BATCH_FILE1" \
     --endpoint-url "$SERVER_ADDRESS"; then
     echo "Batch file 1 upload successful"
 else
@@ -302,7 +275,7 @@ else
 fi
 
 if aws s3 cp "$TEMPDIR2/$TEST_BATCH_FILE2" \
-    s3://$TEST_BUCKET2/$TEST_BATCH_FILE2 \
+    "s3://$TEST_BUCKET2/$TEST_BATCH_FILE2" \
     --endpoint-url "$SERVER_ADDRESS"; then
     echo "Batch file 2 upload successful"
 else
@@ -311,7 +284,7 @@ else
 fi
 
 if aws s3 cp "$TEMPDIR2/$TEST_BATCH_FILE3" \
-    s3://$TEST_BUCKET2/$TEST_BATCH_FILE3 \
+    "s3://$TEST_BUCKET2/$TEST_BATCH_FILE3" \
     --endpoint-url "$SERVER_ADDRESS"; then
     echo "Batch file 3 upload successful"
 else
@@ -333,7 +306,7 @@ EOF
 
 # Test DeleteObjects batch operation
 if aws s3api delete-objects \
-    --bucket $TEST_BUCKET \
+    --bucket "$TEST_BUCKET" \
     --delete "file://$TEMPDIR2/delete.json" \
     --endpoint-url "$SERVER_ADDRESS" > "$TEMPDIR2/delete-result.json" 2>&1; then
     echo "DeleteObjects batch operation successful"
@@ -365,7 +338,7 @@ cat > "$TEMPDIR2/delete-nonexistent.json" <<EOF
 EOF
 
 if aws s3api delete-objects \
-    --bucket $TEST_BUCKET \
+    --bucket "$TEST_BUCKET" \
     --delete "file://$TEMPDIR2/delete-nonexistent.json" \
     --endpoint-url "$SERVER_ADDRESS" > "$TEMPDIR2/delete-nonexistent-result.json" 2>&1; then
     echo "DeleteObjects idempotent - deleting non-existent objects succeeded"
@@ -399,7 +372,7 @@ fi
 
 # Test DeleteBucket on non-empty bucket (should fail)
 if aws s3 rb \
-    s3://$TEST_BUCKET \
+    "s3://$TEST_BUCKET" \
     --endpoint-url "$SERVER_ADDRESS" 2>&1; then
     echo "DeleteBucket should fail on non-empty bucket"
     exit 1
