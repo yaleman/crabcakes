@@ -451,7 +451,7 @@ impl S3Handler {
                 || query.contains("marker=")
                 || query.contains("max-keys=");
 
-            let response = match (
+            match (
                 &method,
                 is_list_v2_operation,
                 is_bucket_operation,
@@ -680,8 +680,7 @@ impl S3Handler {
                     warn!(method = %method, path = %path, "Unknown request pattern");
                     self.not_found_response()
                 }
-            };
-            response
+            }
         };
 
         let span = tracing::Span::current();

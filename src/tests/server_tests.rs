@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use std::fs;
+use std::fs::{self, create_dir_all};
 use std::path::Path;
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -167,11 +167,11 @@ async fn test_list_objects() {
     let output = result.unwrap();
     let contents = output.contents();
     assert!(!contents.is_empty());
+    let file_to_find = format!("{}/testuser/test.txt", TEST_ALLOWED_BUCKET2);
+    dbg!(contents);
     assert!(
-        contents
-            .iter()
-            .any(|obj| obj.key() == Some("bucket1/test.txt")),
-        "Expected to find bucket1/test.txt in listing"
+        contents.iter().any(|obj| obj.key() == Some(&file_to_find)),
+        "Expected to find {file_to_find} in listing"
     );
 
     handle.abort();
@@ -1148,8 +1148,9 @@ async fn test_admin_ui_delete_bucket_without_csrf_fails() {
         .send()
         .await
         .expect("Failed to list buckets");
+    dbg!(buckets.buckets());
     assert!(
-        !buckets
+        buckets
             .buckets()
             .iter()
             .any(|b| b.name() == Some(TEST_ALLOWED_BUCKET2)),
@@ -1218,22 +1219,16 @@ async fn test_admin_ui_bucket_delete_confirmation_page() {
 #[tokio::test]
 async fn test_admin_ui_delete_empty_bucket_via_s3() {
     // Verify S3 API can delete empty buckets (baseline for admin UI)
-    let temp_dir = setup_test_files();
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    create_dir_all(temp_dir.path().join(TEST_ALLOWED_BUCKET2))
+        .expect("Failed to create test bucket dir");
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
-
-    // Create empty bucket
-    client
-        .create_bucket()
-        .bucket("test-empty-delete")
-        .send()
-        .await
-        .unwrap();
 
     // Delete via S3 API
     client
         .delete_bucket()
-        .bucket("test-empty-delete")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .send()
         .await
         .unwrap();
@@ -1244,7 +1239,7 @@ async fn test_admin_ui_delete_empty_bucket_via_s3() {
         !buckets
             .buckets()
             .iter()
-            .any(|b| b.name() == Some("test-empty-delete"))
+            .any(|b| b.name() == Some(TEST_ALLOWED_BUCKET2))
     );
 
     handle.abort();
@@ -1252,32 +1247,16 @@ async fn test_admin_ui_delete_empty_bucket_via_s3() {
 
 #[tokio::test]
 async fn test_admin_ui_delete_nonempty_bucket_fails_via_s3() {
+    setup_test_logging();
     // Verify S3 API rejects deletion of non-empty buckets (admin UI behavior)
     let temp_dir = setup_test_files();
-    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let (_handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
-
-    // Create bucket with object
-    client
-        .create_bucket()
-        .bucket("test-nonempty-delete")
-        .send()
-        .await
-        .unwrap();
-
-    client
-        .put_object()
-        .bucket("test-nonempty-delete")
-        .key("file.txt")
-        .body("content".as_bytes().to_vec().into())
-        .send()
-        .await
-        .unwrap();
 
     // Try to delete via S3 API (should fail)
     let result = client
         .delete_bucket()
-        .bucket("test-nonempty-delete")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .send()
         .await;
 
@@ -1289,10 +1268,8 @@ async fn test_admin_ui_delete_nonempty_bucket_fails_via_s3() {
         buckets
             .buckets()
             .iter()
-            .any(|b| b.name() == Some("test-nonempty-delete"))
+            .any(|b| b.name() == Some(TEST_ALLOWED_BUCKET2))
     );
-
-    handle.abort();
 }
 
 #[tokio::test]
