@@ -69,11 +69,14 @@ impl CleanupTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{constants::MAX_TEMP_CREDS_DURATION, db::initialize_in_memory_database};
+    use crate::{
+        constants::MAX_TEMP_CREDS_DURATION, db::initialize_in_memory_database,
+        logging::setup_test_logging,
+    };
 
     #[tokio::test]
     async fn test_cleanup_task_no_expired_data() {
-        crate::setup_test_logging();
+        setup_test_logging();
 
         let db = initialize_in_memory_database().await.unwrap();
         let db_service = Arc::new(DBService::new(Arc::new(db)));
@@ -87,7 +90,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_task_cleans_expired_pkce() {
-        crate::setup_test_logging();
+        setup_test_logging();
 
         let db = initialize_in_memory_database().await.unwrap();
         let db_service = Arc::new(DBService::new(Arc::new(db)));
@@ -137,7 +140,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_task_cleans_expired_credentials() {
-        crate::setup_test_logging();
+        setup_test_logging();
 
         let db = initialize_in_memory_database().await.unwrap();
         let db_service = Arc::new(DBService::new(Arc::new(db)));
@@ -199,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_task_cleans_both_types() {
-        crate::setup_test_logging();
+        setup_test_logging();
 
         let db = initialize_in_memory_database().await.unwrap();
         let db_service = Arc::new(DBService::new(Arc::new(db)));

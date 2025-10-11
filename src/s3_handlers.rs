@@ -28,7 +28,7 @@ use scratchstack_aws_signature::{
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
 use crate::body_buffer::BufferedBody;
@@ -233,6 +233,73 @@ impl S3Handler {
         Ok((parts, buffered_body, authenticatorresponse))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn check_auth(
+        &self,
+        is_bucket_operation: bool,
+        method: Method,
+        query: &str,
+        s3_action: S3Action,
+        bucket: Option<&str>,
+        key: &str,
+        extracted_key: Option<&str>,
+        auth_context: &AuthContext,
+    ) -> Option<Response<Full<Bytes>>> {
+        // Check if this is a temporary credential (OAuth-based) - they get full access
+        let is_temp_credential = if let Some(ref username) = auth_context.username {
+            self.db_service
+                .get_temporary_credentials(username)
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+        } else {
+            false
+        };
+        // Build IAM request and evaluate policy (skip for temporary credentials)
+        if is_temp_credential {
+            debug!(access_key = ?auth_context.username, "Temporary credential - granting full access");
+        } else {
+            // this means we bypass authorization for the deleteobjects operation because we have to check per-file permissions later
+            trace!("Is bucket operation: {}", is_bucket_operation);
+            // TODO: work out if this should check is_bucket_operation too
+            if method == Method::POST && query == "delete" && key.is_empty() {
+                debug!(
+                    "Bypassing authorization for DeleteObjects operation - will check per-object permissions later"
+                );
+            } else {
+                let iam_request =
+                    match auth_context.build_iam_request(s3_action, bucket, extracted_key) {
+                        Ok(req) => req,
+                        Err(e) => {
+                            error!(error = %e, "Failed to build IAM request");
+                            return Some(self.internal_error_response());
+                        }
+                    };
+
+                match self.policy_store.evaluate_request(&iam_request).await {
+                    Ok(Decision::Allow) => {
+                        debug!("Authorization granted");
+                    }
+                    Ok(Decision::NotApplicable) | Ok(Decision::Deny) => {
+                        warn!(
+                            request = ?iam_request,
+                            principal = ?iam_request.principal,
+                            action = %s3_action,
+                            "Authorization denied"
+                        );
+                        return Some(self.access_denied_response());
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Error evaluating policy");
+                        return Some(self.internal_error_response());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     #[instrument(
         level = "info",
         skip_all,
@@ -325,7 +392,7 @@ impl S3Handler {
         let bucket_for_operation = match bucket.as_ref() {
             Some(val) => val.as_str(),
             None => {
-                debug!(path=%path, "No bucket in path, using bucket from Host header if available");
+                debug!(path=%path, bucket_name = bucket_name, "No bucket in path, using bucket from Host header if available");
                 bucket_name.as_str()
             }
         };
@@ -339,304 +406,284 @@ impl S3Handler {
             )));
         }
 
-        // Check if this is a temporary credential (OAuth-based) - they get full access
-        let is_temp_credential = if let Some(ref username) = auth_context.username {
-            self.db_service
-                .get_temporary_credentials(username)
-                .await
-                .ok()
-                .flatten()
-                .is_some()
-        } else {
-            false
-        };
-
-        // Build IAM request and evaluate policy (skip for temporary credentials)
-        if is_temp_credential {
-            debug!(access_key = ?auth_context.username, "Temporary credential - granting full access");
-        } else {
-            let iam_request = match auth_context.build_iam_request(
+        let response = if let Some(response) = self
+            .check_auth(
+                is_bucket_operation,
+                method.clone(),
+                &query,
                 s3_action,
                 bucket.as_deref(),
+                &key,
                 extracted_key.as_deref(),
-            ) {
-                Ok(req) => req,
-                Err(e) => {
-                    error!(error = %e, "Failed to build IAM request");
-                    return Ok(self.internal_error_response());
-                }
+                &auth_context,
+            )
+            .await
+        {
+            response
+        } else {
+            // auth has passed
+            // Parse multipart upload query parameters
+            let is_multipart_create = query.contains("uploads") && !query.contains("uploadId");
+            let upload_id_opt = if query.contains("uploadId=") {
+                query
+                    .split('&')
+                    .find(|p| p.starts_with("uploadId="))
+                    .and_then(|p| p.strip_prefix("uploadId="))
+                    .map(|s| s.to_string())
+            } else {
+                None
+            };
+            let part_number_opt = if query.contains("partNumber=") {
+                query
+                    .split('&')
+                    .find(|p| p.starts_with("partNumber="))
+                    .and_then(|p| p.strip_prefix("partNumber="))
+                    .and_then(|s| s.parse::<u32>().ok())
+            } else {
+                None
             };
 
-            match self.policy_store.evaluate_request(&iam_request).await {
-                Ok(Decision::Allow) => {
-                    debug!("Authorization granted");
+            // Determine if this is a V2 list operation (has list-type=2)
+            let is_list_v2_operation = query.contains("list-type=2");
+
+            // Detect if this is a V1 list operation (bucket-level GET with certain query params)
+            let has_list_v1_params = query.contains("prefix=")
+                || query.contains("marker=")
+                || query.contains("max-keys=");
+
+            let response = match (
+                &method,
+                is_list_v2_operation,
+                is_bucket_operation,
+                key.as_str(),
+                query.as_str(),
+            ) {
+                // Multipart upload operations
+                // POST /key?uploads - CreateMultipartUpload
+                (&Method::POST, false, false, key, _) if is_multipart_create && !key.is_empty() => {
+                    debug!(key = %key, "Handling CreateMultipartUpload request");
+                    self.handle_create_multipart_upload(bucket_for_operation, key)
+                        .await
                 }
-                Ok(Decision::NotApplicable) | Ok(Decision::Deny) => {
-                    warn!(
-                        request = ?iam_request,
-                        principal = ?iam_request.principal,
-                        action = %s3_action,
-                        "Authorization denied"
+                // PUT /key?uploadId=X&partNumber=Y with x-amz-copy-source - UploadPartCopy
+                (&Method::PUT, false, false, key, _)
+                    if !key.is_empty()
+                        && upload_id_opt.is_some()
+                        && part_number_opt.is_some()
+                        && copy_source.is_some() =>
+                {
+                    let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                    let part_number = part_number_opt.unwrap_or(0);
+                    let source = copy_source.unwrap_or("");
+                    debug!(
+                        key = %key,
+                        upload_id = %upload_id,
+                        part_number = %part_number,
+                        copy_source = %source,
+                        "Handling UploadPartCopy request"
                     );
-                    return Ok(self.access_denied_response());
+                    self.handle_upload_part_copy(
+                        bucket_for_operation,
+                        key,
+                        upload_id,
+                        part_number,
+                        source,
+                        copy_source_range,
+                        &auth_context,
+                    )
+                    .await
                 }
-                Err(e) => {
-                    error!(error = %e, "Error evaluating policy");
-                    return Ok(self.internal_error_response());
+                // PUT /key?uploadId=X&partNumber=Y - UploadPart
+                (&Method::PUT, false, false, key, _)
+                    if !key.is_empty() && upload_id_opt.is_some() && part_number_opt.is_some() =>
+                {
+                    let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                    let part_number = part_number_opt.unwrap_or(0);
+                    debug!(
+                        key = %key,
+                        upload_id = %upload_id,
+                        part_number = %part_number,
+                        "Handling UploadPart request"
+                    );
+                    self.handle_upload_part(
+                        bucket_for_operation,
+                        key,
+                        upload_id,
+                        part_number,
+                        &mut buffered_body,
+                    )
+                    .await
                 }
-            }
-        }
-
-        // Parse multipart upload query parameters
-        let is_multipart_create = query.contains("uploads") && !query.contains("uploadId");
-        let upload_id_opt = if query.contains("uploadId=") {
-            query
-                .split('&')
-                .find(|p| p.starts_with("uploadId="))
-                .and_then(|p| p.strip_prefix("uploadId="))
-                .map(|s| s.to_string())
-        } else {
-            None
-        };
-        let part_number_opt = if query.contains("partNumber=") {
-            query
-                .split('&')
-                .find(|p| p.starts_with("partNumber="))
-                .and_then(|p| p.strip_prefix("partNumber="))
-                .and_then(|s| s.parse::<u32>().ok())
-        } else {
-            None
-        };
-
-        // Determine if this is a V2 list operation (has list-type=2)
-        let is_list_v2_operation = query.contains("list-type=2");
-
-        // Detect if this is a V1 list operation (bucket-level GET with certain query params)
-        let has_list_v1_params =
-            query.contains("prefix=") || query.contains("marker=") || query.contains("max-keys=");
-
-        let response = match (
-            &method,
-            is_list_v2_operation,
-            is_bucket_operation,
-            key.as_str(),
-            query.as_str(),
-        ) {
-            // Multipart upload operations
-            // POST /key?uploads - CreateMultipartUpload
-            (&Method::POST, false, false, key, _) if is_multipart_create && !key.is_empty() => {
-                debug!(key = %key, "Handling CreateMultipartUpload request");
-                self.handle_create_multipart_upload(bucket_for_operation, key)
+                // DELETE /key?uploadId=X - AbortMultipartUpload
+                (&Method::DELETE, false, false, _, _) if upload_id_opt.is_some() => {
+                    let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                    debug!(upload_id = %upload_id, "Handling AbortMultipartUpload request");
+                    self.handle_abort_multipart_upload(bucket_for_operation, upload_id)
+                        .await
+                }
+                // GET /bucket?uploads - ListMultipartUploads
+                (&Method::GET, false, true, _, query) if query.contains("uploads") => {
+                    debug!(bucket = %bucket_for_operation, "Handling ListMultipartUploads request");
+                    self.handle_list_multipart_uploads(bucket_for_operation)
+                        .await
+                }
+                // GET /key?uploadId=X - ListParts
+                (&Method::GET, false, false, key, _)
+                    if !key.is_empty() && upload_id_opt.is_some() =>
+                {
+                    let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                    debug!(key = %key, upload_id = %upload_id, "Handling ListParts request");
+                    self.handle_list_parts(bucket_for_operation, key, upload_id)
+                        .await
+                }
+                // POST /key?uploadId=X - CompleteMultipartUpload
+                (&Method::POST, false, false, key, _)
+                    if !key.is_empty() && upload_id_opt.is_some() =>
+                {
+                    let upload_id = upload_id_opt.as_deref().unwrap_or("");
+                    debug!(key = %key, upload_id = %upload_id, "Handling CompleteMultipartUpload request");
+                    self.handle_complete_multipart_upload(
+                        bucket_for_operation,
+                        key,
+                        upload_id,
+                        &mut buffered_body,
+                    )
                     .await
-            }
-            // PUT /key?uploadId=X&partNumber=Y with x-amz-copy-source - UploadPartCopy
-            (&Method::PUT, false, false, key, _)
-                if !key.is_empty()
-                    && upload_id_opt.is_some()
-                    && part_number_opt.is_some()
-                    && copy_source.is_some() =>
-            {
-                let upload_id = upload_id_opt.as_deref().unwrap_or("");
-                let part_number = part_number_opt.unwrap_or(0);
-                let source = copy_source.unwrap_or("");
-                debug!(
-                    key = %key,
-                    upload_id = %upload_id,
-                    part_number = %part_number,
-                    copy_source = %source,
-                    "Handling UploadPartCopy request"
-                );
-                self.handle_upload_part_copy(
-                    bucket_for_operation,
-                    key,
-                    upload_id,
-                    part_number,
-                    source,
-                    copy_source_range,
-                    &auth_context,
-                )
-                .await
-            }
-            // PUT /key?uploadId=X&partNumber=Y - UploadPart
-            (&Method::PUT, false, false, key, _)
-                if !key.is_empty() && upload_id_opt.is_some() && part_number_opt.is_some() =>
-            {
-                let upload_id = upload_id_opt.as_deref().unwrap_or("");
-                let part_number = part_number_opt.unwrap_or(0);
-                debug!(
-                    key = %key,
-                    upload_id = %upload_id,
-                    part_number = %part_number,
-                    "Handling UploadPart request"
-                );
-                self.handle_upload_part(
-                    bucket_for_operation,
-                    key,
-                    upload_id,
-                    part_number,
-                    &mut buffered_body,
-                )
-                .await
-            }
-            // DELETE /key?uploadId=X - AbortMultipartUpload
-            (&Method::DELETE, false, false, _, _) if upload_id_opt.is_some() => {
-                let upload_id = upload_id_opt.as_deref().unwrap_or("");
-                debug!(upload_id = %upload_id, "Handling AbortMultipartUpload request");
-                self.handle_abort_multipart_upload(bucket_for_operation, upload_id)
-                    .await
-            }
-            // GET /bucket?uploads - ListMultipartUploads
-            (&Method::GET, false, true, _, query) if query.contains("uploads") => {
-                debug!(bucket = %bucket_for_operation, "Handling ListMultipartUploads request");
-                self.handle_list_multipart_uploads(bucket_for_operation)
-                    .await
-            }
-            // GET /key?uploadId=X - ListParts
-            (&Method::GET, false, false, key, _) if !key.is_empty() && upload_id_opt.is_some() => {
-                let upload_id = upload_id_opt.as_deref().unwrap_or("");
-                debug!(key = %key, upload_id = %upload_id, "Handling ListParts request");
-                self.handle_list_parts(bucket_for_operation, key, upload_id)
-                    .await
-            }
-            // POST /key?uploadId=X - CompleteMultipartUpload
-            (&Method::POST, false, false, key, _) if !key.is_empty() && upload_id_opt.is_some() => {
-                let upload_id = upload_id_opt.as_deref().unwrap_or("");
-                debug!(key = %key, upload_id = %upload_id, "Handling CompleteMultipartUpload request");
-                self.handle_complete_multipart_upload(
-                    bucket_for_operation,
-                    key,
-                    upload_id,
-                    &mut buffered_body,
-                )
-                .await
-            }
-            // Any GET with list-type=2 is a ListBucketV2 request
-            (&Method::GET, true, _, _, query) => {
-                debug!("Handling ListBucketV2 request (list-type=2 query)");
-                self.handle_list_bucket(query, bucket_for_operation, &path)
-                    .await
-            }
-            // GET / - ListBuckets
-            (&Method::GET, false, false, "", _) if path == "/" => {
-                debug!("Handling ListBuckets request");
-                self.handle_list_buckets(&bucket_name).await
-            }
-            // GET /bucket?location - GetBucketLocation
-            (&Method::GET, false, true, _, query) if query.contains("location") => {
-                debug!(bucket = %bucket_for_operation, "Handling GetBucketLocation request");
-                self.handle_get_bucket_location(bucket_for_operation).await
-            }
-            // GET /bucket with V1 list parameters - ListBucketV1
-            (&Method::GET, false, true, _, query) if has_list_v1_params && !query.is_empty() => {
-                debug!("Handling ListBucketV1 request (legacy API with query params)");
-                self.handle_list_bucket_v1(query, bucket_for_operation, &path)
-                    .await
-            }
-            // Path-style bucket root without query: GET /bucket/ or GET /bucket - default to V2
-            (&Method::GET, false, true, _, _) => {
-                debug!("Handling ListBucket request (path-style, no query - default to V2)");
-                // Treat as ListBucket V2 with default parameters
-                self.handle_list_bucket("list-type=2", bucket_for_operation, &path)
-                    .await
-            }
-            // HEAD /bucket - HeadBucket
-            (&Method::HEAD, false, true, "", _) => {
-                debug!(bucket = %bucket_for_operation, "Handling HeadBucket request");
-                self.handle_head_bucket(bucket_for_operation).await
-            }
-            // HEAD /key or HEAD /bucket/key - HeadObject
-            (&Method::HEAD, false, false, key, _) if !key.is_empty() => {
-                debug!(key = %key, "Handling HeadObject request");
-                self.handle_head_object(key).await
-            }
-            // GET /key?tagging - GetObjectTagging
-            (&Method::GET, false, false, key, query)
-                if !key.is_empty() && query.contains("tagging") =>
-            {
-                debug!(key = %key, "Handling GetObjectTagging request");
-                self.handle_get_object_tagging(bucket_for_operation, key)
-                    .await
-            }
-            // PUT /key?tagging - PutObjectTagging
-            (&Method::PUT, false, false, key, query)
-                if !key.is_empty() && query.contains("tagging") =>
-            {
-                debug!(key = %key, "Handling PutObjectTagging request");
-                match buffered_body.to_vec().await {
-                    Ok(body_bytes) => {
-                        self.handle_put_object_tagging(bucket_for_operation, key, &body_bytes)
-                            .await
-                    }
-                    Err(e) => {
-                        error!(error = %e, "Failed to read request body");
-                        self.internal_error_response()
+                }
+                // Any GET with list-type=2 is a ListBucketV2 request
+                (&Method::GET, true, _, _, query) => {
+                    debug!("Handling ListBucketV2 request (list-type=2 query)");
+                    self.handle_list_bucket(query, bucket_for_operation, &path)
+                        .await
+                }
+                // GET / - ListBuckets
+                (&Method::GET, false, false, "", _) if path == "/" => {
+                    debug!("Handling ListBuckets request");
+                    self.handle_list_buckets(&bucket_name).await
+                }
+                // GET /bucket?location - GetBucketLocation
+                (&Method::GET, false, true, _, query) if query.contains("location") => {
+                    debug!(bucket = %bucket_for_operation, "Handling GetBucketLocation request");
+                    self.handle_get_bucket_location(bucket_for_operation).await
+                }
+                // GET /bucket with V1 list parameters - ListBucketV1
+                (&Method::GET, false, true, _, query)
+                    if has_list_v1_params && !query.is_empty() =>
+                {
+                    debug!("Handling ListBucketV1 request (legacy API with query params)");
+                    self.handle_list_bucket_v1(query, bucket_for_operation, &path)
+                        .await
+                }
+                // Path-style bucket root without query: GET /bucket/ or GET /bucket - default to V2
+                (&Method::GET, false, true, _, _) => {
+                    debug!("Handling ListBucket request (path-style, no query - default to V2)");
+                    // Treat as ListBucket V2 with default parameters
+                    self.handle_list_bucket("list-type=2", bucket_for_operation, &path)
+                        .await
+                }
+                // HEAD /bucket - HeadBucket
+                (&Method::HEAD, false, true, "", _) => {
+                    debug!(bucket = %bucket_for_operation, "Handling HeadBucket request");
+                    self.handle_head_bucket(bucket_for_operation).await
+                }
+                // HEAD /key or HEAD /bucket/key - HeadObject
+                (&Method::HEAD, false, false, key, _) if !key.is_empty() => {
+                    debug!(key = %key, "Handling HeadObject request");
+                    self.handle_head_object(key).await
+                }
+                // GET /key?tagging - GetObjectTagging
+                (&Method::GET, false, false, key, query)
+                    if !key.is_empty() && query.contains("tagging") =>
+                {
+                    debug!(key = %key, "Handling GetObjectTagging request");
+                    self.handle_get_object_tagging(bucket_for_operation, key)
+                        .await
+                }
+                // PUT /key?tagging - PutObjectTagging
+                (&Method::PUT, false, false, key, query)
+                    if !key.is_empty() && query.contains("tagging") =>
+                {
+                    debug!(key = %key, "Handling PutObjectTagging request");
+                    match buffered_body.to_vec().await {
+                        Ok(body_bytes) => {
+                            self.handle_put_object_tagging(bucket_for_operation, key, &body_bytes)
+                                .await
+                        }
+                        Err(e) => {
+                            error!(error = %e, "Failed to read request body");
+                            self.internal_error_response()
+                        }
                     }
                 }
-            }
-            // DELETE /key?tagging - DeleteObjectTagging
-            (&Method::DELETE, false, false, key, query)
-                if !key.is_empty() && query.contains("tagging") =>
-            {
-                debug!(key = %key, "Handling DeleteObjectTagging request");
-                self.handle_delete_object_tagging(bucket_for_operation, key)
-                    .await
-            }
-            // GET /key?attributes - GetObjectAttributes
-            (&Method::GET, false, false, key, query)
-                if !key.is_empty() && query.contains("attributes") =>
-            {
-                debug!(key = %key, "Handling GetObjectAttributes request");
-                self.handle_get_object_attributes(bucket_for_operation, key)
-                    .await
-            }
-            // GET /key or GET /bucket/key - GetObject
-            (&Method::GET, false, false, key, _) if !key.is_empty() => {
-                debug!(key = %key, "Handling GetObject request");
-                self.handle_get_object(key, &parts).await
-            }
-            // PUT /bucket - CreateBucket
-            (&Method::PUT, false, true, "", _) if copy_source.is_none() => {
-                debug!(bucket = %bucket_for_operation, "Handling CreateBucket request");
-                self.handle_create_bucket(bucket_for_operation).await
-            }
-            // PUT /key with x-amz-copy-source header - CopyObject
-            (&Method::PUT, false, false, key, _) if !key.is_empty() && copy_source.is_some() => {
-                debug!(key = %key, copy_source = ?copy_source, "Handling CopyObject request");
-                match copy_source {
-                    None => {
-                        Response::builder().status(StatusCode::BAD_REQUEST).body( Full::new(Bytes::from_static(
-                            b"<Error><Code>InvalidArgument</Code><Message>Missing x-amz-copy-source header</Message></Error>",
-                        ))).unwrap_or(self.internal_error_response())
-                    }
-                    Some(copy_source) => self.handle_copy_object(copy_source, key, &auth_context).await,
+                // DELETE /key?tagging - DeleteObjectTagging
+                (&Method::DELETE, false, false, key, query)
+                    if !key.is_empty() && query.contains("tagging") =>
+                {
+                    debug!(key = %key, "Handling DeleteObjectTagging request");
+                    self.handle_delete_object_tagging(bucket_for_operation, key)
+                        .await
                 }
-            }
-            // PUT /key or PUT /bucket/key - PutObject
-            (&Method::PUT, false, false, key, _) if !key.is_empty() => {
-                debug!(key = %key, "Handling PutObject request");
-                self.handle_put_object(&mut buffered_body, key).await
-            }
-            // DELETE /bucket - DeleteBucket
-            (&Method::DELETE, false, true, "", _) => {
-                debug!(bucket = %bucket_for_operation, "Handling DeleteBucket request");
-                self.handle_delete_bucket(bucket_for_operation).await
-            }
-            // DELETE /key or DELETE /bucket/key - DeleteObject
-            (&Method::DELETE, false, false, key, _) if !key.is_empty() => {
-                debug!(key = %key, "Handling DeleteObject request");
-                self.handle_delete_object(key).await
-            }
-            // POST /?delete - DeleteObjects (batch delete)
-            (&Method::POST, false, _, _, query) if query.contains("delete") => {
-                debug!("Handling DeleteObjects request (batch delete)");
-                self.handle_delete_objects(&mut buffered_body, bucket_for_operation)
-                    .await
-            }
-            _ => {
-                warn!(method = %method, path = %path, "Unknown request pattern");
-                self.not_found_response()
-            }
+                // GET /key?attributes - GetObjectAttributes
+                (&Method::GET, false, false, key, query)
+                    if !key.is_empty() && query.contains("attributes") =>
+                {
+                    debug!(key = %key, "Handling GetObjectAttributes request");
+                    self.handle_get_object_attributes(bucket_for_operation, key)
+                        .await
+                }
+                // GET /key or GET /bucket/key - GetObject
+                (&Method::GET, false, false, key, _) if !key.is_empty() => {
+                    debug!(key = %key, "Handling GetObject request");
+                    self.handle_get_object(key, &parts).await
+                }
+                // PUT /bucket - CreateBucket
+                (&Method::PUT, false, true, "", _) if copy_source.is_none() => {
+                    debug!(bucket = %bucket_for_operation, "Handling CreateBucket request");
+                    self.handle_create_bucket(bucket_for_operation).await
+                }
+                // PUT /key with x-amz-copy-source header - CopyObject
+                (&Method::PUT, false, false, key, _)
+                    if !key.is_empty() && copy_source.is_some() =>
+                {
+                    debug!(key = %key, copy_source = ?copy_source, "Handling CopyObject request");
+                    match copy_source {
+                        None => {
+                            Response::builder().status(StatusCode::BAD_REQUEST).body( Full::new(Bytes::from_static(
+                                b"<Error><Code>InvalidArgument</Code><Message>Missing x-amz-copy-source header</Message></Error>",
+                            ))).unwrap_or(self.internal_error_response())
+                        }
+                        Some(copy_source) => self.handle_copy_object(copy_source, key, &auth_context).await,
+                    }
+                }
+                // PUT /key or PUT /bucket/key - PutObject
+                (&Method::PUT, false, false, key, _) if !key.is_empty() => {
+                    debug!(key = %key, "Handling PutObject request");
+                    self.handle_put_object(&mut buffered_body, key).await
+                }
+                // DELETE /bucket - DeleteBucket
+                (&Method::DELETE, false, true, "", _) => {
+                    debug!(bucket = %bucket_for_operation, "Handling DeleteBucket request");
+                    self.handle_delete_bucket(bucket_for_operation).await
+                }
+                // DELETE /key or DELETE /bucket/key - DeleteObject
+                (&Method::DELETE, false, false, key, _) if !key.is_empty() => {
+                    debug!(key = %key, "Handling DeleteObject request");
+                    self.handle_delete_object(key).await
+                }
+                // POST /?delete - DeleteObjects (batch delete)
+                (&Method::POST, false, _, _, query) if query.contains("delete") => {
+                    debug!("Handling DeleteObjects request (batch delete)");
+                    self.handle_delete_objects(&mut buffered_body, bucket_for_operation)
+                        .await
+                }
+                _ => {
+                    warn!(method = %method, path = %path, "Unknown request pattern");
+                    self.not_found_response()
+                }
+            };
+            response
         };
+
         let span = tracing::Span::current();
         span.record("method", tracing::field::display(method));
         span.record("uri", tracing::field::display(parts.uri));
@@ -644,6 +691,9 @@ impl S3Handler {
         if let Some(copy_source) = copy_source {
             span.record("copy_source", tracing::field::display(copy_source));
         }
+        eprintln!("S3 Action: {}", s3_action);
+
+        span.record("s3_action", tracing::field::display(&s3_action));
 
         span.record("remote_addr", tracing::field::display(remote_addr));
         span.record(
@@ -651,10 +701,13 @@ impl S3Handler {
             tracing::field::display(parts.headers.contains_key("range")),
         );
         span.record("key", tracing::field::display(&key));
-        span.record(
-            "status_code",
-            tracing::field::display(response.status().as_u16() + 50),
-        );
+
+        if !span.has_field("status_code") {
+            span.record(
+                "status_code",
+                tracing::field::display(response.status().as_u16()),
+            );
+        }
 
         span.record(
             "user",

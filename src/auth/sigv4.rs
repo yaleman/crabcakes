@@ -100,7 +100,7 @@ pub async fn verify_sigv4(
                 };
 
                 // Convert secret key to KSecretKey
-                debug!(access_key = %access_key, secret_key_length = secret_access_key.len(), "About to parse secret key");
+                trace!(access_key = %access_key, secret_key_length = secret_access_key.len(), "About to parse secret key");
                 let secret_key = KSecretKey::from_str(&secret_access_key).map_err(|err| {
                     debug!(
                         access_key_id = access_key,

@@ -45,7 +45,8 @@
                 "AWS": "arn:aws:iam:::user/testuser"
             },
             "Action": [
-                "s3:ListBuckets"
+                "s3:ListBuckets",
+                "s3:ListAllMyBuckets"
             ],
             "Resource": [
                 "*"

@@ -1,7 +1,7 @@
 use iam_rs::{Decision, IAMPolicy};
 use tracing::debug;
 
-use crate::{constants::S3Action, policy::PolicyStore, setup_test_logging};
+use crate::{constants::S3Action, logging::setup_test_logging, policy::PolicyStore};
 use std::path::PathBuf;
 
 #[tokio::test]
@@ -16,7 +16,7 @@ async fn test_policy_loading() {
 
 #[tokio::test]
 async fn test_wildcard_principal() {
-    crate::setup_test_logging();
+    setup_test_logging();
 
     let (_foo, policy_store) = PolicyStore::test_empty_store();
 
