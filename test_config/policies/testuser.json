@@ -37,6 +37,19 @@
                 "arn:aws:s3:::bucket2",
                 "arn:aws:s3:::bucket2/*"
             ]
+        },
+        {
+            "Sid": "AllowS3AllTestUserListBuckets",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:ListBuckets"
+            ],
+            "Resource": [
+                "*"
+            ]
         }
     ]
 }

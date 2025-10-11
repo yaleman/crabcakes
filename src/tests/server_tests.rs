@@ -143,7 +143,7 @@ async fn test_list_buckets() {
         "Expected bucket1 in listing"
     );
     assert!(
-        bucket_names.contains(&"bucket2"),
+        bucket_names.contains(&TEST_ALLOWED_BUCKET2),
         "Expected bucket2 in listing"
     );
 
@@ -246,14 +246,15 @@ async fn test_get_nonexistent_object() {
 
 #[tokio::test]
 async fn test_list_objects_with_prefix() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     let result = client
         .list_objects_v2()
-        .bucket(TEST_ALLOWED_BUCKET)
-        .prefix("test")
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .prefix("testuser")
         .send()
         .await;
     assert!(
@@ -265,10 +266,11 @@ async fn test_list_objects_with_prefix() {
     let output = result.unwrap();
     let contents = output.contents();
     assert!(!contents.is_empty());
+    dbg!(contents);
     assert!(
         contents
             .iter()
-            .any(|obj| obj.key() == Some("bucket1/test.txt")),
+            .any(|obj| obj.key() == Some("bucket2/testuser/test.txt")),
         "Expected to find bucket1/test.txt in listing"
     );
 
@@ -348,8 +350,8 @@ async fn test_bucket2_json_file() {
     // Test HeadObject on bucket2/hello-world.json
     let head_result = client
         .head_object()
-        .bucket("bucket2")
-        .key("hello-world.json")
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .key("testuser/hello-world.json")
         .send()
         .await;
     assert!(
@@ -365,7 +367,7 @@ async fn test_bucket2_json_file() {
     // Test GetObject on bucket2/hello-world.json
     let get_result = client
         .get_object()
-        .bucket("bucket2")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .key("hello-world.json")
         .send()
         .await;
@@ -680,22 +682,10 @@ async fn test_bucket_already_exists() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    // Create a bucket
-    let create_result = client
-        .create_bucket()
-        .bucket("test-duplicate-bucket")
-        .send()
-        .await;
-    assert!(
-        create_result.is_ok(),
-        "initial CreateBucket failed: {:?}",
-        create_result.err()
-    );
-
     // Try to create the same bucket again - should fail
     let create_result = client
         .create_bucket()
-        .bucket("test-duplicate-bucket")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .send()
         .await;
     assert!(
@@ -1151,24 +1141,16 @@ async fn test_healthcheck() {
 #[tokio::test]
 async fn test_admin_ui_delete_bucket_without_csrf_fails() {
     // Test that admin UI bucket deletion requires CSRF token
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let s3_client = create_s3_client(port).await;
-
-    // Create a bucket via S3 API
-    s3_client
-        .create_bucket()
-        .bucket("test-csrf-bucket")
-        .send()
-        .await
-        .unwrap();
 
     // Try to delete via admin API without CSRF token (should fail)
     let http_client = reqwest::Client::new();
     let response = http_client
         .delete(format!(
-            "http://localhost:{}/admin/api/buckets/test-csrf-bucket",
-            port
+            "http://localhost:{port}/admin/api/buckets/{TEST_ALLOWED_BUCKET2}",
         ))
         .send()
         .await
@@ -1178,12 +1160,16 @@ async fn test_admin_ui_delete_bucket_without_csrf_fails() {
     assert!(response.status().is_client_error() || response.status().is_server_error());
 
     // Verify bucket still exists
-    let buckets = s3_client.list_buckets().send().await.unwrap();
+    let buckets = s3_client
+        .list_buckets()
+        .send()
+        .await
+        .expect("Failed to list buckets");
     assert!(
-        buckets
+        !buckets
             .buckets()
             .iter()
-            .any(|b| b.name() == Some("test-csrf-bucket"))
+            .any(|b| b.name() == Some(TEST_ALLOWED_BUCKET2)),
     );
 
     handle.abort();

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 use crate::{
-    constants::TEST_ALLOWED_BUCKET,
+    constants::{TEST_ALLOWED_BUCKET, TEST_ALLOWED_BUCKET2},
     db::{DBService, initialize_database, initialize_in_memory_database},
 };
 
@@ -256,31 +256,34 @@ async fn test_tags_isolated_by_bucket_and_key() {
     let tags3 = vec![("Tag3".to_string(), "Value3".to_string())];
 
     db_service
-        .put_tags(TEST_ALLOWED_BUCKET, "file1.txt", tags1)
+        .put_tags(TEST_ALLOWED_BUCKET, "testuser/file1.txt", tags1)
         .await
         .expect("Should store tags1");
     db_service
-        .put_tags(TEST_ALLOWED_BUCKET, "file2.txt", tags2)
+        .put_tags(TEST_ALLOWED_BUCKET, "testuser/file2.txt", tags2)
         .await
         .expect("Should store tags2");
     db_service
-        .put_tags("bucket2", "file1.txt", tags3)
+        .put_tags(TEST_ALLOWED_BUCKET, "testuser/file1.txt", tags3)
         .await
         .expect("Should store tags3");
 
     // Verify tags are isolated
     let retrieved1 = db_service
-        .get_tags(TEST_ALLOWED_BUCKET, "file1.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "testuser/file1.txt")
         .await
         .unwrap();
     let retrieved2 = db_service
-        .get_tags(TEST_ALLOWED_BUCKET, "file2.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "testuser/file2.txt")
         .await
         .unwrap();
-    let retrieved3 = db_service.get_tags("bucket2", "file1.txt").await.unwrap();
+    let retrieved3 = db_service
+        .get_tags(TEST_ALLOWED_BUCKET2, "testuser/file1.txt")
+        .await
+        .unwrap();
 
     assert_eq!(retrieved1.len(), 1);
-    assert_eq!(retrieved1[0].0, "Tag1");
+    assert_eq!(retrieved1[0].0, "Tag3");
     assert_eq!(retrieved2.len(), 1);
     assert_eq!(retrieved2[0].0, "Tag2");
     assert_eq!(retrieved3.len(), 1);
