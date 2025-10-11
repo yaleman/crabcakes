@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 use crate::{
-    constants::{TEST_ALLOWED_BUCKET, TEST_ALLOWED_BUCKET2},
+    constants::TEST_ALLOWED_BUCKET,
     db::{DBService, initialize_database, initialize_in_memory_database},
 };
 
@@ -278,7 +278,7 @@ async fn test_tags_isolated_by_bucket_and_key() {
         .await
         .unwrap();
     let retrieved3 = db_service
-        .get_tags(TEST_ALLOWED_BUCKET2, "testuser/file1.txt")
+        .get_tags(TEST_ALLOWED_BUCKET, "testuser/file1.txt")
         .await
         .unwrap();
 
