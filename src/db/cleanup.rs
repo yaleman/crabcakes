@@ -86,8 +86,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        constants::MAX_TEMP_CREDS_DURATION, db::initialize_in_memory_database, setup_test_logging,
-        tests::setup_test_files,
+        constants::MAX_TEMP_CREDS_DURATION, db::initialize_in_memory_database,
+        logging::setup_test_logging, tests::setup_test_files,
     };
 
     #[tokio::test]

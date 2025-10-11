@@ -7,9 +7,21 @@ use chrono::Duration;
 use enum_iterator::Sequence;
 use serde::Deserialize;
 
+/// This is related to the AWS secret access key length
+pub(crate) static SECRET_ACCESS_KEY_LENGTH: usize = 40;
+
 /// How long a OAuth-provided temporary credential will live
 pub(crate) static MAX_TEMP_CREDS_DURATION: LazyLock<Duration> =
     LazyLock::new(|| Duration::seconds(3600));
+
+pub(crate) static S3: &str = "s3";
+
+pub(crate) static DEFAULT_REGION: &str = "crabcakes";
+
+pub(crate) static CSRF_TOKEN_LENGTH: usize = 32;
+
+/// Mock AWS Account ID for generated principals
+pub(crate) const MOCK_ACCOUNT_ID: &str = "000000000000";
 
 /// Reserved bucket names that cannot be used as S3 buckets
 /// These are reserved for the admin UI and API endpoints
@@ -97,3 +109,26 @@ impl From<S3Action> for String {
         value.to_string()
     }
 }
+
+pub(crate) enum SessionKey {
+    CsrfToken,
+    UserEmail,
+    UserId,
+    AccessKeyId,
+}
+
+impl AsRef<str> for SessionKey {
+    fn as_ref(&self) -> &'static str {
+        match self {
+            SessionKey::CsrfToken => "csrf_token",
+            SessionKey::UserEmail => "user_email",
+            SessionKey::UserId => "user_id",
+            SessionKey::AccessKeyId => "access_key_id",
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) static TEST_ALLOWED_BUCKET: &str = "bucket1";
+#[cfg(test)]
+pub(crate) static TEST_ALLOWED_BUCKET2: &str = "bucket2";

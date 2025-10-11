@@ -26,6 +26,7 @@ pub mod credentials;
 pub mod db;
 pub mod error;
 pub mod filesystem;
+pub mod logging;
 pub mod multipart;
 pub mod policy;
 pub mod policy_analyzer;
@@ -37,23 +38,6 @@ pub mod xml_responses;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-pub fn setup_test_logging() {
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
-
-    let _ = tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_test_writer()
-                .with_level(true),
-        )
-        .with(tracing_subscriber::EnvFilter::new("debug,russh::client=info,russh::sshbuffer=info,russh::keys::agent::client=info,russh::keys::agent=info,h2::codec=warn"))
-        .try_init();
-}
 
 pub(crate) fn generate_temp_credentials() -> (String, String) {
     let mut rng = rand::rng();

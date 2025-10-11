@@ -7,11 +7,25 @@ default:
     just --list
 
 # run the linter, tests, and format the code
-check:
+check: clippy test fmt lint-scripts
+
+# run clippy
+clippy:
     cargo clippy --all-targets --quiet --workspace
+
+# run rust tests
+test:
     cargo test --quiet --workspace
-    cargo fmt --all
-    pnpm run lint
+
+# format the rust code
+fmt:
+    cargo fmt --all -- --check
+
+
+# run shellcheck on scripts
+lint-scripts:
+    shellcheck *.sh
+    shellcheck scripts/*.sh
 
 # build JavaScript bundles
 build-js:

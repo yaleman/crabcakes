@@ -68,23 +68,54 @@ function checkPolicy(): void {
 
 
                 const contextParagraph = document.createElement("p");
+
                 const principal = document.createElement("div");
-                var arn = "";
-                Object.entries(result.decision.context.Principal).forEach(([key, value]) => {
-                    arn += `${key}(${value}) `;
-                });
-                principal.innerText = `Principal: ${arn} `;
+
+                const principalLabel = document.createElement("label");
+                principalLabel.htmlFor = "principal";
+                principalLabel.innerText = "Principal: ";
+                principal.appendChild(principalLabel);
+
+                const principalValue = document.createElement("span");
+                principalValue.id = "principal";
+                var arn: string;
+                if (Object.entries(result.decision.context.Principal).length === 0) {
+                    arn = "No principal specified";
+                } else {
+                    // hacky workaround for the mock account ID thing
+                    arn = Object.entries(result.decision.context.Principal).map(([_, value]) => value.replace("::000000000000:", ":::")).join(", ");
+                }
+
+                principalValue.innerText = arn;
+                principal.appendChild(principalValue);
                 contextParagraph.appendChild(principal);
 
                 const actionParagraph = document.createElement("p");
                 const action = document.createElement("div");
-                action.innerText = `Action: ${result.decision.context.Action} `;
+                const actionLabel = document.createElement("label");
+                actionLabel.htmlFor = "action";
+                actionLabel.innerText = "Action: ";
+                action.appendChild(actionLabel);
+
+                const actionValue = document.createElement("span");
+                actionValue.id = "action";
+                actionValue.innerText = result.decision.context.Action;
+                action.appendChild(actionValue);
                 actionParagraph.appendChild(action);
                 contextParagraph.appendChild(actionParagraph);
 
                 const resourceParagraph = document.createElement("p");
                 const resource = document.createElement("div");
-                resource.innerText = `Resource: ${result.decision.context.Resource} `;
+
+                const resourceLabel = document.createElement("label");
+                resourceLabel.htmlFor = "resource";
+                resourceLabel.innerText = "Resource: ";
+                resource.appendChild(resourceLabel);
+
+                const resourceValue = document.createElement("span");
+                resourceValue.id = "resource";
+                resourceValue.innerText = result.decision.context.Resource;
+                resource.appendChild(resourceValue);
                 resourceParagraph.appendChild(resource);
                 contextParagraph.appendChild(resourceParagraph);
 

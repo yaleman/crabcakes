@@ -368,8 +368,7 @@ After signature verification (or if signatures not required), authentication con
 
 See `test_config/policies/` directory for examples:
 
-- `allow-all.json` - Allows all S3 operations for all principals
-- `alice.json` - Allows Alice to access only her own prefix (`/bucket/alice/*`)
+- `testuser.json` - Allows the test user access to things for tests
 
 ## Development Commands
 
@@ -426,7 +425,6 @@ just build-js                           # Same as above
 cargo clippy --all-targets --quiet      # Lint Rust code (must pass with no warnings)
 cargo fmt                               # Format Rust code
 pnpm run lint                           # Lint JavaScript and CSS
-pnpm run lint:js                        # Lint JavaScript only
 pnpm run lint:css                       # Lint CSS only
 just check                              # Run comprehensive checks (Rust + JS/CSS)
 just lint-web                           # Lint JavaScript and CSS only
@@ -518,3 +516,5 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - never use npm, use pnpm instead
 - always use static files for css/js, it is NEVER acceptable for such code to be inline
 - don't use javascript alerts to show things worked, redirect to the resulting object with a notification message
+- don't mention how many tests there are, anywhere. nobody cares.
+- users should refer to documentation over CLAUDE.md as documentation is for humans, and CLAUDE is for a tool.

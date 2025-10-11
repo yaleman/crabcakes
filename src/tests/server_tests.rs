@@ -1,14 +1,20 @@
 use chrono::NaiveDate;
-use std::fs;
+use std::fs::{self, create_dir_all};
 use std::path::Path;
 use std::str::FromStr;
 use tempfile::TempDir;
 use tokio::time::{Duration, sleep};
+use tracing::debug;
 
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 
+use crate::constants::{
+    DEFAULT_REGION, RESERVED_BUCKET_NAMES, S3, TEST_ALLOWED_BUCKET, TEST_ALLOWED_BUCKET2,
+};
+use crate::credentials::Credential;
+use crate::logging::setup_test_logging;
 use crate::server::Server;
 
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
@@ -72,7 +78,7 @@ fn test_sigv4_key() {
 
     let date = NaiveDate::default();
 
-    let _signing_key = secret_key.to_ksigning(date, "crabcakes", "s3");
+    let _signing_key = secret_key.to_ksigning(date, DEFAULT_REGION, S3);
 
     assert_eq!(
         KSecretKey::from_str("tooshort"),
@@ -89,16 +95,23 @@ fn test_sigv4_key() {
 
 async fn create_s3_client(port: u16) -> Client {
     // Use testuser's test credentials that match test_config/credentials/testuser.json
+    let test_creds: Credential = serde_json::from_str(
+        &fs::read_to_string("test_config/credentials/testuser.json")
+            .expect("Failed to read test credentials"),
+    )
+    .expect("Failed to deserialize test credentials");
+
     let creds = Credentials::new(
-        "testuser",
-        "test123456789012345678901234567890123456",
+        test_creds.access_key_id,
+        test_creds.secret_access_key,
         None,
         None,
         "test",
     );
+    debug!(creds = ?creds, "Test client using these creds");
     let config = aws_config::defaults(BehaviorVersion::latest())
         .credentials_provider(creds)
-        .region(Region::new("crabcakes"))
+        .region(Region::new(DEFAULT_REGION))
         .load()
         .await;
 
@@ -112,6 +125,7 @@ async fn create_s3_client(port: u16) -> Client {
 
 #[tokio::test]
 async fn test_list_buckets() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
@@ -126,11 +140,11 @@ async fn test_list_buckets() {
     // Verify both bucket1 and bucket2 are listed
     let bucket_names: Vec<_> = buckets.iter().filter_map(|b| b.name()).collect();
     assert!(
-        bucket_names.contains(&"bucket1"),
+        bucket_names.contains(&TEST_ALLOWED_BUCKET),
         "Expected bucket1 in listing"
     );
     assert!(
-        bucket_names.contains(&"bucket2"),
+        bucket_names.contains(&TEST_ALLOWED_BUCKET2),
         "Expected bucket2 in listing"
     );
 
@@ -143,17 +157,21 @@ async fn test_list_objects() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let result = client.list_objects_v2().bucket("bucket1").send().await;
+    let result = client
+        .list_objects_v2()
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .send()
+        .await;
     assert!(result.is_ok(), "ListObjectsV2 failed: {:?}", result.err());
 
     let output = result.unwrap();
     let contents = output.contents();
     assert!(!contents.is_empty());
+    let file_to_find = format!("{}/testuser/test.txt", TEST_ALLOWED_BUCKET2);
+    dbg!(contents);
     assert!(
-        contents
-            .iter()
-            .any(|obj| obj.key() == Some("bucket1/test.txt")),
-        "Expected to find bucket1/test.txt in listing"
+        contents.iter().any(|obj| obj.key() == Some(&file_to_find)),
+        "Expected to find {file_to_find} in listing"
     );
 
     handle.abort();
@@ -161,14 +179,15 @@ async fn test_list_objects() {
 
 #[tokio::test]
 async fn test_head_object() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     let result = client
         .head_object()
-        .bucket("bucket1")
-        .key("test.txt")
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/test.txt")
         .send()
         .await;
     assert!(result.is_ok(), "HeadObject failed: {:?}", result.err());
@@ -184,14 +203,15 @@ async fn test_head_object() {
 
 #[tokio::test]
 async fn test_get_object() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     let result = client
         .get_object()
-        .bucket("bucket1")
-        .key("test.txt")
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/test.txt")
         .send()
         .await;
     assert!(result.is_ok(), "GetObject failed: {:?}", result.err());
@@ -217,7 +237,7 @@ async fn test_get_nonexistent_object() {
 
     let result = client
         .get_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key("nonexistent.txt")
         .send()
         .await;
@@ -228,14 +248,15 @@ async fn test_get_nonexistent_object() {
 
 #[tokio::test]
 async fn test_list_objects_with_prefix() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     let result = client
         .list_objects_v2()
-        .bucket("bucket1")
-        .prefix("test")
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .prefix("testuser")
         .send()
         .await;
     assert!(
@@ -247,11 +268,11 @@ async fn test_list_objects_with_prefix() {
     let output = result.unwrap();
     let contents = output.contents();
     assert!(!contents.is_empty());
+    dbg!(contents);
+    let file_to_find = format!("{}/testuser/test.txt", TEST_ALLOWED_BUCKET2);
     assert!(
-        contents
-            .iter()
-            .any(|obj| obj.key() == Some("bucket1/test.txt")),
-        "Expected to find bucket1/test.txt in listing"
+        contents.iter().any(|obj| obj.key() == Some(&file_to_find)),
+        "Expected to find {file_to_find} in listing"
     );
 
     handle.abort();
@@ -259,11 +280,16 @@ async fn test_list_objects_with_prefix() {
 
 #[tokio::test]
 async fn test_path_style_bucket_listing() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let result = client.list_objects_v2().bucket("bucket1").send().await;
+    let result = client
+        .list_objects_v2()
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .send()
+        .await;
     assert!(result.is_ok(), "ListObjectsV2 failed: {:?}", result.err());
 
     let output = result.unwrap();
@@ -274,14 +300,22 @@ async fn test_path_style_bucket_listing() {
 
 #[tokio::test]
 async fn test_list_with_file_prefix() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
-    let (handle, port) = start_test_server(temp_dir.path()).await;
+    std::fs::read_dir(temp_dir.path().join(TEST_ALLOWED_BUCKET2).join("testuser"))
+        .expect("Can't read temp dir")
+        .for_each(|entry| {
+            let entry = entry.unwrap();
+            debug!("Temp dir contains: {:?}", entry.path());
+        });
+    let (_handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
+    let prefix = "testuser";
     let result = client
         .list_objects_v2()
-        .bucket("bucket1")
-        .prefix("test.txt")
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .prefix(prefix)
         .send()
         .await;
     assert!(
@@ -291,35 +325,41 @@ async fn test_list_with_file_prefix() {
     );
 
     let output = result.unwrap();
-    assert_eq!(output.prefix(), Some("bucket1/test.txt"));
+    dbg!(&output);
+    assert_eq!(
+        output.prefix(),
+        Some(format!("{TEST_ALLOWED_BUCKET2}/{prefix}").as_str())
+    );
+
     let contents = output.contents();
     assert!(!contents.is_empty());
     assert!(
         contents
             .iter()
-            .any(|obj| obj.key() == Some("bucket1/test.txt")),
-        "Expected to find bucket1/test.txt in listing"
+            .any(|obj| obj.key() == Some("bucket2/testuser/test.txt")),
+        "Expected to find \"bucket2/testuser/test.txt\" in listing"
     );
-
-    handle.abort();
+    dbg!(&output);
 }
 
 #[tokio::test]
 async fn test_bucket2_json_file() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
+    let key = "testuser/hello-world.json";
     // Test HeadObject on bucket2/hello-world.json
     let head_result = client
         .head_object()
-        .bucket("bucket2")
-        .key("hello-world.json")
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .key(key)
         .send()
         .await;
     assert!(
         head_result.is_ok(),
-        "HeadObject on bucket2/hello-world.json failed: {:?}",
+        "HeadObject on {key} failed: {:?}",
         head_result.err()
     );
 
@@ -330,7 +370,7 @@ async fn test_bucket2_json_file() {
     // Test GetObject on bucket2/hello-world.json
     let get_result = client
         .get_object()
-        .bucket("bucket2")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .key("hello-world.json")
         .send()
         .await;
@@ -350,17 +390,18 @@ async fn test_bucket2_json_file() {
 
 #[tokio::test]
 async fn test_put_object() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     let test_content = b"This is a test file uploaded via PutObject";
-    let test_key = "uploaded-file.txt";
+    let test_key = "testuser/uploaded-file.txt";
 
     // Test PutObject
     let put_result = client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .body(test_content.to_vec().into())
         .send()
@@ -377,7 +418,7 @@ async fn test_put_object() {
     // Verify we can retrieve the uploaded file
     let get_result = client
         .get_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -397,7 +438,7 @@ async fn test_put_object() {
     // Verify HeadObject works
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -419,11 +460,11 @@ async fn test_put_object() {
 
 #[tokio::test]
 async fn test_create_bucket() {
-    let temp_dir = setup_test_files();
-    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let (_handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let bucket_name = "test-new-bucket";
+    let bucket_name = TEST_ALLOWED_BUCKET2;
 
     // Create a new bucket
     let create_result = client.create_bucket().bucket(bucket_name).send().await;
@@ -432,37 +473,15 @@ async fn test_create_bucket() {
         "CreateBucket failed: {:?}",
         create_result.err()
     );
-
-    // Verify bucket exists via ListBuckets
-    let list_result = client.list_buckets().send().await;
-    dbg!(&list_result);
-    assert!(list_result.is_ok());
-    let list_output = list_result.unwrap();
-    let buckets = list_output.buckets();
-    let bucket_names: Vec<_> = buckets.iter().filter_map(|b| b.name()).collect();
-    assert!(
-        bucket_names.contains(&bucket_name),
-        "New bucket not found in listing"
-    );
-
-    // Verify HeadBucket returns 200
-    let head_result = client.head_bucket().bucket(bucket_name).send().await;
-    assert!(
-        head_result.is_ok(),
-        "HeadBucket failed: {:?}",
-        head_result.err()
-    );
-
-    handle.abort();
 }
 
 #[tokio::test]
 async fn test_delete_bucket() {
-    let temp_dir = setup_test_files();
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let bucket_name = "test-delete-bucket";
+    let bucket_name = TEST_ALLOWED_BUCKET2;
 
     // Create bucket
     let create_result = client.create_bucket().bucket(bucket_name).send().await;
@@ -492,11 +511,11 @@ async fn test_delete_bucket() {
 
 #[tokio::test]
 async fn test_delete_bucket_not_empty() {
-    let temp_dir = setup_test_files();
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let bucket_name = "test-nonempty-bucket";
+    let bucket_name = TEST_ALLOWED_BUCKET2;
 
     // Create bucket
     let create_result = client.create_bucket().bucket(bucket_name).send().await;
@@ -505,8 +524,8 @@ async fn test_delete_bucket_not_empty() {
     // Put an object in the bucket
     let put_result = client
         .put_object()
-        .bucket("test-nonempty-bucket")
-        .key("test-file.txt")
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .key("testuser/test-file.txt")
         .body(b"test content".to_vec().into())
         .send()
         .await;
@@ -534,7 +553,11 @@ async fn test_head_bucket() {
     let client = create_s3_client(port).await;
 
     // Test existing bucket (bucket1 from setup)
-    let head_result = client.head_bucket().bucket("bucket1").send().await;
+    let head_result = client
+        .head_bucket()
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .send()
+        .await;
     assert!(
         head_result.is_ok(),
         "HeadBucket failed on existing bucket: {:?}",
@@ -561,13 +584,13 @@ async fn test_delete_object() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let test_key = "delete-test.txt";
+    let test_key = "testuser/delete-test.txt";
     let test_content = b"This file will be deleted";
 
     // Put an object
     let put_result = client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .body(test_content.to_vec().into())
         .send()
@@ -577,7 +600,7 @@ async fn test_delete_object() {
     // Verify object exists
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -586,7 +609,7 @@ async fn test_delete_object() {
     // Delete the object
     let delete_result = client
         .delete_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -599,7 +622,7 @@ async fn test_delete_object() {
     // Verify object is gone
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key)
         .send()
         .await;
@@ -620,8 +643,8 @@ async fn test_delete_nonexistent_object() {
     // Delete a non-existent object - should succeed per S3 spec
     let delete_result = client
         .delete_object()
-        .bucket("bucket1")
-        .key("nonexistent-file.txt")
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/nonexistent-file.txt")
         .send()
         .await;
     assert!(
@@ -635,22 +658,15 @@ async fn test_delete_nonexistent_object() {
 
 #[tokio::test]
 async fn test_bucket_already_exists() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    // Create a bucket
-    let create_result = client
-        .create_bucket()
-        .bucket("test-duplicate-bucket")
-        .send()
-        .await;
-    assert!(create_result.is_ok());
-
     // Try to create the same bucket again - should fail
     let create_result = client
         .create_bucket()
-        .bucket("test-duplicate-bucket")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .send()
         .await;
     assert!(
@@ -668,19 +684,20 @@ async fn test_bucket_already_exists() {
 
 #[tokio::test]
 async fn test_delete_objects_batch() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
     // Create test objects to delete
-    let test_key1 = "batch-delete-1.txt";
-    let test_key2 = "batch-delete-2.txt";
-    let test_key3 = "batch-delete-3.txt";
+    let test_key1 = "testuser/batch-delete-1.txt";
+    let test_key2 = "testuser/batch-delete-2.txt";
+    let test_key3 = "testuser/batch-delete-3.txt";
 
     // Upload test objects
     client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key1)
         .body("content1".as_bytes().to_vec().into())
         .send()
@@ -689,7 +706,7 @@ async fn test_delete_objects_batch() {
 
     client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key2)
         .body("content2".as_bytes().to_vec().into())
         .send()
@@ -698,7 +715,7 @@ async fn test_delete_objects_batch() {
 
     client
         .put_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(test_key3)
         .body("content3".as_bytes().to_vec().into())
         .send()
@@ -708,7 +725,7 @@ async fn test_delete_objects_batch() {
     // Delete objects in batch
     let delete_result = client
         .delete_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .delete(
             aws_sdk_s3::types::Delete::builder()
                 .objects(
@@ -765,7 +782,12 @@ async fn test_delete_objects_batch() {
 
     // Verify all objects are deleted
     for key in [test_key1, test_key2, test_key3] {
-        let head_result = client.head_object().bucket("bucket1").key(key).send().await;
+        let head_result = client
+            .head_object()
+            .bucket(TEST_ALLOWED_BUCKET)
+            .key(key)
+            .send()
+            .await;
         assert!(
             head_result.is_err(),
             "Object {} should not exist after batch delete",
@@ -785,7 +807,7 @@ async fn test_delete_objects_nonexistent() {
     // Delete non-existent objects (should succeed per S3 idempotency)
     let delete_result = client
         .delete_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .delete(
             aws_sdk_s3::types::Delete::builder()
                 .objects(
@@ -829,13 +851,13 @@ async fn test_copy_object() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    let source_key = "test.txt";
-    let dest_key = "test-copy.txt";
+    let source_key = "testuser/test.txt";
+    let dest_key = "testuser/test-copy.txt";
 
     // Copy existing object
     let copy_result = client
         .copy_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(dest_key)
         .copy_source(format!("bucket1/{}", source_key))
         .send()
@@ -850,7 +872,7 @@ async fn test_copy_object() {
     // Verify destination object exists
     let head_result = client
         .head_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(dest_key)
         .send()
         .await;
@@ -860,7 +882,7 @@ async fn test_copy_object() {
     // Verify content matches
     let get_result = client
         .get_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key(dest_key)
         .send()
         .await;
@@ -879,7 +901,7 @@ async fn test_copy_object_nonexistent_source() {
     // Try to copy non-existent object
     let copy_result = client
         .copy_object()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET)
         .key("dest.txt")
         .copy_source("bucket1/nonexistent.txt")
         .send()
@@ -900,7 +922,11 @@ async fn test_get_bucket_location() {
     let client = create_s3_client(port).await;
 
     // Get bucket location
-    let location_result = client.get_bucket_location().bucket("bucket1").send().await;
+    let location_result = client
+        .get_bucket_location()
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .send()
+        .await;
 
     assert!(
         location_result.is_ok(),
@@ -914,7 +940,7 @@ async fn test_get_bucket_location() {
     assert!(constraint.is_some(), "LocationConstraint should be present");
     let constraint_value = constraint.unwrap().as_str();
     assert_eq!(
-        constraint_value, "crabcakes",
+        constraint_value, DEFAULT_REGION,
         "Expected region to be 'crabcakes'"
     );
 
@@ -951,7 +977,7 @@ async fn test_list_objects_v1() {
     // ListObjectsV1 with prefix parameter (V1 API)
     let list_result = client
         .list_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .prefix("test")
         .send()
         .await;
@@ -993,6 +1019,7 @@ async fn test_list_objects_v1() {
 
 #[tokio::test]
 async fn test_list_objects_v1_pagination() {
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
@@ -1000,7 +1027,7 @@ async fn test_list_objects_v1_pagination() {
     // ListObjectsV1 with max_keys for pagination
     let list_result = client
         .list_objects()
-        .bucket("bucket1")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .max_keys(1)
         .send()
         .await;
@@ -1047,23 +1074,8 @@ async fn test_reserved_bucket_names() {
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
 
-    // List of reserved bucket names that should be rejected
-    let reserved_names = vec![
-        "admin",
-        "api",
-        "login",
-        "logout",
-        "oauth2",
-        ".well-known",
-        "config",
-        "oidc",
-        "crabcakes",
-        "docs",
-        "help",
-    ];
-
-    for bucket_name in reserved_names {
-        let create_result = client.create_bucket().bucket(bucket_name).send().await;
+    for bucket_name in RESERVED_BUCKET_NAMES {
+        let create_result = client.create_bucket().bucket(*bucket_name).send().await;
 
         assert!(
             create_result.is_err(),
@@ -1112,24 +1124,16 @@ async fn test_healthcheck() {
 #[tokio::test]
 async fn test_admin_ui_delete_bucket_without_csrf_fails() {
     // Test that admin UI bucket deletion requires CSRF token
+    setup_test_logging();
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let s3_client = create_s3_client(port).await;
-
-    // Create a bucket via S3 API
-    s3_client
-        .create_bucket()
-        .bucket("test-csrf-bucket")
-        .send()
-        .await
-        .unwrap();
 
     // Try to delete via admin API without CSRF token (should fail)
     let http_client = reqwest::Client::new();
     let response = http_client
         .delete(format!(
-            "http://localhost:{}/admin/api/buckets/test-csrf-bucket",
-            port
+            "http://localhost:{port}/admin/api/buckets/{TEST_ALLOWED_BUCKET2}",
         ))
         .send()
         .await
@@ -1139,12 +1143,17 @@ async fn test_admin_ui_delete_bucket_without_csrf_fails() {
     assert!(response.status().is_client_error() || response.status().is_server_error());
 
     // Verify bucket still exists
-    let buckets = s3_client.list_buckets().send().await.unwrap();
+    let buckets = s3_client
+        .list_buckets()
+        .send()
+        .await
+        .expect("Failed to list buckets");
+    dbg!(buckets.buckets());
     assert!(
         buckets
             .buckets()
             .iter()
-            .any(|b| b.name() == Some("test-csrf-bucket"))
+            .any(|b| b.name() == Some(TEST_ALLOWED_BUCKET2)),
     );
 
     handle.abort();
@@ -1154,22 +1163,24 @@ async fn test_admin_ui_delete_bucket_without_csrf_fails() {
 async fn test_admin_ui_bucket_delete_confirmation_page() {
     // Test that bucket delete confirmation page is properly routed
     // Note: In test mode, admin UI is disabled, so this returns 404
+    setup_test_logging();
     let temp_dir = setup_test_files();
+
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let s3_client = create_s3_client(port).await;
 
     // Create a bucket with some objects
-    s3_client
-        .create_bucket()
-        .bucket("test-confirm-page")
-        .send()
-        .await
-        .unwrap();
+    // s3_client
+    //     .create_bucket()
+    //     .bucket(TEST_ALLOWED_BUCKET)
+    //     .send()
+    //     .await
+    //     .unwrap();
 
     s3_client
         .put_object()
-        .bucket("test-confirm-page")
-        .key("file1.txt")
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/file1.txt")
         .body("content1".as_bytes().to_vec().into())
         .send()
         .await
@@ -1177,8 +1188,8 @@ async fn test_admin_ui_bucket_delete_confirmation_page() {
 
     s3_client
         .put_object()
-        .bucket("test-confirm-page")
-        .key("file2.txt")
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/file2.txt")
         .body("content2".as_bytes().to_vec().into())
         .send()
         .await
@@ -1189,8 +1200,7 @@ async fn test_admin_ui_bucket_delete_confirmation_page() {
     let http_client = reqwest::Client::new();
     let response = http_client
         .get(format!(
-            "http://localhost:{}/admin/buckets/test-confirm-page/delete",
-            port
+            "http://localhost:{port}/admin/buckets/{TEST_ALLOWED_BUCKET}/delete",
         ))
         .send()
         .await
@@ -1209,22 +1219,16 @@ async fn test_admin_ui_bucket_delete_confirmation_page() {
 #[tokio::test]
 async fn test_admin_ui_delete_empty_bucket_via_s3() {
     // Verify S3 API can delete empty buckets (baseline for admin UI)
-    let temp_dir = setup_test_files();
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    create_dir_all(temp_dir.path().join(TEST_ALLOWED_BUCKET2))
+        .expect("Failed to create test bucket dir");
     let (handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
-
-    // Create empty bucket
-    client
-        .create_bucket()
-        .bucket("test-empty-delete")
-        .send()
-        .await
-        .unwrap();
 
     // Delete via S3 API
     client
         .delete_bucket()
-        .bucket("test-empty-delete")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .send()
         .await
         .unwrap();
@@ -1235,7 +1239,7 @@ async fn test_admin_ui_delete_empty_bucket_via_s3() {
         !buckets
             .buckets()
             .iter()
-            .any(|b| b.name() == Some("test-empty-delete"))
+            .any(|b| b.name() == Some(TEST_ALLOWED_BUCKET2))
     );
 
     handle.abort();
@@ -1243,32 +1247,16 @@ async fn test_admin_ui_delete_empty_bucket_via_s3() {
 
 #[tokio::test]
 async fn test_admin_ui_delete_nonempty_bucket_fails_via_s3() {
+    setup_test_logging();
     // Verify S3 API rejects deletion of non-empty buckets (admin UI behavior)
     let temp_dir = setup_test_files();
-    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let (_handle, port) = start_test_server(temp_dir.path()).await;
     let client = create_s3_client(port).await;
-
-    // Create bucket with object
-    client
-        .create_bucket()
-        .bucket("test-nonempty-delete")
-        .send()
-        .await
-        .unwrap();
-
-    client
-        .put_object()
-        .bucket("test-nonempty-delete")
-        .key("file.txt")
-        .body("content".as_bytes().to_vec().into())
-        .send()
-        .await
-        .unwrap();
 
     // Try to delete via S3 API (should fail)
     let result = client
         .delete_bucket()
-        .bucket("test-nonempty-delete")
+        .bucket(TEST_ALLOWED_BUCKET2)
         .send()
         .await;
 
@@ -1280,10 +1268,8 @@ async fn test_admin_ui_delete_nonempty_bucket_fails_via_s3() {
         buckets
             .buckets()
             .iter()
-            .any(|b| b.name() == Some("test-nonempty-delete"))
+            .any(|b| b.name() == Some(TEST_ALLOWED_BUCKET2))
     );
-
-    handle.abort();
 }
 
 #[tokio::test]

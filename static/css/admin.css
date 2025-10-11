@@ -144,11 +144,11 @@ body {
     margin: 0 auto;
 }
 
-.form-group,
-.troubleshooter-results {
+.container-column {
+    max-width: 50%;
     flex: 1 1 auto;
-    max-width: 100%;
-    min-width: 50%;
+    flex-direction: column;
+    display: inline-flex;
 }
 
 .form-control {

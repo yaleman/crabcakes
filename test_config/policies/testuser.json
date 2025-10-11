@@ -1,0 +1,81 @@
+{
+    "Version": "2012-10-17",
+    "Id": "S3BucketPolicy",
+    "Statement": [
+        {
+            "Sid": "AllowS3All",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:*"
+            ],
+            "Resource": "arn:aws:s3:::bucket1/testuser/*"
+        },
+        {
+            "Sid": "AllowS3AllTestUserBucket",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:*"
+            ],
+            "Resource": "arn:aws:s3:::bucket1/testuser"
+        },
+        {
+            "Sid": "AllowS3AllTestUserBucket",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::bucket2",
+                "arn:aws:s3:::bucket2/*"
+            ]
+        },
+        {
+            "Sid": "AllowS3AllTestUserListBuckets",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:ListBuckets",
+                "s3:ListAllMyBuckets"
+            ],
+            "Resource": [
+                "*"
+            ]
+        },
+        {
+            "Sid": "AllowListBucket1",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::bucket1"
+        },
+        {
+            "Sid": "AllowCreateDeleteBucket21",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:CreateBucket",
+                "s3:HeadBucket",
+                "s3:ListBucket",
+                "s3:DeleteBucket"
+            ],
+            "Resource": "arn:aws:s3:::bucket21"
+        }
+    ]
+}
