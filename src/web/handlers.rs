@@ -355,6 +355,12 @@ impl WebHandler {
                     None => Ok(respond_404()),
                 }
             }
+            (Method::GET, "/admin/api/database/vacuum") => {
+                self.get_api_database_vacuum(session).await
+            }
+            (Method::POST, "/admin/api/database/vacuum") => {
+                self.post_api_database_vacuum(req, session).await
+            }
             _ => Ok(respond_404()),
         }
     }
@@ -1848,6 +1854,79 @@ impl WebHandler {
         let form: TroubleShooterForm = serde_json::from_str(body_str)?;
 
         let response = handle_troubleshooter_request(form, &self.policy_store).await?;
+        self.build_json_response(response)
+    }
+
+    /// GET /admin/api/database/vacuum - Check if database needs vacuuming
+    async fn get_api_database_vacuum(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Get vacuum statistics
+        let stats = self.db.get_vacuum_stats().await?;
+        let needs_vacuum = stats.percentage > 10.0;
+
+        #[derive(Serialize)]
+        struct VacuumCheckResponse {
+            needs_vacuum: bool,
+            freelist_count: i64,
+            page_count: i64,
+            percentage: f64,
+        }
+
+        let response = VacuumCheckResponse {
+            needs_vacuum,
+            freelist_count: stats.freelist_count,
+            page_count: stats.page_count,
+            percentage: stats.percentage,
+        };
+
+        self.build_json_response(response)
+    }
+
+    /// POST /admin/api/database/vacuum - Execute database vacuum
+    async fn post_api_database_vacuum(
+        &self,
+        req: Request<Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts for CSRF validation
+        let (parts, _body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Check if confirm parameter is present
+        let query = parts.uri.query().unwrap_or("");
+        let confirm = query.contains("confirm=true");
+
+        if !confirm {
+            return self.build_json_response(json!({
+                "success": false,
+                "error": "Must include confirm=true query parameter to execute vacuum"
+            }));
+        }
+
+        // Execute vacuum
+        let reclaimed_pages = self.db.vacuum_database().await?;
+
+        #[derive(Serialize)]
+        struct VacuumExecuteResponse {
+            success: bool,
+            reclaimed_pages: i64,
+        }
+
+        let response = VacuumExecuteResponse {
+            success: true,
+            reclaimed_pages,
+        };
+
         self.build_json_response(response)
     }
 }
