@@ -391,9 +391,9 @@ impl DBService {
             .await?
             .ok_or_else(|| CrabCakesError::other(&"Failed to get freelist_count".to_string()))?;
 
-        let freelist_count: i64 = freelist_result
-            .try_get("", "freelist_count")
-            .map_err(|e| CrabCakesError::other(&format!("Failed to parse freelist_count: {}", e)))?;
+        let freelist_count: i64 = freelist_result.try_get("", "freelist_count").map_err(|e| {
+            CrabCakesError::other(&format!("Failed to parse freelist_count: {}", e))
+        })?;
 
         // Calculate percentage
         let percentage = if page_count > 0 {

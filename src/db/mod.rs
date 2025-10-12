@@ -30,6 +30,7 @@ pub async fn initialize_database(config_dir: &Path) -> Result<DatabaseConnection
     let connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
 
     debug!("Connecting to database at {}", db_path.display());
+
     let db = Database::connect(&connection_string).await?;
 
     // Configure SQLite PRAGMAs for optimal performance and incremental vacuum
@@ -60,7 +61,8 @@ async fn configure_sqlite_pragmas(db: &DatabaseConnection) -> Result<(), DbErr> 
     db.execute_unprepared("PRAGMA mmap_size = 10485760").await?;
 
     // Enable incremental vacuum for space reclamation
-    db.execute_unprepared("PRAGMA auto_vacuum = INCREMENTAL").await?;
+    db.execute_unprepared("PRAGMA auto_vacuum = INCREMENTAL")
+        .await?;
 
     debug!("SQLite PRAGMA configuration complete");
     Ok(())

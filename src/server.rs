@@ -196,17 +196,9 @@ impl Server {
                 );
 
                 // Create session store using the same SQLite database
-                let db_path = self.config_dir.join("crabcakes.sqlite3");
-                let session_store = SqliteStore::new(
-                    sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
-                        .await
-                        .map_err(|e| {
-                            CrabCakesError::other(&format!(
-                                "Failed to connect to session database: {}",
-                                e
-                            ))
-                        })?,
-                );
+                let session_db = db.clone();
+                let session_store =
+                    SqliteStore::new(session_db.get_sqlite_connection_pool().clone());
                 session_store.migrate().await.map_err(|e| {
                     CrabCakesError::other(&format!("Failed to migrate session store: {}", e))
                 })?;
