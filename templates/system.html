@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+
+{% block title %}System - Crabcakes Admin{% endblock %}
+
+{% block content %}
+<h1>System Information</h1>
+<p class="subtitle">Database maintenance and system status</p>
+
+<div class="info-section">
+    <h2>Database Vacuum Status</h2>
+    <div class="info-row">
+        <span class="info-label">Status:</span>
+        <span id="vacuum-status" class="badge">Loading...</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Page Count:</span>
+        <span id="page-count" class="info-value">-</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Freelist Count:</span>
+        <span id="freelist-count" class="info-value">-</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Freelist Percentage:</span>
+        <span id="freelist-percentage" class="info-value">-</span>
+    </div>
+</div>
+
+<div class="action-section">
+    <button id="vacuum-btn" class="btn btn-primary" disabled>
+        Vacuum Database
+    </button>
+    <div id="vacuum-result" class="message" style="display: none;"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/admin/static/js/system.js"></script>
+{% endblock %}
