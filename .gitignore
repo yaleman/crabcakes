@@ -13,3 +13,5 @@ test_config/*.sqlite3
 node_modules/
 docs/book/
 src/js/*.js
+*.profraw
+test_config/crabcakes.sqlite3*

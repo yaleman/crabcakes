@@ -26,7 +26,7 @@ use serde_json::json;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
-use crate::constants::{CSRF_TOKEN_LENGTH, S3Action, SessionKey};
+use crate::constants::{CSRF_TOKEN_LENGTH, S3Action, SessionKey, WebPage};
 use crate::db::DBService;
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
@@ -46,7 +46,7 @@ pub(crate) struct ErrorTemplate {
 #[derive(Template)]
 #[template(path = "profile.html")]
 struct ProfileTemplate {
-    page: String,
+    page: &'static str,
     user_email: String,
     user_id: String,
     access_key_id: String,
@@ -54,11 +54,18 @@ struct ProfileTemplate {
     expires_at: String,
 }
 
+/// System page template
+#[derive(Template)]
+#[template(path = "system.html")]
+struct SystemTemplate {
+    page: &'static str,
+}
+
 /// Policies list template
 #[derive(Template)]
 #[template(path = "policies.html")]
 struct PoliciesTemplate {
-    page: String,
+    page: &'static str,
     policies: Vec<PolicyInfo>,
 }
 
@@ -66,7 +73,7 @@ struct PoliciesTemplate {
 #[derive(Template)]
 #[template(path = "policy_detail.html")]
 struct PolicyDetailTemplate {
-    page: String,
+    page: &'static str,
     policy_name: String,
     policy_json: String,
     policy_principal_permissions: Vec<PolicyPrincipalPermission>,
@@ -87,7 +94,7 @@ struct PolicyPrincipalPermission {
 #[derive(Template)]
 #[template(path = "policy_form.html")]
 struct PolicyFormTemplate {
-    page: String,
+    page: &'static str,
     policy_name: String,
     policy_json: String,
 }
@@ -96,7 +103,7 @@ struct PolicyFormTemplate {
 #[derive(Template)]
 #[template(path = "credential_form.html")]
 struct CredentialFormTemplate {
-    page: String,
+    page: &'static str,
     access_key_id: String,
     is_edit: bool,
 }
@@ -104,7 +111,7 @@ struct CredentialFormTemplate {
 impl Default for CredentialFormTemplate {
     fn default() -> Self {
         Self {
-            page: "identities".to_string(),
+            page: WebPage::Identities.as_ref(),
             access_key_id: String::new(),
             is_edit: false,
         }
@@ -115,22 +122,31 @@ impl Default for CredentialFormTemplate {
 #[derive(Template)]
 #[template(path = "buckets.html")]
 struct BucketsTemplate {
-    page: String,
+    page: &'static str,
     buckets: Vec<String>,
+}
+
+impl Default for BucketsTemplate {
+    fn default() -> Self {
+        Self {
+            page: WebPage::Buckets.as_ref(),
+            buckets: Vec::new(),
+        }
+    }
 }
 
 /// Bucket form template (for creating buckets)
 #[derive(Template)]
 #[template(path = "bucket_form.html")]
 struct BucketFormTemplate {
-    page: String,
+    page: &'static str,
 }
 
 /// Bucket delete confirmation template
 #[derive(Template)]
 #[template(path = "bucket_delete.html")]
 struct BucketDeleteTemplate {
-    page: String,
+    page: &'static str,
     bucket_name: String,
     object_count: usize,
 }
@@ -139,7 +155,7 @@ struct BucketDeleteTemplate {
 #[derive(Template)]
 #[template(path = "bucket_detail.html")]
 struct BucketDetailTemplate {
-    page: String,
+    page: &'static str,
     bucket_name: String,
     objects: Vec<ObjectInfo>,
 }
@@ -148,7 +164,7 @@ struct BucketDetailTemplate {
 #[derive(Template)]
 #[template(path = "identities.html")]
 struct IdentitiesTemplate {
-    page: String,
+    page: &'static str,
     identities: Vec<IdentitySummary>,
     temporary_credentials: Vec<TemporaryCredentialSummary>,
 }
@@ -167,7 +183,7 @@ struct TemporaryCredentialSummary {
 #[derive(Template)]
 #[template(path = "identity_detail.html")]
 struct IdentityDetailTemplate {
-    page: String,
+    page: &'static str,
     identity: crate::policy_analyzer::IdentityInfo,
     has_credential: bool,
 }
@@ -194,7 +210,7 @@ struct IdentitySummary {
 #[derive(Template)]
 #[template(path = "troubleshooter.html")]
 struct PolicyTroubleshooterTemplate {
-    page: String,
+    page: &'static str,
     bucket: String,
     key: String,
     user: String,
@@ -207,7 +223,7 @@ struct PolicyTroubleshooterTemplate {
 impl Default for PolicyTroubleshooterTemplate {
     fn default() -> Self {
         Self {
-            page: "policy_troubleshooter".to_string(),
+            page: WebPage::PolicyTroubleshooter.as_ref(),
             bucket: String::new(),
             key: String::new(),
             user: String::new(),
@@ -355,6 +371,12 @@ impl WebHandler {
                     None => Ok(respond_404()),
                 }
             }
+            (Method::GET, "/admin/api/database/vacuum") => {
+                self.get_api_database_vacuum(session).await
+            }
+            (Method::POST, "/admin/api/database/vacuum") => {
+                self.post_api_database_vacuum(req, session).await
+            }
             _ => Ok(respond_404()),
         }
     }
@@ -386,6 +408,7 @@ impl WebHandler {
 
                 (Method::GET, "/admin") | (Method::GET, "/admin/") => self.get_admin().await,
                 (Method::GET, "/admin/profile") => self.get_profile(session).await,
+                (Method::GET, "/admin/system") => self.get_system(session).await,
                 (Method::GET, "/admin/policies") => self.get_policies(session).await,
                 (Method::GET, "/admin/policies/new") => self.get_policy_new_form(session).await,
                 (Method::GET, "/admin/policy_troubleshooter") => {
@@ -787,12 +810,25 @@ impl WebHandler {
 
         // Render template
         let template = ProfileTemplate {
-            page: "profile".to_string(),
+            page: WebPage::Profile.as_ref(),
             user_email,
             user_id,
             access_key_id: creds.access_key_id,
             secret_key_preview: creds.secret_access_key.chars().take(8).collect(),
             expires_at: creds.expires_at.to_string(),
+        };
+
+        self.build_html_response(template)
+    }
+
+    /// GET /admin/system - System information page
+    async fn get_system(&self, session: Session) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
+        }
+
+        let template = SystemTemplate {
+            page: WebPage::System.as_ref(),
         };
 
         self.build_html_response(template)
@@ -818,7 +854,7 @@ impl WebHandler {
         }
 
         let template = PoliciesTemplate {
-            page: "policies".to_string(),
+            page: WebPage::Policies.as_ref(),
             policies,
         };
 
@@ -914,7 +950,7 @@ impl WebHandler {
         }
 
         let template = PolicyDetailTemplate {
-            page: "policies".to_string(),
+            page: WebPage::Policies.as_ref(),
             policy_name: policy_name.to_string(),
             policy_json,
             policy_principal_permissions,
@@ -933,7 +969,7 @@ impl WebHandler {
         };
 
         let template = PolicyFormTemplate {
-            page: "policies".to_string(),
+            page: WebPage::Policies.as_ref(),
             policy_name: String::new(),
             policy_json: String::new(),
         };
@@ -961,7 +997,7 @@ impl WebHandler {
             .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
 
         let template = PolicyFormTemplate {
-            page: "policies".to_string(),
+            page: WebPage::Policies.as_ref(),
             policy_name: policy_name.to_string(),
             policy_json,
         };
@@ -1098,7 +1134,7 @@ impl WebHandler {
             .collect();
 
         let template = IdentitiesTemplate {
-            page: "identities".to_string(),
+            page: WebPage::Identities.as_ref(),
             identities,
             temporary_credentials,
         };
@@ -1133,7 +1169,7 @@ impl WebHandler {
             .is_some();
 
         let template = IdentityDetailTemplate {
-            page: "identities".to_string(),
+            page: WebPage::Identities.as_ref(),
             identity,
             has_credential,
         };
@@ -1156,8 +1192,8 @@ impl WebHandler {
             .map_err(CrabCakesError::from)?;
 
         let template = BucketsTemplate {
-            page: "buckets".to_string(),
             buckets,
+            ..Default::default()
         };
 
         self.build_html_response(template)
@@ -1203,7 +1239,7 @@ impl WebHandler {
             .collect();
 
         let template = BucketDetailTemplate {
-            page: "buckets".to_string(),
+            page: WebPage::Buckets.as_ref(),
             bucket_name: bucket_name.to_string(),
             objects,
         };
@@ -1221,7 +1257,7 @@ impl WebHandler {
         };
 
         let template = BucketFormTemplate {
-            page: "buckets".to_string(),
+            page: WebPage::Buckets.as_ref(),
         };
 
         self.build_html_response(template)
@@ -1286,7 +1322,7 @@ impl WebHandler {
             .map_err(CrabCakesError::from)?;
 
         let template = BucketDeleteTemplate {
-            page: "buckets".to_string(),
+            page: WebPage::Buckets.as_ref(),
             bucket_name: bucket_name.to_string(),
             object_count: entries.len(),
         };
@@ -1848,6 +1884,79 @@ impl WebHandler {
         let form: TroubleShooterForm = serde_json::from_str(body_str)?;
 
         let response = handle_troubleshooter_request(form, &self.policy_store).await?;
+        self.build_json_response(response)
+    }
+
+    /// GET /admin/api/database/vacuum - Check if database needs vacuuming
+    async fn get_api_database_vacuum(
+        &self,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Get vacuum statistics
+        let stats = self.db.get_vacuum_stats().await?;
+        let needs_vacuum = stats.percentage > 10.0;
+
+        #[derive(Serialize)]
+        struct VacuumCheckResponse {
+            needs_vacuum: bool,
+            freelist_count: i64,
+            page_count: i64,
+            percentage: f64,
+        }
+
+        let response = VacuumCheckResponse {
+            needs_vacuum,
+            freelist_count: stats.freelist_count,
+            page_count: stats.page_count,
+            percentage: stats.percentage,
+        };
+
+        self.build_json_response(response)
+    }
+
+    /// POST /admin/api/database/vacuum - Execute database vacuum
+    async fn post_api_database_vacuum(
+        &self,
+        req: Request<Incoming>,
+        session: Session,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        // Check authentication
+        self.check_auth(&session).await?;
+
+        // Split request into parts for CSRF validation
+        let (parts, _body) = req.into_parts();
+
+        // Validate CSRF token
+        self.validate_csrf_token(&session, &parts.headers).await?;
+
+        // Check if confirm parameter is present
+        let query = parts.uri.query().unwrap_or("");
+        let confirm = query.contains("confirm=true");
+
+        if !confirm {
+            return self.build_json_response(json!({
+                "success": false,
+                "error": "Must include confirm=true query parameter to execute vacuum"
+            }));
+        }
+
+        // Execute vacuum
+        let reclaimed_pages = self.db.vacuum_database().await?;
+
+        #[derive(Serialize)]
+        struct VacuumExecuteResponse {
+            success: bool,
+            reclaimed_pages: i64,
+        }
+
+        let response = VacuumExecuteResponse {
+            success: true,
+            reclaimed_pages,
+        };
+
         self.build_json_response(response)
     }
 }

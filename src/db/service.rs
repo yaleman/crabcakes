@@ -361,6 +361,87 @@ impl DBService {
         Ok(result.rows_affected)
     }
 
+    // ===== Database Maintenance Operations =====
+
+    /// Get vacuum statistics for the database
+    pub async fn get_vacuum_stats(&self) -> Result<VacuumStats, CrabCakesError> {
+        use sea_orm::ConnectionTrait;
+
+        // Query page_count
+        let page_count_result = self
+            .db
+            .query_one(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "PRAGMA page_count".to_string(),
+            ))
+            .await?
+            .ok_or_else(|| CrabCakesError::other(&"Failed to get page_count".to_string()))?;
+
+        let page_count: i64 = page_count_result
+            .try_get("", "page_count")
+            .map_err(|e| CrabCakesError::other(&format!("Failed to parse page_count: {}", e)))?;
+
+        // Query freelist_count
+        let freelist_result = self
+            .db
+            .query_one(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "PRAGMA freelist_count".to_string(),
+            ))
+            .await?
+            .ok_or_else(|| CrabCakesError::other(&"Failed to get freelist_count".to_string()))?;
+
+        let freelist_count: i64 = freelist_result.try_get("", "freelist_count").map_err(|e| {
+            CrabCakesError::other(&format!("Failed to parse freelist_count: {}", e))
+        })?;
+
+        // Calculate percentage
+        let percentage = if page_count > 0 {
+            (freelist_count as f64 / page_count as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        Ok(VacuumStats {
+            page_count,
+            freelist_count,
+            percentage,
+        })
+    }
+
+    /// Check if database needs vacuuming (freelist > 10% of total pages)
+    pub async fn needs_vacuum(&self) -> Result<bool, CrabCakesError> {
+        let stats = self.get_vacuum_stats().await?;
+        Ok(stats.percentage > 10.0)
+    }
+
+    /// Execute incremental vacuum to reclaim free pages
+    pub async fn vacuum_database(&self) -> Result<i64, CrabCakesError> {
+        use sea_orm::ConnectionTrait;
+
+        // Get freelist count before vacuum
+        let stats_before = self.get_vacuum_stats().await?;
+        let freelist_before = stats_before.freelist_count;
+
+        // Execute incremental vacuum
+        self.db
+            .execute_unprepared("PRAGMA incremental_vacuum")
+            .await?;
+
+        // Get freelist count after vacuum to calculate reclaimed pages
+        let stats_after = self.get_vacuum_stats().await?;
+        let reclaimed = freelist_before - stats_after.freelist_count;
+
+        debug!(
+            freelist_before = freelist_before,
+            freelist_after = stats_after.freelist_count,
+            reclaimed_pages = reclaimed,
+            "Database vacuum completed"
+        );
+
+        Ok(reclaimed)
+    }
+
     // ===== Future: Object Metadata Operations =====
     // pub async fn put_object_metadata(...) { ... }
     // pub async fn get_object_metadata(...) { ... }
@@ -368,4 +449,12 @@ impl DBService {
     // ===== Future: ACL Operations =====
     // pub async fn put_acl(...) { ... }
     // pub async fn get_acl(...) { ... }
+}
+
+/// Database vacuum statistics
+#[derive(Debug, Clone)]
+pub struct VacuumStats {
+    pub page_count: i64,
+    pub freelist_count: i64,
+    pub percentage: f64,
 }

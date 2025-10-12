@@ -151,7 +151,7 @@ impl PolicyStore {
         let contents = fs::read_to_string(path).inspect_err(
             |err| error!(policy_path = path.display().to_string(), error = ?err, "Failed to read policy file"),
         )?;
-        debug!(contents = contents, "Loaded policy JSON",);
+        debug!(contents = contents.replace("\\n", ""), "Loaded policy JSON");
         // Apply mock ID transformation to match request transformation
         let transformed_contents = fix_mock_id(&contents);
         let policy: IAMPolicy = serde_json::from_str(&transformed_contents)?;

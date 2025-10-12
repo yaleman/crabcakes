@@ -132,3 +132,32 @@ impl AsRef<str> for SessionKey {
 pub(crate) static TEST_ALLOWED_BUCKET: &str = "bucket1";
 #[cfg(test)]
 pub(crate) static TEST_ALLOWED_BUCKET2: &str = "bucket2";
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum WebPage {
+    Buckets,
+    Identities,
+    Policies,
+    System,
+    Profile,
+    PolicyTroubleshooter,
+}
+
+impl AsRef<str> for WebPage {
+    fn as_ref(&self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Profile => "profile",
+            Self::Buckets => "buckets",
+            Self::Identities => "identities",
+            Self::Policies => "policies",
+            Self::PolicyTroubleshooter => "policy_troubleshooter",
+        }
+    }
+}
+
+impl Display for WebPage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_ref())
+    }
+}

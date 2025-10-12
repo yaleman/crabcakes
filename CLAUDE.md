@@ -518,3 +518,4 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - don't use javascript alerts to show things worked, redirect to the resulting object with a notification message
 - don't mention how many tests there are, anywhere. nobody cares.
 - users should refer to documentation over CLAUDE.md as documentation is for humans, and CLAUDE is for a tool.
+- TODO.md is not for documentation, remove completed tasks entirely from it when done

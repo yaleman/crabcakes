@@ -30,7 +30,11 @@ pub async fn initialize_database(config_dir: &Path) -> Result<DatabaseConnection
     let connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
 
     debug!("Connecting to database at {}", db_path.display());
+
     let db = Database::connect(&connection_string).await?;
+
+    // Configure SQLite PRAGMAs for optimal performance and incremental vacuum
+    configure_sqlite_pragmas(&db).await?;
 
     // Run migrations
     info!("Running database migrations...");
@@ -40,10 +44,37 @@ pub async fn initialize_database(config_dir: &Path) -> Result<DatabaseConnection
     Ok(db)
 }
 
+/// Configure SQLite PRAGMA settings for performance and maintenance
+async fn configure_sqlite_pragmas(db: &DatabaseConnection) -> Result<(), DbErr> {
+    use sea_orm::ConnectionTrait;
+
+    // Enable WAL mode for better concurrency
+    db.execute_unprepared("PRAGMA journal_mode = WAL").await?;
+
+    // Set cache size to 16MB (negative value = KiB)
+    db.execute_unprepared("PRAGMA cache_size = -16000").await?;
+
+    // Use memory for temporary storage
+    db.execute_unprepared("PRAGMA temp_store = MEMORY").await?;
+
+    // Set memory-mapped I/O size to 10MB
+    db.execute_unprepared("PRAGMA mmap_size = 10485760").await?;
+
+    // Enable incremental vacuum for space reclamation
+    db.execute_unprepared("PRAGMA auto_vacuum = INCREMENTAL")
+        .await?;
+
+    debug!("SQLite PRAGMA configuration complete");
+    Ok(())
+}
+
 /// Initialize in-memory database for testing
 #[cfg(test)]
 pub async fn initialize_in_memory_database() -> Result<DatabaseConnection, DbErr> {
     let db = Database::connect("sqlite::memory:").await?;
+
+    // Configure SQLite PRAGMAs (even for in-memory, for consistency)
+    configure_sqlite_pragmas(&db).await?;
 
     // Run migrations
     Migrator::up(&db, None).await?;
