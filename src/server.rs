@@ -120,7 +120,6 @@ impl Server {
     pub async fn run(self, use_in_memory_db: bool) -> Result<(), CrabCakesError> {
         let addr = format!("{}:{}", self.bind_address, self.port);
         let addr: SocketAddr = addr.parse()?;
-
         // Create filesystem service
         let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone()));
 
