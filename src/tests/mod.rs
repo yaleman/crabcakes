@@ -1,13 +1,14 @@
 pub(crate) mod db_tests;
 pub(crate) mod policy_tests;
 pub(crate) mod server_tests;
+pub(crate) mod web_handlers_tests;
 
 use super::*;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
-fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
+pub(crate) fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
     fs::create_dir_all(&dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;

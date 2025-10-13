@@ -9,7 +9,7 @@ use hyper::body::Bytes;
 use hyper::{Request, Response};
 use tower::Service;
 
-use crate::s3_handlers::S3Handler;
+use crate::web::s3_handlers::S3Handler;
 
 pub(crate) type WebServiceResponse = Response<Full<Bytes>>;
 

@@ -38,8 +38,8 @@ use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::router::{WebServiceWithSession, route_request};
-use crate::s3_handlers::S3Handler;
 use crate::web::handlers::WebHandler;
+use crate::web::s3_handlers::S3Handler;
 use crate::web::service::WebService;
 
 /// Main server struct holding configuration and state, if oidc is not configured the admin interface won't be either.

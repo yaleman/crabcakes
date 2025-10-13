@@ -136,7 +136,7 @@ impl PolicyStore {
     /// use crate::policy::PolicyStore;
     /// let (_tempdir, policy_store) = PolicyStore::test_empty_store();
     /// ```
-    pub fn test_empty_store() -> (TempDir, Self) {
+    pub fn new_test() -> (TempDir, Self) {
         let tempdir = tempfile::tempdir().expect("failed to create temp dir");
 
         let path = tempdir.path().to_path_buf();

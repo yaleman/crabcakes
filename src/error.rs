@@ -12,7 +12,7 @@ use scratchstack_aws_signature::{SignatureError, auth::SigV4AuthenticatorRespons
 use serde::Serialize;
 use serde_with::{DisplayFromStr, serde_as};
 
-use crate::web::handlers::ErrorTemplate;
+use crate::web::templates::ErrorTemplate;
 
 #[serde_as]
 #[derive(Serialize, Debug)]

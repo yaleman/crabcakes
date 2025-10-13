@@ -17,7 +17,7 @@ async fn test_policy_loading() {
 async fn test_wildcard_principal() {
     setup_test_logging();
 
-    let (_foo, policy_store) = PolicyStore::test_empty_store();
+    let (_foo, policy_store) = PolicyStore::new_test();
 
     // inject a wildcard policy
     let allow_all_policy = r#"
@@ -83,7 +83,7 @@ async fn test_wildcard_principal() {
 #[tokio::test]
 async fn test_alice_policy() {
     setup_test_logging();
-    let (_foo, policy_store) = PolicyStore::test_empty_store();
+    let (_foo, policy_store) = PolicyStore::new_test();
 
     let policy: IAMPolicy = serde_json::from_str(
         r#"

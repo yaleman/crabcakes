@@ -11,7 +11,7 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
 - `src/main.rs` - Main server entry point with tracing initialization
 - `src/cli.rs` - Command-line argument parsing using Clap
 - `src/server.rs` - Server struct with HTTP server setup and lifecycle management
-- `src/s3_handlers.rs` - S3 API request routing and handler implementations
+- `src/web/s3_handlers.rs` - S3 API request routing and handler implementations
 - `src/filesystem.rs` - Filesystem service for file operations
 - `src/xml_responses.rs` - AWS S3-compliant XML response serialization
 - `src/auth.rs` - AWS Signature V4 verification and authentication context building
@@ -516,6 +516,9 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - never use npm, use pnpm instead
 - always use static files for css/js, it is NEVER acceptable for such code to be inline
 - don't use javascript alerts to show things worked, redirect to the resulting object with a notification message
+
+## generic guidelines
+
 - don't mention how many tests there are, anywhere. nobody cares.
 - users should refer to documentation over CLAUDE.md as documentation is for humans, and CLAUDE is for a tool.
 - TODO.md is not for documentation, remove completed tasks entirely from it when done

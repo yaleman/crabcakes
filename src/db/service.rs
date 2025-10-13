@@ -364,7 +364,7 @@ impl DBService {
     // ===== Database Maintenance Operations =====
 
     /// Get vacuum statistics for the database
-    pub async fn get_vacuum_stats(&self) -> Result<VacuumStats, CrabCakesError> {
+    pub(crate) async fn get_vacuum_stats(&self) -> Result<VacuumStats, CrabCakesError> {
         use sea_orm::ConnectionTrait;
 
         // Query page_count
@@ -453,7 +453,7 @@ impl DBService {
 
 /// Database vacuum statistics
 #[derive(Debug, Clone)]
-pub struct VacuumStats {
+pub(crate) struct VacuumStats {
     pub page_count: i64,
     pub freelist_count: i64,
     pub percentage: f64,
