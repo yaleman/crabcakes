@@ -255,6 +255,10 @@ th {
     border-bottom: 0.15rem solid var(--color-purple-30pct);
 }
 
+.buttons-no-padding {
+    text-align: center;
+}
+
 @media (width >800px) {
 
     th,
@@ -275,7 +279,7 @@ th {
         padding: 0.1rem;
     }
 
-    td.buttons-no-padding {
+    .buttons-no-padding {
         padding: 0;
     }
 
@@ -558,8 +562,9 @@ table td button {
     transform: translateY(-2px);
 }
 
-th .select-column {
-    max-width: 1.0em;
+.select-column {
+    width: 1.0rem;
+    max-width: 5.0rem;
 }
 
 
