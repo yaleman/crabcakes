@@ -36,6 +36,27 @@ pub struct FilesystemService {
     root_dir: PathBuf,
 }
 
+/// Check if a bucket name should be excluded from listing or creation.
+/// Returns true if the bucket name should be excluded (reserved, hidden, or system directory).
+fn is_bucket_name_excluded(name: &str) -> bool {
+    // Reserved bucket names
+    if RESERVED_BUCKET_NAMES.contains(&name) {
+        return true;
+    }
+
+    // Hidden directories (starting with .)
+    if name.starts_with('.') {
+        return true;
+    }
+
+    // System directories
+    if name == "lost+found" {
+        return true;
+    }
+
+    false
+}
+
 impl FilesystemService {
     pub fn new(root_dir: PathBuf) -> Self {
         Self { root_dir }
@@ -96,6 +117,12 @@ impl FilesystemService {
             if entry.file_type()?.is_dir()
                 && let Some(name) = entry.file_name().to_str()
             {
+                // Filter out excluded bucket names
+                if is_bucket_name_excluded(name) {
+                    debug!(bucket = %name, "Skipping excluded bucket name");
+                    continue;
+                }
+
                 buckets.push(name.to_string());
             }
         }
@@ -217,8 +244,8 @@ impl FilesystemService {
     pub async fn create_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
         debug!(bucket = %bucket, "Creating bucket");
 
-        // Check if bucket name is reserved
-        if RESERVED_BUCKET_NAMES.contains(&bucket) {
+        // Check if bucket name is excluded (reserved, hidden, or system directory)
+        if is_bucket_name_excluded(bucket) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("Bucket name '{}' is reserved and cannot be used", bucket),

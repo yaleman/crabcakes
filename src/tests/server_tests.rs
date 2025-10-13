@@ -152,6 +152,60 @@ async fn test_list_buckets() {
 }
 
 #[tokio::test]
+async fn test_list_buckets_filters_system_directories() {
+    // Test that ListBuckets filters out reserved names, hidden dirs, and system dirs
+    setup_test_logging();
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+    // Create buckets including reserved names, hidden dirs, and lost+found
+    create_dir_all(temp_dir.path().join(TEST_ALLOWED_BUCKET)).unwrap();
+    create_dir_all(temp_dir.path().join(TEST_ALLOWED_BUCKET2)).unwrap();
+    create_dir_all(temp_dir.path().join("admin")).unwrap(); // reserved name
+    create_dir_all(temp_dir.path().join(".hidden")).unwrap(); // hidden directory
+    create_dir_all(temp_dir.path().join("lost+found")).unwrap(); // system directory
+
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    let result = client.list_buckets().send().await;
+    assert!(result.is_ok(), "ListBuckets failed: {:?}", result.err());
+
+    let output = result.unwrap();
+    let buckets = output.buckets();
+    let bucket_names: Vec<_> = buckets.iter().filter_map(|b| b.name()).collect();
+
+    // Should include allowed buckets
+    assert!(
+        bucket_names.contains(&TEST_ALLOWED_BUCKET),
+        "Expected bucket1 in listing"
+    );
+    assert!(
+        bucket_names.contains(&TEST_ALLOWED_BUCKET2),
+        "Expected bucket2 in listing"
+    );
+
+    // Should NOT include reserved names
+    assert!(
+        !bucket_names.contains(&"admin"),
+        "Reserved bucket name 'admin' should be filtered out"
+    );
+
+    // Should NOT include hidden directories
+    assert!(
+        !bucket_names.contains(&".hidden"),
+        "Hidden directory '.hidden' should be filtered out"
+    );
+
+    // Should NOT include lost+found
+    assert!(
+        !bucket_names.contains(&"lost+found"),
+        "System directory 'lost+found' should be filtered out"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn test_list_objects() {
     let temp_dir = setup_test_files();
     let (handle, port) = start_test_server(temp_dir.path()).await;
@@ -1093,6 +1147,44 @@ async fn test_reserved_bucket_names() {
             bucket_name
         );
     }
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_create_bucket_excluded_names() {
+    // Test that CreateBucket fails for hidden directories and system directories
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Try to create hidden directory bucket
+    let create_result = client.create_bucket().bucket(".hidden").send().await;
+    assert!(
+        create_result.is_err(),
+        "CreateBucket should fail for hidden directory name '.hidden'"
+    );
+    let err = create_result.unwrap_err();
+    let service_err = err.into_service_error();
+    assert_eq!(
+        service_err.meta().code(),
+        Some("InvalidBucketName"),
+        "Should return InvalidBucketName error for hidden directory"
+    );
+
+    // Try to create lost+found bucket
+    let create_result = client.create_bucket().bucket("lost+found").send().await;
+    assert!(
+        create_result.is_err(),
+        "CreateBucket should fail for system directory 'lost+found'"
+    );
+    let err = create_result.unwrap_err();
+    let service_err = err.into_service_error();
+    assert_eq!(
+        service_err.meta().code(),
+        Some("InvalidBucketName"),
+        "Should return InvalidBucketName error for system directory"
+    );
 
     handle.abort();
 }

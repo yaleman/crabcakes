@@ -17,31 +17,31 @@ use crate::web::handlers::ErrorTemplate;
 #[serde_as]
 #[derive(Serialize, Debug)]
 pub enum CrabCakesError {
-    IamEvaluation(#[serde_as(as = "DisplayFromStr")] EvaluationError),
-    Other(String),
-
-    SerdeJson(#[serde_as(as = "DisplayFromStr")] serde_json::Error),
-    Io(#[serde_as(as = "DisplayFromStr")] std::io::Error),
+    BucketNotFound(String),
+    Configuration(String),
+    CredentialAlreadyExists,
     Database(String),
-    NoPolicies,
-    NoAuthenticationSupplied(String),
+    HttpResponseError(String),
+    Hyper(String),
+    IamEvaluation(#[serde_as(as = "DisplayFromStr")] EvaluationError),
+    InvalidAccessKeyId,
+    InvalidBucketName,
     InvalidCredential,
     InvalidPath,
     InvalidPolicyName,
-    InvalidAccessKeyId,
     InvalidSecretLength,
-    Rustls(String),
-    Sigv4Verification(String),
+    Io(#[serde_as(as = "DisplayFromStr")] std::io::Error),
+    NoAuthenticationSupplied(String),
+    NoPolicies,
     NoUserIdInPrincipal,
-    OidcStateParameterExpired,
     OidcDiscovery(String),
-    HttpResponseError(String),
-    BucketNotFound(String),
-    Configuration(String),
-    Hyper(String),
+    OidcStateParameterExpired,
+    Other(String),
     Reqwest(String),
-    CredentialAlreadyExists,
+    Rustls(String),
+    SerdeJson(#[serde_as(as = "DisplayFromStr")] serde_json::Error),
     SigV4AuthenticatorResponseBuilderError(String),
+    Sigv4Verification(String),
     TemplateRendering(String),
     UnknownAction,
 }
@@ -105,6 +105,7 @@ impl std::fmt::Display for CrabCakesError {
             CrabCakesError::InvalidSecretLength => {
                 f.write_str("Invalid Secret Length, should be 40 characters")
             }
+            CrabCakesError::InvalidBucketName => f.write_str("Invalid Bucket Name"),
         }
     }
 }
