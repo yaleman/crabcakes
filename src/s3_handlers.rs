@@ -406,13 +406,33 @@ impl S3Handler {
             }
         };
 
-        if !bucket_for_operation.is_empty() && RESERVED_BUCKET_NAMES.contains(&bucket_for_operation)
-        {
-            warn!(bucket = %bucket_for_operation, "Request to reserved bucket name");
-            return Ok(self.invalid_bucket_name_response(&format!(
-                "Bucket name '{}' is reserved and cannot be used",
-                bucket_for_operation
-            )));
+        // Check if bucket name is excluded (reserved, hidden, or system directory)
+        if !bucket_for_operation.is_empty() {
+            // URL-decode the bucket name to handle encoded characters like %2B (+)
+            let decoded_bucket = urlencoding::decode(bucket_for_operation)
+                .unwrap_or(std::borrow::Cow::Borrowed(bucket_for_operation));
+
+            if RESERVED_BUCKET_NAMES.contains(&decoded_bucket.as_ref()) {
+                warn!(bucket = %decoded_bucket, "Request to reserved bucket name");
+                return Ok(self.invalid_bucket_name_response(&format!(
+                    "Bucket name '{}' is reserved and cannot be used",
+                    decoded_bucket
+                )));
+            }
+            if decoded_bucket.starts_with('.') {
+                warn!(bucket = %decoded_bucket, "Request to hidden directory bucket name");
+                return Ok(self.invalid_bucket_name_response(&format!(
+                    "Bucket name '{}' cannot start with a dot",
+                    decoded_bucket
+                )));
+            }
+            if decoded_bucket.as_ref() == "lost+found" {
+                warn!(bucket = %decoded_bucket, "Request to system directory bucket name");
+                return Ok(self.invalid_bucket_name_response(&format!(
+                    "Bucket name '{}' is a system directory and cannot be used",
+                    decoded_bucket
+                )));
+            }
         }
 
         let response = if let Some(response) = self
