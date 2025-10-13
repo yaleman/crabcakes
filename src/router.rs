@@ -9,6 +9,7 @@ use hyper::body::Bytes;
 use hyper::{Request, Response};
 use tower::Service;
 
+use crate::web::handlers::respond_500;
 use crate::web::s3_handlers::S3Handler;
 
 pub(crate) type WebServiceResponse = Response<Full<Bytes>>;
@@ -60,10 +61,7 @@ pub async fn route_request(
         if let Some(mut web_service) = web_service {
             web_service.call(req).await
         } else {
-            Ok(Response::builder()
-                .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Full::new(Bytes::from("Web service not configured")))
-                .unwrap_or_else(|_| Response::new(Full::new(Bytes::from("Error")))))
+            Ok(respond_500(&"Web handler not configured"))
         }
     } else {
         // S3 request (or web handler not configured) - handle with S3 handler

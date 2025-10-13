@@ -48,6 +48,8 @@ use crate::xml_responses::{
     TaggingRequest,
 };
 
+static CT_APPLICATION_XML: &str = "application/xml";
+
 pub struct S3Handler {
     server_addr: String,
     filesystem: Arc<FilesystemService>,
@@ -238,6 +240,16 @@ impl S3Handler {
         );
 
         Ok((parts, buffered_body, authenticatorresponse))
+    }
+
+    fn to_xml_response(xml: String) -> Response<Full<Bytes>> {
+        let xml_length = xml.len();
+        let mut res = Response::new(Full::new(Bytes::from(xml)));
+        *res.status_mut() = StatusCode::OK;
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
+        res.headers_mut().insert(CONTENT_LENGTH, xml_length.into());
+        res
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -873,16 +885,7 @@ impl S3Handler {
                 );
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .header(CONTENT_LENGTH, xml.len())
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate a ListBucketV1 response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBucket response");
                         self.internal_error_response()
@@ -996,16 +999,7 @@ impl S3Handler {
                 );
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .header(CONTENT_LENGTH, xml.len())
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate a ListBucketV1 response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBucketV1 response");
                         self.internal_error_response()
@@ -1027,16 +1021,7 @@ impl S3Handler {
                 let response = ListBucketsResponse::from_buckets(buckets);
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .header(CONTENT_LENGTH, xml.len())
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate a ListBuckets response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBuckets response");
                         self.internal_error_response()
@@ -1055,21 +1040,53 @@ impl S3Handler {
             Ok(metadata) => {
                 debug!(key = %key, size = metadata.size, "HeadObject success");
 
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(CONTENT_TYPE, metadata.content_type)
-                    .header(CONTENT_LENGTH, metadata.size)
-                    .header(
-                        LAST_MODIFIED,
-                        metadata
-                            .last_modified
-                            .format("%a, %d %b %Y %H:%M:%S GMT")
-                            .to_string(),
-                    )
-                    .header(ETAG, metadata.etag)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate a HeadObject response")
+                let mut res = Response::new(Full::new(Bytes::new()));
+                *res.status_mut() = StatusCode::OK;
+
+                let headers = res.headers_mut();
+                match HeaderValue::from_str(&metadata.content_type) {
+                    Ok(hv) => {
+                        headers.insert(CONTENT_TYPE, hv);
+                    }
+                    Err(e) => {
+                        error!(key = %key, error = %e, "Invalid content type");
+                        headers.insert(
+                            CONTENT_TYPE,
+                            HeaderValue::from_static("application/octet-stream"),
+                        );
+                    }
+                }
+                match HeaderValue::from_str(&metadata.size.to_string()) {
+                    Ok(hv) => {
+                        headers.insert(CONTENT_LENGTH, hv);
+                    }
+                    Err(e) => {
+                        error!(key = %key, error = %e, "Invalid content length");
+                    }
+                }
+                match HeaderValue::from_str(
+                    &metadata
+                        .last_modified
+                        .format("%a, %d %b %Y %H:%M:%S GMT")
+                        .to_string(),
+                ) {
+                    Ok(hv) => {
+                        headers.insert(LAST_MODIFIED, hv);
+                    }
+                    Err(e) => {
+                        error!(key = %key, error = %e, "Invalid Last-Modified header");
+                    }
+                }
+
+                match HeaderValue::from_str(&metadata.etag) {
+                    Ok(val) => {
+                        headers.insert(ETAG, val);
+                    }
+                    Err(e) => {
+                        error!(key = %key, error = %e, "Invalid ETag");
+                    }
+                };
+                res
             }
             Err(e) => {
                 warn!(key = %key, error = %e, "HeadObject failed: file not found");
@@ -1375,16 +1392,7 @@ impl S3Handler {
         let response = DeleteResponse { deleted, errors };
 
         match response.to_xml() {
-            Ok(xml) => {
-                debug!("DeleteObjects completed successfully");
-
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(CONTENT_TYPE, "application/xml")
-                    .body(Full::new(Bytes::from(xml)))
-                    .expect("Failed to generate a DeleteObjects response")
-            }
+            Ok(xml) => Self::to_xml_response(xml),
             Err(e) => {
                 error!(error = %e, "Failed to serialize DeleteObjects response");
                 self.internal_error_response()
@@ -1457,15 +1465,7 @@ impl S3Handler {
                 };
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate a CopyObject response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CopyObject response");
                         self.internal_error_response()
@@ -1499,15 +1499,7 @@ impl S3Handler {
         };
 
         match response.to_xml() {
-            Ok(xml) => {
-                debug!(bucket = %bucket, region = %self.region, "GetBucketLocation success");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(CONTENT_TYPE, "application/xml")
-                    .body(Full::new(Bytes::from(xml)))
-                    .expect("Failed to generate a GetBucketLocation response")
-            }
+            Ok(xml) => Self::to_xml_response(xml),
             Err(e) => {
                 error!(error = %e, "Failed to serialize GetBucketLocation response");
                 self.internal_error_response()
@@ -1569,15 +1561,7 @@ impl S3Handler {
                 };
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate CreateMultipartUpload response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CreateMultipartUpload response");
                         self.internal_error_response()
@@ -1830,21 +1814,24 @@ impl S3Handler {
                     etag: part_info.etag.clone(),
                 };
 
-                let xml_body = match response.to_xml() {
-                    Ok(xml) => xml,
+                let mut response = match response.to_xml() {
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CopyPartResult XML");
                         return self.internal_error_response();
                     }
                 };
 
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(CONTENT_TYPE, "application/xml")
-                    .header(ETAG, part_info.etag)
-                    .body(Full::new(Bytes::from(xml_body)))
-                    .expect("Failed to generate UploadPartCopy response")
+                match HeaderValue::from_str(&part_info.etag) {
+                    Ok(header) => {
+                        response.headers_mut().insert(ETAG, header);
+                        response
+                    }
+                    Err(err) => {
+                        error!(bucket=&bucket, key=&key, error = %err, "Failed to set ETag header in handle_upload_part_copy response");
+                        self.internal_error_response()
+                    }
+                }
             }
             Err(e) => {
                 error!(
@@ -1877,12 +1864,9 @@ impl S3Handler {
             .await
         {
             Ok(()) => {
-                debug!(upload_id = %upload_id, "AbortMultipartUpload success");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::NO_CONTENT)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate AbortMultipartUpload response")
+                let mut res = Response::new(Full::new(Bytes::new()));
+                *res.status_mut() = StatusCode::NO_CONTENT;
+                res
             }
             Err(e) => {
                 error!(upload_id = %upload_id, error = %e, "Failed to abort multipart upload");
@@ -1928,15 +1912,7 @@ impl S3Handler {
                 };
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate ListMultipartUploads response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListMultipartUploads response");
                         self.internal_error_response()
@@ -1994,15 +1970,7 @@ impl S3Handler {
                 };
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate ListParts response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListParts response");
                         self.internal_error_response()
@@ -2044,11 +2012,10 @@ impl S3Handler {
                 Ok(req) => req,
                 Err(e) => {
                     error!(error = %e, "Failed to parse CompleteMultipartUpload XML request");
-                    #[allow(clippy::expect_used)]
-                    return Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Full::new(Bytes::from("Invalid XML request")))
-                        .expect("Failed to generate error response");
+
+                    let mut res = Response::new(Full::new(Bytes::from("Invalid XML request")));
+                    *res.status_mut() = StatusCode::BAD_REQUEST;
+                    return res;
                 }
             };
 
@@ -2086,15 +2053,7 @@ impl S3Handler {
                 };
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate CompleteMultipartUpload response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CompleteMultipartUpload response");
                         self.internal_error_response()
@@ -2143,11 +2102,9 @@ impl S3Handler {
         match self.db_service.put_tags(bucket, key, tags).await {
             Ok(()) => {
                 debug!(bucket = %bucket, key = %key, "Tags stored successfully");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate PutObjectTagging response")
+                let mut res = Response::new(Full::new(Bytes::new()));
+                *res.status_mut() = StatusCode::OK;
+                res
             }
             Err(e) => {
                 error!(bucket = %bucket, key = %key, error = %e, "Failed to store tags");
@@ -2172,15 +2129,7 @@ impl S3Handler {
                 let response = GetObjectTaggingResponse { tag_set };
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate GetObjectTagging response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize tagging response");
                         self.internal_error_response()
@@ -2200,11 +2149,9 @@ impl S3Handler {
         match self.db_service.delete_tags(bucket, key).await {
             Ok(()) => {
                 debug!(bucket = %bucket, key = %key, "Tags deleted successfully");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::NO_CONTENT)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate DeleteObjectTagging response")
+                let mut res = Response::new(Full::new(Bytes::new()));
+                *res.status_mut() = StatusCode::NO_CONTENT;
+                res
             }
             Err(e) => {
                 error!(bucket = %bucket, key = %key, error = %e, "Failed to delete tags");
@@ -2250,15 +2197,7 @@ impl S3Handler {
                 };
 
                 match response.to_xml() {
-                    Ok(xml) =>
-                    {
-                        #[allow(clippy::expect_used)]
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "application/xml")
-                            .body(Full::new(Bytes::from(xml)))
-                            .expect("Failed to generate GetObjectAttributes response")
-                    }
+                    Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize attributes response");
                         self.internal_error_response()
@@ -2282,7 +2221,7 @@ impl S3Handler {
         )));
         *res.status_mut() = StatusCode::NOT_FOUND;
         res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
         res
     }
 
@@ -2293,7 +2232,7 @@ impl S3Handler {
         )));
         *res.status_mut() = StatusCode::FORBIDDEN;
         res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
         res
     }
 
@@ -2305,7 +2244,7 @@ impl S3Handler {
         ))));
         *response.status_mut() = StatusCode::UNAUTHORIZED;
         let headers = response.headers_mut();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
         headers.insert(
             WWW_AUTHENTICATE,
             HeaderValue::from_static("AWS4-HMAC-SHA256"),
@@ -2320,7 +2259,7 @@ impl S3Handler {
         )));
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
         res
     }
 
@@ -2332,7 +2271,7 @@ impl S3Handler {
         ))));
         *res.status_mut() = StatusCode::CONFLICT;
         res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
         res
     }
 
@@ -2344,7 +2283,7 @@ impl S3Handler {
         ))));
         *res.status_mut() = StatusCode::CONFLICT;
         res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
         res
     }
 
@@ -2356,7 +2295,7 @@ impl S3Handler {
         ))));
         *res.status_mut() = StatusCode::NOT_FOUND;
         res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
         res
     }
 
@@ -2372,7 +2311,7 @@ impl S3Handler {
         );
         response
             .headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+            .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
 
         response
     }

@@ -3,7 +3,10 @@
 use std::{error::Error, net::AddrParseError};
 
 use askama::Template;
-use http::{HeaderValue, Response, StatusCode, header::CONTENT_TYPE};
+use http::{
+    HeaderValue, Response, StatusCode,
+    header::{CONTENT_TYPE, InvalidHeaderValue},
+};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use iam_rs::EvaluationError;
@@ -107,6 +110,12 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::InvalidBucketName => f.write_str("Invalid Bucket Name"),
         }
+    }
+}
+
+impl From<InvalidHeaderValue> for CrabCakesError {
+    fn from(err: InvalidHeaderValue) -> Self {
+        CrabCakesError::Other(err.to_string())
     }
 }
 

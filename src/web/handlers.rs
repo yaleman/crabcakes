@@ -56,7 +56,7 @@ pub(crate) fn respond_404() -> Response<Full<Bytes>> {
 }
 
 /// Return with a 500 response
-fn respond_500(msg: &impl ToString) -> Response<Full<Bytes>> {
+pub(crate) fn respond_500(msg: &impl ToString) -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from(msg.to_string())));
     *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
     response
