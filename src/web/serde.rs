@@ -61,3 +61,36 @@ pub(crate) struct TroubleShooterForm {
 pub(crate) struct TroubleShooterResponse {
     pub(crate) decision: EvaluationResult,
 }
+
+// API response types for RequestHandler methods
+
+/// Policy info for API listing (includes full policy JSON)
+#[derive(Serialize, Debug)]
+pub(crate) struct ApiPolicyInfo {
+    pub(crate) name: String,
+    pub(crate) policy: serde_json::Value,
+}
+
+/// Credential info for API listing (without secret)
+#[derive(Serialize, Debug)]
+pub(crate) struct CredentialInfo {
+    pub(crate) access_key_id: String,
+    // DO NOT include secret_access_key
+}
+
+/// Database vacuum statistics
+#[derive(Serialize, Debug)]
+pub(crate) struct VacuumStats {
+    pub(crate) page_count: i64,
+    pub(crate) page_size: i64,
+    pub(crate) freelist_count: i64,
+    pub(crate) total_size_bytes: i64,
+    pub(crate) freelist_size_bytes: i64,
+}
+
+/// Database vacuum execution result
+#[derive(Serialize, Debug)]
+pub(crate) struct VacuumResult {
+    pub(crate) success: bool,
+    pub(crate) pages_freed: i64,
+}

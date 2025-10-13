@@ -11,7 +11,12 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
 - `src/main.rs` - Main server entry point with tracing initialization
 - `src/cli.rs` - Command-line argument parsing using Clap
 - `src/server.rs` - Server struct with HTTP server setup and lifecycle management
-- `src/web/s3_handlers.rs` - S3 API request routing and handler implementations
+- `src/s3_handlers.rs` - S3 API request routing and handler implementations
+- `src/web/` - Admin web UI handlers (follows separation of concerns pattern)
+  - `src/web/handlers.rs` - HTTP layer (authentication, CSRF, request/response handling)
+  - `src/request_handler.rs` - Business logic layer (pure functions, testable without HTTP)
+  - `src/web/serde.rs` - Data structures for API requests/responses
+  - `src/web/templates.rs` - Askama HTML templates
 - `src/filesystem.rs` - Filesystem service for file operations
 - `src/xml_responses.rs` - AWS S3-compliant XML response serialization
 - `src/auth.rs` - AWS Signature V4 verification and authentication context building
@@ -26,7 +31,7 @@ Crabcakes is an S3-compatible server written in Rust that serves files from a fi
   - `src/db/entities/` - SeaORM entity models (object_tags, oauth_pkce_state, temporary_credentials)
 - `src/error.rs` - Centralized error handling
 - `src/lib.rs` - Library module declarations
-- `src/tests/` - Test modules (server_tests.rs, policy_tests.rs)
+- `src/tests/` - Test modules (server_tests.rs, policy_tests.rs, request_handler_tests.rs, web_handlers_tests.rs)
 
 The server:
 
@@ -501,6 +506,114 @@ The server accepts configuration via:
 - Integration tests must be added to `manual_test.sh` for signed request validation
 - all tests that might involve the database should be against an in-memory database where possible, or if it's testing disk functionality then the config dir should be a temporary directory for that test
 - Ensure CLAUDE.md is kept up to date with the current design
+
+## Web Handler Architecture Pattern
+
+The admin UI follows a **separation of concerns pattern** with distinct layers:
+
+### Layer Structure
+
+**WebHandler** (`src/web/handlers.rs`):
+- HTTP layer responsibilities only
+- Authentication checking (session validation)
+- CSRF token validation
+- Request parsing (headers, body, query parameters)
+- Response building (JSON, HTML with security headers)
+- Calls RequestHandler for business logic
+
+**RequestHandler** (`src/request_handler.rs`):
+- Pure business logic functions
+- No HTTP dependencies (no Request/Response types)
+- No authentication/CSRF concerns (already validated)
+- Testable with simple unit tests
+- Returns Result types for error handling
+
+**Data Structures** (`src/web/serde.rs`):
+- Request/response types for API endpoints
+- Separate from HTTP layer
+- Used by both WebHandler and RequestHandler
+
+### Pattern Example
+
+```rust
+// WebHandler - HTTP concerns
+async fn post_api_bucket(&self, req: Request<Incoming>, session: Session) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    // 1. Check authentication
+    self.check_auth(&session).await?;
+
+    // 2. Parse request
+    let (parts, body) = req.into_parts();
+
+    // 3. Validate CSRF
+    self.validate_csrf_token(&session, &parts.headers).await?;
+
+    // 4. Parse body
+    let body_bytes = body.collect().await?.to_bytes();
+    let request: CreateBucketRequest = serde_json::from_str(std::str::from_utf8(&body_bytes)?)?;
+
+    // 5. Call business logic
+    self.request_handler.api_create_bucket(&request.bucket_name).await?;
+
+    // 6. Build response
+    self.build_json_response(json!({"success": true, "bucket_name": request.bucket_name}))
+}
+
+// RequestHandler - Business logic
+pub(crate) async fn api_create_bucket(&self, bucket_name: &str) -> Result<(), CrabCakesError> {
+    // Pure business logic - delegates to services
+    self.filesystem.create_bucket(bucket_name).await.map_err(CrabCakesError::from)
+}
+```
+
+### Guidelines for New Handlers
+
+**ALWAYS follow this pattern when adding new API endpoints:**
+
+1. **WebHandler method** handles HTTP layer:
+   - Check authentication with `self.check_auth(&session).await?`
+   - Validate CSRF with `self.validate_csrf_token(&session, &parts.headers).await?`
+   - Parse request body/parameters
+   - Call RequestHandler method for business logic
+   - Build and return HTTP response
+
+2. **RequestHandler method** contains business logic:
+   - Takes simple Rust types as parameters (not HTTP types)
+   - Returns `Result<T, CrabCakesError>`
+   - Delegates to service layers (filesystem, db, policy_store, etc.)
+   - No knowledge of HTTP, sessions, or CSRF
+
+3. **Unit tests** in `src/tests/request_handler_tests.rs`:
+   - Test RequestHandler methods directly
+   - Use `RequestHandler::new_test()` for test setup
+   - No HTTP mocking required
+   - Test both success and error cases
+   - Verify validation rules and edge cases
+
+4. **Integration tests** (if needed) in `src/tests/web_handlers_tests.rs`:
+   - Test full HTTP flow including authentication
+   - Use actual HTTP requests with sessions
+   - Verify CSRF protection works
+
+### Benefits
+
+- **Testability**: Business logic tested without HTTP complexity
+- **Separation**: HTTP concerns isolated from business rules
+- **Maintainability**: Clear boundaries between layers
+- **Reusability**: Business logic can be called from multiple handlers
+- **Security**: Authentication/CSRF enforced at HTTP layer, not scattered
+
+### Constructor Pattern
+
+**Production use:**
+```rust
+let request_handler = RequestHandler::new(db, credentials_store, policy_store, filesystem);
+```
+
+**Test use:**
+```rust
+let request_handler = RequestHandler::new_test().await;
+// Automatically sets up in-memory DB, temp directories, test policies
+```
 
 ## UI Design
 

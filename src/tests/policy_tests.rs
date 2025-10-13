@@ -34,7 +34,7 @@ async fn test_wildcard_principal() {
     }"#;
     policy_store
         .add_policy(
-            "allow-all-bucket1".to_string(),
+            "allow-all-bucket1",
             serde_json::from_str(allow_all_policy).expect("Failed to parse policy"),
         )
         .await
@@ -105,7 +105,7 @@ async fn test_alice_policy() {
     .expect("Failed to parse alice policy");
 
     policy_store
-        .add_policy("alice".to_string(), policy)
+        .add_policy("alice", policy)
         .await
         .expect("Failed to add alice policy");
 

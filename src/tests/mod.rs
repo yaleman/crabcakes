@@ -1,5 +1,6 @@
 pub(crate) mod db_tests;
 pub(crate) mod policy_tests;
+pub(crate) mod request_handler_tests;
 pub(crate) mod server_tests;
 pub(crate) mod web_handlers_tests;
 

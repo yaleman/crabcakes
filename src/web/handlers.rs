@@ -81,12 +81,12 @@ impl WebHandler {
         filesystem: Arc<FilesystemService>,
     ) -> Self {
         Self {
-            request_handler: Arc::new(RequestHandler {
-                db: db.clone(),
-                credentials_store: credentials_store.clone(),
-                policy_store: policy_store.clone(),
-                filesystem: filesystem.clone(),
-            }),
+            request_handler: Arc::new(RequestHandler::new(
+                db.clone(),
+                credentials_store.clone(),
+                policy_store.clone(),
+                filesystem.clone(),
+            )),
             oauth_client,
             db,
             credentials_store,
@@ -1088,11 +1088,10 @@ impl WebHandler {
         let request: CreateBucketRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Create bucket through filesystem service
-        self.filesystem
-            .create_bucket(&request.bucket_name)
-            .await
-            .map_err(CrabCakesError::from)?;
+        // Call extracted business logic
+        self.request_handler
+            .api_create_bucket(&request.bucket_name)
+            .await?;
 
         // Return success
         self.build_json_response(json!({
@@ -1267,24 +1266,8 @@ impl WebHandler {
         // Check authentication
         self.check_auth(&session).await?;
 
-        // Get all policy names
-        let policy_names = self.policy_store.get_policy_names().await;
-        #[derive(Serialize)]
-        struct PolicySummary {
-            name: String,
-            statement_count: usize,
-        }
-
-        // Build response with policy names and statement counts
-        let mut policies = Vec::new();
-        for name in policy_names {
-            if let Some(policy) = self.policy_store.get_policy(&name).await {
-                policies.push(PolicySummary {
-                    name,
-                    statement_count: policy.statement.len(),
-                });
-            }
-        }
+        // Call extracted business logic
+        let policies = self.request_handler.api_list_policies().await?;
 
         self.build_json_response(&policies)
     }
@@ -1319,9 +1302,9 @@ impl WebHandler {
         let request: CreatePolicyRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Add policy
-        self.policy_store
-            .add_policy(request.name.clone(), request.policy)
+        // Call extracted business logic
+        self.request_handler
+            .api_create_policy(&request.name, request.policy)
             .await?;
 
         // Return success
@@ -1363,9 +1346,9 @@ impl WebHandler {
             }
         };
 
-        // Update policy
-        self.policy_store
-            .update_policy(policy_name.to_string(), policy)
+        // Call extracted business logic
+        self.request_handler
+            .api_update_policy(policy_name.to_string(), policy)
             .await?;
 
         // Return success
@@ -1393,8 +1376,8 @@ impl WebHandler {
         // Validate CSRF token
         self.validate_csrf_token(&session, &parts.headers).await?;
 
-        // Delete policy
-        self.policy_store.delete_policy(policy_name).await?;
+        // Call extracted business logic
+        self.request_handler.api_delete_policy(policy_name).await?;
 
         // Return success
         self.build_json_response(json!({
@@ -1411,18 +1394,8 @@ impl WebHandler {
         // Check authentication
         self.check_auth(&session).await?;
 
-        // Get all access key IDs (NOT secret keys)
-        let access_key_ids = self.credentials_store.get_access_key_ids().await;
-
-        // Build response with just access key IDs
-        let credentials: Vec<serde_json::Value> = access_key_ids
-            .into_iter()
-            .map(|id| {
-                json!({
-                    "access_key_id": id
-                })
-            })
-            .collect();
+        // Call extracted business logic
+        let credentials = self.request_handler.api_list_credentials().await?;
 
         self.build_json_response(&credentials)
     }
@@ -1457,9 +1430,9 @@ impl WebHandler {
         let request: CreateCredentialRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Add credential
-        self.credentials_store
-            .write_credential(request.access_key_id.clone(), request.secret_access_key)
+        // Call extracted business logic
+        self.request_handler
+            .api_create_credential(request.access_key_id.clone(), request.secret_access_key)
             .await?;
 
         // Return success
@@ -1499,9 +1472,9 @@ impl WebHandler {
         let request: UpdateCredentialRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Update credential
-        self.credentials_store
-            .update_credential(access_key_id.to_string(), request.secret_access_key)
+        // Call extracted business logic
+        self.request_handler
+            .api_update_credential(access_key_id.to_string(), request.secret_access_key)
             .await?;
 
         // Return success
@@ -1527,9 +1500,9 @@ impl WebHandler {
         // Validate CSRF token
         self.validate_csrf_token(&session, &parts.headers).await?;
 
-        // Delete credential
-        self.credentials_store
-            .delete_credential(access_key_id)
+        // Call extracted business logic
+        self.request_handler
+            .api_delete_credential(access_key_id)
             .await?;
 
         // Return success
@@ -1555,8 +1528,10 @@ impl WebHandler {
         // Validate CSRF token
         self.validate_csrf_token(&session, &parts.headers).await?;
 
-        // Delete temporary credential from database
-        self.db.delete_temporary_credentials(access_key_id).await?;
+        // Call extracted business logic
+        self.request_handler
+            .api_delete_temp_credential(access_key_id)
+            .await?;
 
         // Return success
         self.build_json_response(json!({
@@ -1673,9 +1648,16 @@ impl WebHandler {
         // Check authentication
         self.check_auth(&session).await?;
 
-        // Get vacuum statistics
-        let stats = self.db.get_vacuum_stats().await?;
-        let needs_vacuum = stats.percentage > 10.0;
+        // Call extracted business logic
+        let vacuum_stats = self.request_handler.api_database_vacuum_status().await?;
+
+        // Calculate percentage and needs_vacuum flag
+        let percentage = if vacuum_stats.page_count > 0 {
+            (vacuum_stats.freelist_count as f64 / vacuum_stats.page_count as f64) * 100.0
+        } else {
+            0.0
+        };
+        let needs_vacuum = percentage > 10.0;
 
         #[derive(Serialize)]
         struct VacuumCheckResponse {
@@ -1687,9 +1669,9 @@ impl WebHandler {
 
         let response = VacuumCheckResponse {
             needs_vacuum,
-            freelist_count: stats.freelist_count,
-            page_count: stats.page_count,
-            percentage: stats.percentage,
+            freelist_count: vacuum_stats.freelist_count,
+            page_count: vacuum_stats.page_count,
+            percentage,
         };
 
         self.build_json_response(response)
@@ -1714,15 +1696,8 @@ impl WebHandler {
         let query = parts.uri.query().unwrap_or("");
         let confirm = query.contains("confirm=true");
 
-        if !confirm {
-            return self.build_json_response(json!({
-                "success": false,
-                "error": "Must include confirm=true query parameter to execute vacuum"
-            }));
-        }
-
-        // Execute vacuum
-        let reclaimed_pages = self.db.vacuum_database().await?;
+        // Call extracted business logic
+        let result = self.request_handler.api_database_vacuum(confirm).await?;
 
         #[derive(Serialize)]
         struct VacuumExecuteResponse {
@@ -1731,8 +1706,8 @@ impl WebHandler {
         }
 
         let response = VacuumExecuteResponse {
-            success: true,
-            reclaimed_pages,
+            success: result.success,
+            reclaimed_pages: result.pages_freed,
         };
 
         self.build_json_response(response)
