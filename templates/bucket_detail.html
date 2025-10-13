@@ -26,30 +26,30 @@
             </th>
             {% endif %}
             <th>Key</th>
-            <th>Size</th>
-            <th>Last Modified</th>
+            <th class="collapsible">Size</th>
+            <th class="collapsible">Last Modified</th>
             <th>Actions</th>
         </tr>
     </thead>
     <tbody>
         {% for object in objects %}
         <tr>
-            <td>
+            <td class="select-column">
                 <input type="checkbox" class="object-checkbox"
                     data-bucket="{{ bucket_name }}"
                     data-key="{{ object.key }}">
             </td>
-            <td>{{ object.key }}</td>
-            <td>{{ object.size_formatted }}</td>
-            <td>{{ object.last_modified }}</td>
-            <td>
+            <td class="wrap">{{ object.key }}</td>
+            <td class="collapsible">{{ object.size_formatted }}</td>
+            <td class="collapsible">{{ object.last_modified }}</td>
+            <td class="buttons-no-padding">
                 <button class="btn btn-small btn-primary download-object-btn"
-                    data-bucket="{{ bucket_name }}" data-key="{{ object.key }}">
-                    Download
+                    data-bucket="{{ bucket_name }}" data-key="{{ object.key }}" title="Download">
+                    ↡ <span class="collapsible">Download</span>
                 </button>
                 <button class="btn btn-small btn-danger delete-object-btn"
-                    data-bucket="{{ bucket_name }}" data-key="{{ object.key }}">
-                    Delete
+                    data-bucket="{{ bucket_name }}" data-key="{{ object.key }}" title="Delete">
+                    ␡ <span class="collapsible">Delete</span>
                 </button>
             </td>
         </tr>
