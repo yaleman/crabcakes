@@ -99,7 +99,7 @@ pub fn extract_display_name(principal_arn: &str) -> String {
 }
 
 /// Determine identity type from principal ARN
-pub fn determine_identity_type(principal_arn: &str) -> IdentityType {
+pub(crate) fn determine_identity_type(principal_arn: &str) -> IdentityType {
     if principal_arn == "*" {
         return IdentityType::Wildcard;
     }

@@ -165,7 +165,10 @@ async fn test_api_list_policies_empty() {
     let handler = RequestHandler::new_test().await;
 
     // List policies (should have test policies from setup)
-    let policies = handler.api_list_policies().await.expect("Should list policies");
+    let policies = handler
+        .api_list_policies()
+        .await
+        .expect("Should list policies");
 
     // Verify it's a vec of ApiPolicyInfo
     assert!(!policies.is_empty(), "Test setup should have policies");
@@ -180,7 +183,10 @@ async fn test_api_list_policies_empty() {
 async fn test_api_list_policies_sorted() {
     let handler = RequestHandler::new_test().await;
 
-    let policies = handler.api_list_policies().await.expect("Should list policies");
+    let policies = handler
+        .api_list_policies()
+        .await
+        .expect("Should list policies");
 
     // Verify policies are sorted by name
     let names: Vec<String> = policies.iter().map(|p| p.name.clone()).collect();
@@ -308,7 +314,10 @@ async fn test_api_delete_policy_idempotent() {
 async fn test_api_list_credentials_empty() {
     let handler = RequestHandler::new_test().await;
 
-    let creds = handler.api_list_credentials().await.expect("Should list credentials");
+    let creds = handler
+        .api_list_credentials()
+        .await
+        .expect("Should list credentials");
 
     // Test setup may have no credentials initially (new_test uses empty temp dir)
     // Just verify the structure works
@@ -414,7 +423,10 @@ async fn test_api_update_credential_nonexistent() {
         .api_update_credential("nosuchuser".to_string(), "secret".to_string())
         .await;
 
-    assert!(result.is_err(), "Should fail to update nonexistent credential");
+    assert!(
+        result.is_err(),
+        "Should fail to update nonexistent credential"
+    );
 }
 
 #[tokio::test]
@@ -454,7 +466,10 @@ async fn test_api_delete_temp_credential_idempotent() {
 
     // Delete non-existent temp credential (should be idempotent)
     let result = handler.api_delete_temp_credential("fake-temp-key").await;
-    assert!(result.is_ok(), "Should succeed even if credential doesn't exist");
+    assert!(
+        result.is_ok(),
+        "Should succeed even if credential doesn't exist"
+    );
 }
 
 #[tokio::test]
@@ -480,7 +495,11 @@ async fn test_api_delete_temp_credential_existing() {
     assert!(result.is_ok(), "Should delete existing temp credential");
 
     // Verify it's gone
-    let creds = handler.db.get_temporary_credentials("temp-key-123").await.unwrap();
+    let creds = handler
+        .db
+        .get_temporary_credentials("temp-key-123")
+        .await
+        .unwrap();
     assert!(creds.is_none(), "Temp credential should be deleted");
 }
 
@@ -496,9 +515,18 @@ async fn test_api_database_vacuum_status() {
     // Verify structure
     assert!(stats.page_count >= 0, "Page count should be non-negative");
     assert!(stats.page_size > 0, "Page size should be positive");
-    assert!(stats.freelist_count >= 0, "Freelist count should be non-negative");
-    assert!(stats.total_size_bytes >= 0, "Total size should be non-negative");
-    assert!(stats.freelist_size_bytes >= 0, "Freelist size should be non-negative");
+    assert!(
+        stats.freelist_count >= 0,
+        "Freelist count should be non-negative"
+    );
+    assert!(
+        stats.total_size_bytes >= 0,
+        "Total size should be non-negative"
+    );
+    assert!(
+        stats.freelist_size_bytes >= 0,
+        "Freelist size should be non-negative"
+    );
 }
 
 #[tokio::test]
@@ -520,7 +548,10 @@ async fn test_api_database_vacuum_with_confirm() {
 
     let vacuum_result = result.unwrap();
     assert!(vacuum_result.success, "Vacuum should succeed");
-    assert!(vacuum_result.pages_freed >= 0, "Pages freed should be non-negative");
+    assert!(
+        vacuum_result.pages_freed >= 0,
+        "Pages freed should be non-negative"
+    );
 }
 
 #[tokio::test]

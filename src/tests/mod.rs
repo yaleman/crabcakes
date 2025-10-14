@@ -4,6 +4,9 @@ pub(crate) mod request_handler_tests;
 pub(crate) mod server_tests;
 pub(crate) mod web_handlers_tests;
 
+use crate::constants::SECRET_ACCESS_KEY_LENGTH;
+use crate::xml_responses::to_xml;
+
 use super::*;
 use std::fs;
 use std::path::Path;
@@ -81,7 +84,7 @@ async fn test_xml_responses() {
         None,
     );
 
-    let xml = response.to_xml().expect("Should serialize to XML");
+    let xml = to_xml(response).expect("Should serialize to XML");
     assert!(xml.contains("<ListBucketResult>"));
     assert!(xml.contains("<Name>test-bucket</Name>"));
     assert!(xml.contains("<Key>test.txt</Key>"));
@@ -91,9 +94,30 @@ async fn test_xml_responses() {
 async fn test_list_buckets_xml() {
     let response =
         xml_responses::ListBucketsResponse::from_buckets(vec!["test-bucket".to_string()]);
-    let xml = response.to_xml().expect("Should serialize to XML");
+    let xml = to_xml(response).expect("Should serialize to XML");
 
     assert!(xml.contains("<ListAllMyBucketsResult>"));
     assert!(xml.contains("<Name>test-bucket</Name>"));
     assert!(xml.contains("<Owner>"));
+}
+
+#[test]
+fn test_generate_temp_credentials() {
+    for _ in 0..1000 {
+        let (access_key_id, secret_access_key) = generate_temp_credentials();
+
+        assert_eq!(access_key_id.len(), TEMP_ACCESS_KEY_LENGTH);
+        assert_eq!(secret_access_key.len(), SECRET_ACCESS_KEY_LENGTH);
+        // Check that access key ID is alphanumeric
+        assert!(access_key_id.chars().all(|c| c.is_ascii_alphanumeric()));
+
+        assert!(access_key_id.chars().next().unwrap().is_ascii_alphabetic());
+
+        assert!(
+            secret_access_key
+                .as_bytes()
+                .iter()
+                .all(|c| SECRET_CHARS.contains(c))
+        );
+    }
 }

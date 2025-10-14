@@ -45,7 +45,7 @@ use crate::xml_responses::{
     GetBucketLocationResponse, GetObjectAttributesResponse, GetObjectTaggingResponse,
     InitiateMultipartUploadResponse, ListBucketResponse, ListBucketV1Response, ListBucketsResponse,
     ListMultipartUploadsResponse, ListPartsResponse, MultipartUploadItem, PartItem, Tag, TagSet,
-    TaggingRequest,
+    TaggingRequest, to_xml,
 };
 
 static CT_APPLICATION_XML: &str = "application/xml";
@@ -884,7 +884,7 @@ impl S3Handler {
                     next_token,
                 );
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBucket response");
@@ -998,7 +998,7 @@ impl S3Handler {
                     next_marker,
                 );
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBucketV1 response");
@@ -1020,7 +1020,7 @@ impl S3Handler {
                 debug!(count = buckets.len(), "Listed buckets");
                 let response = ListBucketsResponse::from_buckets(buckets);
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListBuckets response");
@@ -1391,7 +1391,7 @@ impl S3Handler {
         // Build response
         let response = DeleteResponse { deleted, errors };
 
-        match response.to_xml() {
+        match to_xml(response) {
             Ok(xml) => Self::to_xml_response(xml),
             Err(e) => {
                 error!(error = %e, "Failed to serialize DeleteObjects response");
@@ -1464,7 +1464,7 @@ impl S3Handler {
                     etag: metadata.etag,
                 };
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CopyObject response");
@@ -1498,7 +1498,7 @@ impl S3Handler {
             location: self.region.clone(),
         };
 
-        match response.to_xml() {
+        match to_xml(response) {
             Ok(xml) => Self::to_xml_response(xml),
             Err(e) => {
                 error!(error = %e, "Failed to serialize GetBucketLocation response");
@@ -1560,7 +1560,7 @@ impl S3Handler {
                     upload_id: metadata.upload_id,
                 };
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CreateMultipartUpload response");
@@ -1814,7 +1814,7 @@ impl S3Handler {
                     etag: part_info.etag.clone(),
                 };
 
-                let mut response = match response.to_xml() {
+                let mut response = match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CopyPartResult XML");
@@ -1911,7 +1911,7 @@ impl S3Handler {
                     uploads: upload_items,
                 };
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListMultipartUploads response");
@@ -1969,7 +1969,7 @@ impl S3Handler {
                     parts: part_items,
                 };
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize ListParts response");
@@ -2052,7 +2052,7 @@ impl S3Handler {
                     etag,
                 };
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize CompleteMultipartUpload response");
@@ -2128,7 +2128,7 @@ impl S3Handler {
 
                 let response = GetObjectTaggingResponse { tag_set };
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize tagging response");
@@ -2196,7 +2196,7 @@ impl S3Handler {
                     object_size: Some(object_size),
                 };
 
-                match response.to_xml() {
+                match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),
                     Err(e) => {
                         error!(error = %e, "Failed to serialize attributes response");

@@ -3,15 +3,14 @@
 //! Main entry point that initializes tracing and starts the server.
 
 use clap::Parser;
-use crabcakes::cli::Cli;
 use crabcakes::server::Server;
+use crabcakes::{cli::Cli, logging::setup_logging};
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{info, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Calculate worker threads: num_cpus - 2, minimum of 4
-    let worker_threads = std::cmp::max(num_cpus::get().saturating_sub(2), 4);
+    // Calculate worker threads: num_cpus, minimum of 4
+    let worker_threads = std::cmp::max(num_cpus::get(), 4);
 
     // Build Tokio runtime with calculated worker threads
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -23,15 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Initialize tracing subscriber
-    let log_level = std::env::var("RUST_LOG").unwrap_or("info".to_string());
-    let log_level_sqlx = std::env::var("RUST_LOG_SQLX").unwrap_or("warn".to_string());
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(format!(
-            "crabcakes={log_level},scratchstack_aws_signature=debug,tower_http=info,h2=warn,sqlx={log_level_sqlx}",
-        )))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    setup_logging();
 
     let mut hangup_waiter = signal(SignalKind::hangup())?;
     loop {
