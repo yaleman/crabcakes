@@ -26,8 +26,12 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: cargo-bins/cargo-binstall@main
+
       - name: "Run cargo test"
-        run: cargo test
+        run: |
+          cargo binstall cargo-tarpaulin
+          cargo tarpaulin --coveralls ${{ secrets.COVERALLS_REPO_TOKEN }}
       - name: "Build the workspace (release)"
         run: cargo build --workspace --release
       - name: Run sccache stat for check

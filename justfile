@@ -45,6 +45,9 @@ lint-css:
 coverage:
     cargo tarpaulin --out=Html
 
+coveralls:
+    cargo tarpaulin --coveralls $COVERALLS_REPO_TOKEN
+
 # build the docker image
 docker_build:
     docker buildx build \
