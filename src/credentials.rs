@@ -138,22 +138,12 @@ impl CredentialStore {
     }
 
     /// Get a credential by access key ID
-    pub async fn get_credential(&self, access_key_id: &str) -> Option<String> {
+    pub(crate) async fn get_credential(&self, access_key_id: &str) -> Option<String> {
         self.credentials.read().await.get(access_key_id).cloned()
-    }
-
-    /// Get the secret access key for a given access key ID
-    pub async fn get_secret_key(&self, access_key_id: &str) -> Option<String> {
-        self.credentials.read().await.get(access_key_id).cloned()
-    }
-
-    /// Get the number of loaded credentials
-    pub async fn credential_count(&self) -> usize {
-        self.credentials.read().await.len()
     }
 
     /// Get all access key IDs (NOT secret keys - for display purposes only)
-    pub async fn get_access_key_ids(&self) -> Vec<String> {
+    pub(crate) async fn get_access_key_ids(&self) -> Vec<String> {
         let credentials = self.credentials.read().await;
         let mut keys: Vec<String> = credentials.keys().cloned().collect();
         keys.sort();
@@ -161,7 +151,7 @@ impl CredentialStore {
     }
 
     /// Add a new credential
-    pub async fn write_credential(
+    pub(crate) async fn write_credential(
         &self,
         access_key_id: String,
         secret_access_key: String,

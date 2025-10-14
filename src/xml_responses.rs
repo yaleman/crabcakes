@@ -8,6 +8,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::filesystem::DirectoryEntry;
 
+pub(crate) fn to_xml<T>(input: T) -> Result<String, Box<dyn std::error::Error>>
+where
+    T: Serialize,
+{
+    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str(&to_string(&input).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
+    Ok(xml)
+}
+
 #[derive(Serialize)]
 #[serde(rename = "ListBucketResult")]
 pub struct ListBucketResponse {
@@ -106,17 +115,12 @@ impl ListBucketResponse {
             next_continuation_token,
         }
     }
-
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }
 
 impl ListBucketsResponse {
     pub fn from_buckets(bucket_names: Vec<String>) -> Self {
         let now = Utc::now();
+        // TODO: this should really be the actual bucket creation date from the filesystem
         let creation_date = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
         let buckets = bucket_names
@@ -129,18 +133,11 @@ impl ListBucketsResponse {
 
         Self {
             owner: Owner {
-                id: "crabcakes-owner".to_string(),
+                id: "crabcakes".to_string(),
                 display_name: "Crabcakes".to_string(),
             },
             buckets: Buckets { bucket: buckets },
         }
-    }
-
-    /// Serialize to XML string
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
     }
 }
 
@@ -185,14 +182,6 @@ pub struct DeleteError {
     pub message: String,
 }
 
-impl DeleteResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
-}
-
 // CopyObject response structure
 #[derive(Serialize)]
 #[serde(rename = "CopyObjectResult")]
@@ -201,14 +190,6 @@ pub struct CopyObjectResponse {
     pub last_modified: String,
     #[serde(rename = "ETag")]
     pub etag: String,
-}
-
-impl CopyObjectResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }
 
 // UploadPartCopy response structure (same fields as CopyObjectResponse but different root element)
@@ -221,28 +202,12 @@ pub struct CopyPartResponse {
     pub etag: String,
 }
 
-impl CopyPartResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
-}
-
 // GetBucketLocation response structure
 #[derive(Serialize)]
 #[serde(rename = "LocationConstraint")]
 pub struct GetBucketLocationResponse {
     #[serde(rename = "$value")]
     pub location: String,
-}
-
-impl GetBucketLocationResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }
 
 // ListObjectsV1 response structure (legacy API)
@@ -300,12 +265,6 @@ impl ListBucketV1Response {
             next_marker,
         }
     }
-
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }
 
 // Multipart upload response structures
@@ -319,14 +278,6 @@ pub struct InitiateMultipartUploadResponse {
     pub key: String,
     #[serde(rename = "UploadId")]
     pub upload_id: String,
-}
-
-impl InitiateMultipartUploadResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }
 
 #[derive(Serialize)]
@@ -354,14 +305,6 @@ pub struct PartItem {
     pub size: u64,
 }
 
-impl ListPartsResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
-}
-
 #[derive(Serialize)]
 #[serde(rename = "ListMultipartUploadsResult")]
 pub struct ListMultipartUploadsResponse {
@@ -379,14 +322,6 @@ pub struct MultipartUploadItem {
     pub upload_id: String,
     #[serde(rename = "Initiated")]
     pub initiated: String,
-}
-
-impl ListMultipartUploadsResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }
 
 #[derive(Deserialize)]
@@ -415,14 +350,6 @@ pub struct CompleteMultipartUploadResponse {
     pub key: String,
     #[serde(rename = "ETag")]
     pub etag: String,
-}
-
-impl CompleteMultipartUploadResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }
 
 // ===== Object Tagging Structures =====
@@ -455,14 +382,6 @@ pub struct GetObjectTaggingResponse {
     pub tag_set: TagSet,
 }
 
-impl GetObjectTaggingResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
-}
-
 #[derive(Serialize)]
 #[serde(rename = "GetObjectAttributesOutput")]
 pub struct GetObjectAttributesResponse {
@@ -472,12 +391,4 @@ pub struct GetObjectAttributesResponse {
     pub last_modified: Option<String>,
     #[serde(rename = "ObjectSize", skip_serializing_if = "Option::is_none")]
     pub object_size: Option<u64>,
-}
-
-impl GetObjectAttributesResponse {
-    pub fn to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(&to_string(self).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?);
-        Ok(xml)
-    }
 }

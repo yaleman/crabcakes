@@ -7,6 +7,8 @@ use chrono::Duration;
 use enum_iterator::Sequence;
 use serde::Deserialize;
 
+/// This is the temporary access key length
+pub(crate) static TEMP_ACCESS_KEY_LENGTH: usize = 20;
 /// This is related to the AWS secret access key length
 pub(crate) static SECRET_ACCESS_KEY_LENGTH: usize = 40;
 

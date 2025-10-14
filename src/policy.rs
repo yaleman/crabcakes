@@ -136,7 +136,7 @@ impl PolicyStore {
     /// use crate::policy::PolicyStore;
     /// let (_tempdir, policy_store) = PolicyStore::test_empty_store();
     /// ```
-    pub fn test_empty_store() -> (TempDir, Self) {
+    pub fn new_test() -> (TempDir, Self) {
         let tempdir = tempfile::tempdir().expect("failed to create temp dir");
 
         let path = tempdir.path().to_path_buf();
@@ -334,16 +334,16 @@ impl PolicyStore {
     }
 
     /// Add a new policy
-    pub async fn add_policy(&self, name: String, policy: IAMPolicy) -> Result<(), CrabCakesError> {
+    pub async fn add_policy(&self, name: &str, policy: IAMPolicy) -> Result<(), CrabCakesError> {
         // Validate policy name (no path traversal)
-        if !self.is_valid_name(&name) {
+        if !self.is_valid_name(name) {
             return Err(CrabCakesError::InvalidPolicyName);
         }
 
         // Check if policy already exists
         {
             let policies = self.policies.read().await;
-            if policies.contains_key(&name) {
+            if policies.contains_key(name) {
                 return Err(CrabCakesError::other(&format!(
                     "Policy '{}' already exists",
                     name
@@ -365,7 +365,7 @@ impl PolicyStore {
         // Update in-memory store
         {
             let mut policies = self.policies.write().await;
-            policies.insert(name.clone(), serde_json::from_str(&policy_json)?);
+            policies.insert(name.to_string(), serde_json::from_str(&policy_json)?);
         }
 
         // Clear cache

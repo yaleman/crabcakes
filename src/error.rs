@@ -3,7 +3,10 @@
 use std::{error::Error, net::AddrParseError};
 
 use askama::Template;
-use http::{HeaderValue, Response, StatusCode, header::CONTENT_TYPE};
+use http::{
+    HeaderValue, Response, StatusCode,
+    header::{CONTENT_TYPE, InvalidHeaderValue},
+};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use iam_rs::EvaluationError;
@@ -12,7 +15,7 @@ use scratchstack_aws_signature::{SignatureError, auth::SigV4AuthenticatorRespons
 use serde::Serialize;
 use serde_with::{DisplayFromStr, serde_as};
 
-use crate::web::handlers::ErrorTemplate;
+use crate::web::templates::ErrorTemplate;
 
 #[serde_as]
 #[derive(Serialize, Debug)]
@@ -107,6 +110,12 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::InvalidBucketName => f.write_str("Invalid Bucket Name"),
         }
+    }
+}
+
+impl From<InvalidHeaderValue> for CrabCakesError {
+    fn from(err: InvalidHeaderValue) -> Self {
+        CrabCakesError::Other(err.to_string())
     }
 }
 

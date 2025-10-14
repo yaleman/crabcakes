@@ -20,230 +20,25 @@ use hyper::{
     Request, Response, StatusCode,
     body::{Bytes, Incoming},
 };
-use iam_rs::{Arn, EvaluationOptions, EvaluationResult, IAMRequest, PolicyEvaluator, PrincipalId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
-use crate::constants::{CSRF_TOKEN_LENGTH, S3Action, SessionKey, WebPage};
-use crate::db::DBService;
-use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::policy_analyzer;
 use crate::{auth::OAuthClient, db::entities::temporary_credentials};
+use crate::{
+    constants::{CSRF_TOKEN_LENGTH, SessionKey, WebPage},
+    web::serde::PolicyInfo,
+};
 use crate::{credentials::CredentialStore, generate_temp_credentials};
+use crate::{db::DBService, web::serde::PolicyPrincipalPermission};
+use crate::{error::CrabCakesError, request_handler::RequestHandler};
 
-/// Error page template
-#[derive(Template)]
-#[template(path = "error.html")]
-pub(crate) struct ErrorTemplate {
-    pub(crate) error_message: String,
-}
-
-/// Profile page template
-#[derive(Template)]
-#[template(path = "profile.html")]
-struct ProfileTemplate {
-    page: &'static str,
-    user_email: String,
-    user_id: String,
-    access_key_id: String,
-    secret_key_preview: String,
-    expires_at: String,
-}
-
-/// System page template
-#[derive(Template)]
-#[template(path = "system.html")]
-struct SystemTemplate {
-    page: &'static str,
-}
-
-/// Policies list template
-#[derive(Template)]
-#[template(path = "policies.html")]
-struct PoliciesTemplate {
-    page: &'static str,
-    policies: Vec<PolicyInfo>,
-}
-
-/// Policy detail template
-#[derive(Template)]
-#[template(path = "policy_detail.html")]
-struct PolicyDetailTemplate {
-    page: &'static str,
-    policy_name: String,
-    policy_json: String,
-    policy_principal_permissions: Vec<PolicyPrincipalPermission>,
-}
-
-/// Principal permission entry for policy detail page (one row per principal+action+resource)
-#[derive(Debug, Serialize, PartialEq, Eq, Hash)]
-struct PolicyPrincipalPermission {
-    arn: String,
-    display_name: String,
-    identity_type: String,
-    effect: String,
-    action: String,
-    resource: String,
-}
-
-/// Policy form template (for creating/editing)
-#[derive(Template)]
-#[template(path = "policy_form.html")]
-struct PolicyFormTemplate {
-    page: &'static str,
-    policy_name: String,
-    policy_json: String,
-}
-
-/// Credential form template (for creating/editing)
-#[derive(Template)]
-#[template(path = "credential_form.html")]
-struct CredentialFormTemplate {
-    page: &'static str,
-    access_key_id: String,
-    is_edit: bool,
-}
-
-impl Default for CredentialFormTemplate {
-    fn default() -> Self {
-        Self {
-            page: WebPage::Identities.as_ref(),
-            access_key_id: String::new(),
-            is_edit: false,
-        }
-    }
-}
-
-/// Buckets list template
-#[derive(Template)]
-#[template(path = "buckets.html")]
-struct BucketsTemplate {
-    page: &'static str,
-    buckets: Vec<String>,
-}
-
-impl Default for BucketsTemplate {
-    fn default() -> Self {
-        Self {
-            page: WebPage::Buckets.as_ref(),
-            buckets: Vec::new(),
-        }
-    }
-}
-
-/// Bucket form template (for creating buckets)
-#[derive(Template)]
-#[template(path = "bucket_form.html")]
-struct BucketFormTemplate {
-    page: &'static str,
-}
-
-/// Bucket delete confirmation template
-#[derive(Template)]
-#[template(path = "bucket_delete.html")]
-struct BucketDeleteTemplate {
-    page: &'static str,
-    bucket_name: String,
-    object_count: usize,
-}
-
-/// Bucket detail template
-#[derive(Template)]
-#[template(path = "bucket_detail.html")]
-struct BucketDetailTemplate {
-    page: &'static str,
-    bucket_name: String,
-    objects: Vec<ObjectInfo>,
-}
-
-/// Identities list template
-#[derive(Template)]
-#[template(path = "identities.html")]
-struct IdentitiesTemplate {
-    page: &'static str,
-    identities: Vec<IdentitySummary>,
-    temporary_credentials: Vec<TemporaryCredentialSummary>,
-}
-
-/// Temporary credential summary for listing
-#[derive(Debug)]
-struct TemporaryCredentialSummary {
-    access_key_id: String,
-    user_email: String,
-    user_id: String,
-    expires_at: String,
-    created_at: String,
-}
-
-/// Identity detail template
-#[derive(Template)]
-#[template(path = "identity_detail.html")]
-struct IdentityDetailTemplate {
-    page: &'static str,
-    identity: crate::policy_analyzer::IdentityInfo,
-    has_credential: bool,
-}
-
-/// Policy info for listing
-#[derive(Debug)]
-struct PolicyInfo {
-    name: String,
-    statement_count: usize,
-}
-
-/// Identity summary for listing
-#[derive(Debug)]
-struct IdentitySummary {
-    principal_arn: String,
-    display_name: String,
-    identity_type: String,
-    policy_count: usize,
-    action_count: usize,
-    has_credential: bool,
-}
-
-/// Identity detail template
-#[derive(Template)]
-#[template(path = "troubleshooter.html")]
-struct PolicyTroubleshooterTemplate {
-    page: &'static str,
-    bucket: String,
-    key: String,
-    user: String,
-    action: String,
-    policy_name: String,
-    policy_names: Vec<String>,
-    s3_actions: Vec<String>,
-}
-
-impl Default for PolicyTroubleshooterTemplate {
-    fn default() -> Self {
-        Self {
-            page: WebPage::PolicyTroubleshooter.as_ref(),
-            bucket: String::new(),
-            key: String::new(),
-            user: String::new(),
-            action: String::new(),
-            policy_names: Vec::new(),
-            policy_name: String::new(),
-            s3_actions: enum_iterator::all::<S3Action>()
-                .map(|a| a.to_string())
-                .collect::<Vec<_>>(),
-        }
-    }
-}
-
-/// Object info for bucket listing
-#[derive(Debug)]
-struct ObjectInfo {
-    key: String,
-    size_formatted: String,
-    last_modified: String,
-}
+use super::serde::*;
+use super::templates::*;
 
 fn login_redirect() -> Result<Response<Full<Bytes>>, CrabCakesError> {
     let mut res = Response::new(Full::new(Bytes::new()));
@@ -261,7 +56,7 @@ pub(crate) fn respond_404() -> Response<Full<Bytes>> {
 }
 
 /// Return with a 500 response
-fn respond_500(msg: &impl ToString) -> Response<Full<Bytes>> {
+pub(crate) fn respond_500(msg: &impl ToString) -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from(msg.to_string())));
     *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
     response
@@ -274,22 +69,9 @@ pub struct WebHandler {
     credentials_store: Arc<CredentialStore>,
     policy_store: Arc<PolicyStore>,
     filesystem: Arc<FilesystemService>,
+    // Shared request handler for business logic
+    request_handler: Arc<RequestHandler>,
 }
-
-#[derive(Deserialize, Debug)]
-struct TroubleShooterForm {
-    bucket: String,
-    key: String,
-    user: String,
-    action: String,
-    policy: String,
-}
-
-#[derive(Serialize, Debug)]
-struct TroubleShooterResponse {
-    decision: EvaluationResult,
-}
-
 impl WebHandler {
     pub fn new(
         oauth_client: Arc<OAuthClient>,
@@ -299,6 +81,12 @@ impl WebHandler {
         filesystem: Arc<FilesystemService>,
     ) -> Self {
         Self {
+            request_handler: Arc::new(RequestHandler::new(
+                db.clone(),
+                credentials_store.clone(),
+                policy_store.clone(),
+                filesystem.clone(),
+            )),
             oauth_client,
             db,
             credentials_store,
@@ -314,6 +102,11 @@ impl WebHandler {
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         match (req.method().clone(), path) {
+            (Method::POST, "/admin/api/buckets") => self.post_api_bucket(req, session).await,
+            (Method::DELETE, path) if path.starts_with("/admin/api/buckets/") => {
+                let bucket_name = path.strip_prefix("/admin/api/buckets/").unwrap_or("");
+                self.delete_api_bucket(req, session, bucket_name).await
+            }
             (Method::GET, "/admin/api/session") => self.handle_get_session(session).await,
             (Method::GET, "/admin/api/csrf-token") => self.handle_csrf_token(session).await,
             (Method::GET, "/admin/api/policies") => self.handle_api_list_policies(session).await,
@@ -377,7 +170,11 @@ impl WebHandler {
             (Method::POST, "/admin/api/database/vacuum") => {
                 self.post_api_database_vacuum(req, session).await
             }
-            _ => Ok(respond_404()),
+            _ => {
+                debug!(method=req.method().as_ref(), path=?path, "API 404 not found ");
+
+                Ok(respond_404())
+            }
         }
     }
 
@@ -398,7 +195,7 @@ impl WebHandler {
         let result = if is_api_request {
             self.handle_api_request(req, &path, session).await
         } else {
-            match (method, path.as_str()) {
+            match (method.clone(), path.as_str()) {
                 (Method::GET, "/") => self.get_admin().await,
                 (Method::GET, "/login") => self.handle_login().await,
                 (Method::GET, path) if path.starts_with("/oauth2/callback") => {
@@ -476,7 +273,6 @@ impl WebHandler {
                 }
                 (Method::GET, "/admin/buckets") => self.get_admin_buckets(session).await,
                 (Method::GET, "/admin/buckets/new") => self.get_admin_buckets_new(session).await,
-                (Method::POST, "/admin/api/buckets") => self.post_api_bucket(req, session).await,
                 (Method::GET, path)
                     if path.starts_with("/admin/buckets/") && path.ends_with("/delete") =>
                 {
@@ -486,10 +282,7 @@ impl WebHandler {
                         .unwrap_or("");
                     self.get_bucket_delete_form(session, bucket_name).await
                 }
-                (Method::DELETE, path) if path.starts_with("/admin/api/buckets/") => {
-                    let bucket_name = path.strip_prefix("/admin/api/buckets/").unwrap_or("");
-                    self.delete_api_bucket(req, session, bucket_name).await
-                }
+
                 (Method::GET, path) if path.starts_with("/admin/buckets/") => {
                     let bucket_path = path.strip_prefix("/admin/buckets/").unwrap_or("");
                     self.get_bucket_detail(session, bucket_path).await
@@ -497,7 +290,10 @@ impl WebHandler {
                 (Method::GET, path) if path.starts_with("/admin/static/") => {
                     self.get_static_file(path).await
                 }
-                _ => Ok(respond_404()),
+                _ => {
+                    debug!(method=method.as_ref(), path=?path, "404 not found");
+                    Ok(respond_404())
+                }
             }
         };
         let span = tracing::Span::current();
@@ -1292,11 +1088,10 @@ impl WebHandler {
         let request: CreateBucketRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Create bucket through filesystem service
-        self.filesystem
-            .create_bucket(&request.bucket_name)
-            .await
-            .map_err(CrabCakesError::from)?;
+        // Call extracted business logic
+        self.request_handler
+            .api_create_bucket(&request.bucket_name)
+            .await?;
 
         // Return success
         self.build_json_response(json!({
@@ -1350,27 +1145,9 @@ impl WebHandler {
         let query = parts.uri.query().unwrap_or("");
         let force = query.contains("force=true");
 
-        if force {
-            // Delete all objects in the bucket first
-            let (entries, _) = self
-                .filesystem
-                .list_directory(Some(&format!("{}/", bucket_name)), 10000, None)
-                .map_err(CrabCakesError::from)?;
-
-            // Delete each object
-            for entry in entries {
-                self.filesystem
-                    .delete_file(&entry.key)
-                    .await
-                    .map_err(CrabCakesError::from)?;
-            }
-        }
-
-        // Delete the bucket (will fail if not empty and force=false)
-        self.filesystem
-            .delete_bucket(bucket_name)
-            .await
-            .map_err(CrabCakesError::from)?;
+        self.request_handler
+            .api_delete_bucket(bucket_name, force)
+            .await?;
 
         // Return success
         self.build_json_response(json!({
@@ -1489,24 +1266,8 @@ impl WebHandler {
         // Check authentication
         self.check_auth(&session).await?;
 
-        // Get all policy names
-        let policy_names = self.policy_store.get_policy_names().await;
-        #[derive(Serialize)]
-        struct PolicySummary {
-            name: String,
-            statement_count: usize,
-        }
-
-        // Build response with policy names and statement counts
-        let mut policies = Vec::new();
-        for name in policy_names {
-            if let Some(policy) = self.policy_store.get_policy(&name).await {
-                policies.push(PolicySummary {
-                    name,
-                    statement_count: policy.statement.len(),
-                });
-            }
-        }
+        // Call extracted business logic
+        let policies = self.request_handler.api_list_policies().await?;
 
         self.build_json_response(&policies)
     }
@@ -1541,9 +1302,9 @@ impl WebHandler {
         let request: CreatePolicyRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Add policy
-        self.policy_store
-            .add_policy(request.name.clone(), request.policy)
+        // Call extracted business logic
+        self.request_handler
+            .api_create_policy(&request.name, request.policy)
             .await?;
 
         // Return success
@@ -1585,9 +1346,9 @@ impl WebHandler {
             }
         };
 
-        // Update policy
-        self.policy_store
-            .update_policy(policy_name.to_string(), policy)
+        // Call extracted business logic
+        self.request_handler
+            .api_update_policy(policy_name.to_string(), policy)
             .await?;
 
         // Return success
@@ -1615,8 +1376,8 @@ impl WebHandler {
         // Validate CSRF token
         self.validate_csrf_token(&session, &parts.headers).await?;
 
-        // Delete policy
-        self.policy_store.delete_policy(policy_name).await?;
+        // Call extracted business logic
+        self.request_handler.api_delete_policy(policy_name).await?;
 
         // Return success
         self.build_json_response(json!({
@@ -1633,18 +1394,8 @@ impl WebHandler {
         // Check authentication
         self.check_auth(&session).await?;
 
-        // Get all access key IDs (NOT secret keys)
-        let access_key_ids = self.credentials_store.get_access_key_ids().await;
-
-        // Build response with just access key IDs
-        let credentials: Vec<serde_json::Value> = access_key_ids
-            .into_iter()
-            .map(|id| {
-                json!({
-                    "access_key_id": id
-                })
-            })
-            .collect();
+        // Call extracted business logic
+        let credentials = self.request_handler.api_list_credentials().await?;
 
         self.build_json_response(&credentials)
     }
@@ -1679,9 +1430,9 @@ impl WebHandler {
         let request: CreateCredentialRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Add credential
-        self.credentials_store
-            .write_credential(request.access_key_id.clone(), request.secret_access_key)
+        // Call extracted business logic
+        self.request_handler
+            .api_create_credential(request.access_key_id.clone(), request.secret_access_key)
             .await?;
 
         // Return success
@@ -1721,9 +1472,9 @@ impl WebHandler {
         let request: UpdateCredentialRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Update credential
-        self.credentials_store
-            .update_credential(access_key_id.to_string(), request.secret_access_key)
+        // Call extracted business logic
+        self.request_handler
+            .api_update_credential(access_key_id.to_string(), request.secret_access_key)
             .await?;
 
         // Return success
@@ -1749,9 +1500,9 @@ impl WebHandler {
         // Validate CSRF token
         self.validate_csrf_token(&session, &parts.headers).await?;
 
-        // Delete credential
-        self.credentials_store
-            .delete_credential(access_key_id)
+        // Call extracted business logic
+        self.request_handler
+            .api_delete_credential(access_key_id)
             .await?;
 
         // Return success
@@ -1777,8 +1528,10 @@ impl WebHandler {
         // Validate CSRF token
         self.validate_csrf_token(&session, &parts.headers).await?;
 
-        // Delete temporary credential from database
-        self.db.delete_temporary_credentials(access_key_id).await?;
+        // Call extracted business logic
+        self.request_handler
+            .api_delete_temp_credential(access_key_id)
+            .await?;
 
         // Return success
         self.build_json_response(json!({
@@ -1883,7 +1636,7 @@ impl WebHandler {
 
         let form: TroubleShooterForm = serde_json::from_str(body_str)?;
 
-        let response = handle_troubleshooter_request(form, &self.policy_store).await?;
+        let response = self.request_handler.api_troubleshooter(form).await?;
         self.build_json_response(response)
     }
 
@@ -1895,9 +1648,16 @@ impl WebHandler {
         // Check authentication
         self.check_auth(&session).await?;
 
-        // Get vacuum statistics
-        let stats = self.db.get_vacuum_stats().await?;
-        let needs_vacuum = stats.percentage > 10.0;
+        // Call extracted business logic
+        let vacuum_stats = self.request_handler.api_database_vacuum_status().await?;
+
+        // Calculate percentage and needs_vacuum flag
+        let percentage = if vacuum_stats.page_count > 0 {
+            (vacuum_stats.freelist_count as f64 / vacuum_stats.page_count as f64) * 100.0
+        } else {
+            0.0
+        };
+        let needs_vacuum = percentage > 10.0;
 
         #[derive(Serialize)]
         struct VacuumCheckResponse {
@@ -1909,9 +1669,9 @@ impl WebHandler {
 
         let response = VacuumCheckResponse {
             needs_vacuum,
-            freelist_count: stats.freelist_count,
-            page_count: stats.page_count,
-            percentage: stats.percentage,
+            freelist_count: vacuum_stats.freelist_count,
+            page_count: vacuum_stats.page_count,
+            percentage,
         };
 
         self.build_json_response(response)
@@ -1936,15 +1696,8 @@ impl WebHandler {
         let query = parts.uri.query().unwrap_or("");
         let confirm = query.contains("confirm=true");
 
-        if !confirm {
-            return self.build_json_response(json!({
-                "success": false,
-                "error": "Must include confirm=true query parameter to execute vacuum"
-            }));
-        }
-
-        // Execute vacuum
-        let reclaimed_pages = self.db.vacuum_database().await?;
+        // Call extracted business logic
+        let result = self.request_handler.api_database_vacuum(confirm).await?;
 
         #[derive(Serialize)]
         struct VacuumExecuteResponse {
@@ -1953,87 +1706,21 @@ impl WebHandler {
         }
 
         let response = VacuumExecuteResponse {
-            success: true,
-            reclaimed_pages,
+            success: result.success,
+            reclaimed_pages: result.pages_freed,
         };
 
         self.build_json_response(response)
     }
 }
 
-/// Inner caller for the troubleshooter logic, separated for testing
-async fn handle_troubleshooter_request(
-    form: TroubleShooterForm,
-    policy_store: &PolicyStore,
-) -> Result<TroubleShooterResponse, CrabCakesError> {
-    let mut arnstr = form.bucket.to_string();
-    if arnstr.is_empty() {
-        arnstr.push('*');
-    }
-
-    if !form.key.is_empty() {
-        arnstr.push_str(&format!("/{}", form.key));
-    };
-
-    let iam_request = IAMRequest::new(
-        iam_rs::Principal::Aws(PrincipalId::String(format!(
-            "arn:aws:iam:::user/{}",
-            form.user
-        ))),
-        form.action.clone(),
-        Arn::from_str(&format!("arn:aws:s3:::{arnstr}"))?,
-    );
-
-    // Apply the same transformation that PolicyStore uses
-    let request_json = crate::policy::fix_mock_id(&serde_json::to_string(&iam_request)?);
-    let iam_request: IAMRequest = serde_json::from_str(&request_json)?;
-
-    // look for a policy that matches the bucket and key
-    let policies = policy_store.policies.read().await;
-    let filtered_policies = policies
-        .iter()
-        .filter_map(|(name, policy)| match &form.policy.is_empty() {
-            false => {
-                if name == &form.policy {
-                    Some(policy.clone())
-                } else {
-                    None
-                }
-            }
-            true => Some(policy.clone()),
-        })
-        .collect();
-
-    let policyevaluator =
-        PolicyEvaluator::with_policies(filtered_policies).with_options(EvaluationOptions {
-            stop_on_explicit_deny: false,
-            collect_match_details: true,
-            max_statements: usize::MAX,
-            ignore_resource_constraints: false,
-        });
-    let evaluation_result = policyevaluator.evaluate(&iam_request)?;
-
-    let response = TroubleShooterResponse {
-        decision: evaluation_result,
-    };
-    debug!("Troubleshooter response: {:?}", response);
-    Ok(response)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use iam_rs::Decision;
-    use std::path::PathBuf;
-
-    /// Helper to load PolicyStore from test_config
-    fn load_test_policy_store() -> PolicyStore {
-        PolicyStore::new(&PathBuf::from("test_config/policies"))
-            .expect("Failed to load test policies")
-    }
 
     /// Helper to build TroubleShooterForm
-    fn build_form(
+    fn build_troubleshooter_form(
         bucket: &str,
         key: &str,
         user: &str,
@@ -2069,8 +1756,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket1_testuser_prefix_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form(
+        let request_handler = RequestHandler::new_test().await;
+
+        let form = build_troubleshooter_form(
             "bucket1",
             "testuser/file.txt",
             "testuser",
@@ -2078,7 +1766,8 @@ mod tests {
             "",
         );
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2087,8 +1776,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket1_testuser_wildcard_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form(
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form(
             "bucket1",
             "testuser/subdir/file.txt",
             "testuser",
@@ -2096,7 +1785,8 @@ mod tests {
             "",
         );
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2105,10 +1795,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket2_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket2", "file.txt", "testuser", "s3:PutObject", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket2", "file.txt", "testuser", "s3:PutObject", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2117,10 +1808,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket2_root_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket2", "", "testuser", "s3:ListBucket", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket2", "", "testuser", "s3:ListBucket", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2129,10 +1821,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_list_all_buckets_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("", "", "testuser", "s3:ListAllMyBuckets", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("", "", "testuser", "s3:ListAllMyBuckets", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2141,10 +1834,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_list_bucket1_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "", "testuser", "s3:ListBucket", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket1", "", "testuser", "s3:ListBucket", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2153,10 +1847,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_create_bucket21_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket21", "", "testuser", "s3:CreateBucket", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket21", "", "testuser", "s3:CreateBucket", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2165,10 +1860,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_delete_bucket21_allow() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket21", "", "testuser", "s3:DeleteBucket", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket21", "", "testuser", "s3:DeleteBucket", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2179,10 +1875,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket1_other_prefix_deny() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "other/file.txt", "testuser", "s3:GetObject", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form =
+            build_troubleshooter_form("bucket1", "other/file.txt", "testuser", "s3:GetObject", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2192,10 +1890,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket3_deny() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket3", "file.txt", "testuser", "s3:GetObject", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket3", "file.txt", "testuser", "s3:GetObject", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2205,10 +1904,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_testuser_bucket1_root_putobject_deny() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "file.txt", "testuser", "s3:PutObject", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket1", "file.txt", "testuser", "s3:PutObject", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2220,8 +1920,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_otheruser_bucket1_deny() {
-        let policy_store = load_test_policy_store();
-        let form = build_form(
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form(
             "bucket1",
             "testuser/file.txt",
             "otheruser",
@@ -2229,7 +1929,8 @@ mod tests {
             "",
         );
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2239,10 +1940,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_otheruser_bucket2_deny() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket2", "file.txt", "otheruser", "s3:PutObject", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form =
+            build_troubleshooter_form("bucket2", "file.txt", "otheruser", "s3:PutObject", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2254,10 +1957,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_empty_bucket_becomes_wildcard() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("", "", "testuser", "s3:ListBucket", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("", "", "testuser", "s3:ListBucket", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2269,10 +1973,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_bucket_level_operation() {
-        let policy_store = load_test_policy_store();
-        let form = build_form("bucket1", "", "testuser", "s3:ListBucket", "");
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form("bucket1", "", "testuser", "s3:ListBucket", "");
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2282,8 +1987,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_specific_policy_filter() {
-        let policy_store = load_test_policy_store();
-        let form = build_form(
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form(
             "bucket1",
             "testuser/file.txt",
             "testuser",
@@ -2291,7 +1996,8 @@ mod tests {
             "testuser",
         );
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 
@@ -2301,8 +2007,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_troubleshooter_all_policies_evaluated() {
-        let policy_store = load_test_policy_store();
-        let form = build_form(
+        let request_handler = RequestHandler::new_test().await;
+        let form = build_troubleshooter_form(
             "bucket1",
             "testuser/file.txt",
             "testuser",
@@ -2310,7 +2016,8 @@ mod tests {
             "",
         );
 
-        let response = handle_troubleshooter_request(form, &policy_store)
+        let response = request_handler
+            .api_troubleshooter(form)
             .await
             .expect("Request should succeed");
 

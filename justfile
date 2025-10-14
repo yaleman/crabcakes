@@ -45,6 +45,10 @@ lint-css:
 coverage:
     cargo tarpaulin --out=Html
 
+coveralls:
+    cargo tarpaulin --coveralls $COVERALLS_REPO_TOKEN
+    echo "Coverage report should be at https://coveralls.io/github/yaleman/crabcakes?branch=$(git branch --show-current)"
+
 # build the docker image
 docker_build:
     docker buildx build \

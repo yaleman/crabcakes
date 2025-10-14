@@ -8,7 +8,7 @@ use crate::db::DBService;
 use crate::error::CrabCakesError;
 
 /// Background cleanup task that periodically removes expired PKCE states and temporary credentials
-pub struct CleanupTask {
+pub(crate) struct CleanupTask {
     db: Arc<DBService>,
     interval_secs: u64,
 }

@@ -247,10 +247,48 @@ async fn test_head_object() {
     assert!(result.is_ok(), "HeadObject failed: {:?}", result.err());
 
     let output = result.unwrap();
-    assert_eq!(output.content_length(), Some(29));
-    assert!(output.content_type().is_some());
-    assert!(output.e_tag().is_some());
-    assert!(output.last_modified().is_some());
+
+    // Validate all response headers
+    assert_eq!(
+        output.content_length(),
+        Some(29),
+        "Content-Length should be 29 bytes"
+    );
+
+    let content_type = output.content_type();
+    assert!(
+        content_type.is_some(),
+        "Content-Type header should be present"
+    );
+    assert_eq!(
+        content_type.unwrap(),
+        "text/plain",
+        "Content-Type should be text/plain for .txt file"
+    );
+
+    let etag = output.e_tag();
+    assert!(etag.is_some(), "ETag header should be present");
+    // ETag should be quoted and non-empty
+    let etag_value = etag.unwrap();
+    assert!(
+        etag_value.starts_with('"') && etag_value.ends_with('"'),
+        "ETag should be quoted"
+    );
+    assert!(
+        etag_value.len() > 2,
+        "ETag should have content inside quotes"
+    );
+
+    let last_modified = output.last_modified();
+    assert!(
+        last_modified.is_some(),
+        "Last-Modified header should be present"
+    );
+    // Verify Last-Modified is a valid datetime
+    assert!(
+        last_modified.unwrap().secs() > 0,
+        "Last-Modified should have a valid timestamp"
+    );
 
     handle.abort();
 }

@@ -72,7 +72,7 @@ fn decode_aws_chunks(data: &[u8]) -> Result<Vec<u8>, CrabCakesError> {
 }
 
 /// A buffered request body that can be stored in memory or spilled to disk
-pub struct BufferedBody {
+pub(crate) struct BufferedBody {
     file: SpooledTempFile,
     size: usize,
 }
@@ -137,6 +137,7 @@ impl BufferedBody {
     /// Get the body as a byte vector (reading from disk if necessary)
     /// Note: This method rewinds the file to the start before AND after reading
     /// to allow multiple reads from the same buffer.
+    #[allow(clippy::wrong_self_convention)]
     pub async fn to_vec(&mut self) -> Result<Vec<u8>, CrabCakesError> {
         let mut buffer = Vec::with_capacity(self.size);
         self.file

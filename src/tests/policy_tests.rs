@@ -17,7 +17,7 @@ async fn test_policy_loading() {
 async fn test_wildcard_principal() {
     setup_test_logging();
 
-    let (_foo, policy_store) = PolicyStore::test_empty_store();
+    let (_foo, policy_store) = PolicyStore::new_test();
 
     // inject a wildcard policy
     let allow_all_policy = r#"
@@ -34,7 +34,7 @@ async fn test_wildcard_principal() {
     }"#;
     policy_store
         .add_policy(
-            "allow-all-bucket1".to_string(),
+            "allow-all-bucket1",
             serde_json::from_str(allow_all_policy).expect("Failed to parse policy"),
         )
         .await
@@ -83,7 +83,7 @@ async fn test_wildcard_principal() {
 #[tokio::test]
 async fn test_alice_policy() {
     setup_test_logging();
-    let (_foo, policy_store) = PolicyStore::test_empty_store();
+    let (_foo, policy_store) = PolicyStore::new_test();
 
     let policy: IAMPolicy = serde_json::from_str(
         r#"
@@ -105,7 +105,7 @@ async fn test_alice_policy() {
     .expect("Failed to parse alice policy");
 
     policy_store
-        .add_policy("alice".to_string(), policy)
+        .add_policy("alice", policy)
         .await
         .expect("Failed to add alice policy");
 

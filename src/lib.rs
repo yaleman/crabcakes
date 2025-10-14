@@ -17,6 +17,8 @@
 
 use rand::Rng;
 
+use crate::constants::TEMP_ACCESS_KEY_LENGTH;
+
 pub mod auth;
 pub mod body_buffer;
 pub mod cleanup;
@@ -30,8 +32,8 @@ pub mod logging;
 pub mod multipart;
 pub mod policy;
 pub mod policy_analyzer;
+pub mod request_handler;
 pub mod router;
-pub mod s3_handlers;
 pub mod server;
 pub mod web;
 pub mod xml_responses;
@@ -39,27 +41,31 @@ pub mod xml_responses;
 #[cfg(test)]
 mod tests;
 
+pub(crate) static AKID_CHARS: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+pub(crate) static SECRET_CHARS: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 pub(crate) fn generate_temp_credentials() -> (String, String) {
     let mut rng = rand::rng();
 
     // Generate random access key (20 chars, alphanumeric)
-    let access_key_id: String = (0..20)
-        .map(|_| {
-            let idx = rng.random_range(0..62);
-            match idx {
-                0..=25 => (b'A' + idx) as char,
-                26..=51 => (b'a' + (idx - 26)) as char,
-                _ => (b'0' + (idx - 52)) as char,
-            }
-        })
-        .collect();
+    let access_key_id = loop {
+        let access_key_id: Vec<u8> = (0..TEMP_ACCESS_KEY_LENGTH - 4)
+            .map(|_| AKID_CHARS[rng.random_range(0..AKID_CHARS.len())])
+            .collect();
+
+        if let Ok(s) = String::from_utf8(access_key_id) {
+            break format!("temp{s}");
+        }
+    };
 
     // Generate random secret key (40 chars, alphanumeric + special)
-    let secret_chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let secret_access_key: String = (0..40)
         .map(|_| {
-            let idx = rng.random_range(0..secret_chars.len());
-            secret_chars[idx] as char
+            let idx = rng.random_range(0..SECRET_CHARS.len());
+            SECRET_CHARS[idx] as char
         })
         .collect();
 

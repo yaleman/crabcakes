@@ -11,8 +11,9 @@ use hyper::body::Bytes;
 use hyper::{Request, Response};
 use tower::Service;
 use tower_sessions::Session;
+use tracing::error;
 
-use crate::web::handlers::WebHandler;
+use crate::web::handlers::{WebHandler, respond_500};
 
 /// Tower service that wraps WebHandler and provides session support
 #[derive(Clone)]
@@ -46,10 +47,14 @@ impl Service<Request<hyper::body::Incoming>> for WebService {
                 Some(s) => s,
                 None => {
                     // Session not found - this should never happen if SessionManagerLayer is configured
-                    return Ok(Response::builder()
-                        .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Full::new(Bytes::from("Session not configured")))
-                        .unwrap_or_else(|_| Response::new(Full::new(Bytes::from("Error")))));
+                    error!(
+                        method = req.method().as_ref(),
+                        uri = req.uri().path(),
+                        "Session not found in request extensions, can't handle request."
+                    );
+                    return Ok(respond_500(
+                        &"Session extension not found, can't handle request.",
+                    ));
                 }
             };
 

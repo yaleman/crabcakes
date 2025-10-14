@@ -19,7 +19,7 @@ static MULTIPART_PREFIX: &str = "part-";
 
 /// Metadata for a multipart upload session
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultipartUploadMetadata {
+pub(crate) struct MultipartUploadMetadata {
     pub upload_id: String,
     pub bucket: String,
     pub key: String,
@@ -70,7 +70,7 @@ impl MultipartManager {
     }
 
     /// Create a new multipart upload
-    pub async fn create_upload(
+    pub(crate) async fn create_upload(
         &self,
         bucket: &str,
         key: &str,
@@ -108,7 +108,7 @@ impl MultipartManager {
     }
 
     /// Get metadata for an upload
-    pub async fn get_metadata(
+    pub(crate) async fn get_metadata(
         &self,
         bucket: &str,
         upload_id: &str,
@@ -129,7 +129,7 @@ impl MultipartManager {
     }
 
     /// Upload a part
-    pub async fn upload_part(
+    pub(crate) async fn upload_part(
         &self,
         bucket: &str,
         upload_id: &str,
@@ -180,7 +180,7 @@ impl MultipartManager {
     }
 
     /// List all parts for an upload
-    pub async fn list_parts(
+    pub(crate) async fn list_parts(
         &self,
         bucket: &str,
         upload_id: &str,
@@ -233,7 +233,11 @@ impl MultipartManager {
     }
 
     /// Abort a multipart upload (delete all state)
-    pub async fn abort_upload(&self, bucket: &str, upload_id: &str) -> Result<(), CrabCakesError> {
+    pub(crate) async fn abort_upload(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+    ) -> Result<(), CrabCakesError> {
         // Verify upload exists
         self.get_metadata(bucket, upload_id).await?;
 
@@ -248,7 +252,7 @@ impl MultipartManager {
     }
 
     /// List all multipart uploads in a bucket
-    pub async fn list_uploads(
+    pub(crate) async fn list_uploads(
         &self,
         bucket: &str,
     ) -> Result<Vec<MultipartUploadMetadata>, CrabCakesError> {
@@ -299,7 +303,7 @@ impl MultipartManager {
     }
 
     /// Complete a multipart upload by concatenating all parts
-    pub async fn complete_upload(
+    pub(crate) async fn complete_upload(
         &self,
         bucket: &str,
         upload_id: &str,
