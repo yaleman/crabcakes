@@ -41,14 +41,19 @@ lint-web:
 lint-css:
     pnpm run lint:css
 
+set positional-arguments
+
+@coverage_inner *args='':
+    cargo tarpaulin --workspace --exclude-files=src/main.rs $@
+
 # run coverage checks
 coverage:
-    cargo tarpaulin --out=Html --exclude-files=src/main.rs
-    echo "Coverage report should be at file://$(pwd)/tarpaulin-report.html"
+    just coverage_inner --out=Html
+    @echo "Coverage report should be at file://$(pwd)/tarpaulin-report.html"
 
 coveralls:
-    cargo tarpaulin  --exclude-files=src/main.rs --coveralls $COVERALLS_REPO_TOKEN
-    echo "Coverage report should be at https://coveralls.io/github/yaleman/crabcakes?branch=$(git branch --show-current)"
+    just coverage_inner --out=Html --coveralls $COVERALLS_REPO_TOKEN
+    @echo "Coverage report should be at https://coveralls.io/github/yaleman/crabcakes?branch=$(git branch --show-current)"
 
 # build the docker image
 docker_build:

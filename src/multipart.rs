@@ -48,6 +48,15 @@ impl MultipartManager {
         }
     }
 
+    /// Create a test MultipartManager with a temporary directory
+    #[cfg(test)]
+    pub fn new_test() -> (Self, tempfile::TempDir) {
+        crate::logging::setup_test_logging();
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let manager = Self::new(temp_dir.path());
+        (manager, temp_dir)
+    }
+
     /// Get the multipart base directory
     fn multipart_base(&self) -> PathBuf {
         self.root_dir.join(".multipart")
@@ -346,20 +355,11 @@ impl MultipartManager {
 
         let mut all_data = Vec::new();
 
-        // debug!(parts = ?parts, "Processing parts for multipart completion");
-
         for (part_number, _) in parts {
             let part_path = self.part_path(bucket, upload_id, *part_number);
             let data = fs::read(&part_path).await.inspect_err(|e| {
                 error!(part_path=%part_path.display(), "Failed to read part {}: {}", part_number, e)
             })?;
-
-            // debug!(
-            //     part_number = %part_number,
-            //     part_size = data.len(),
-            //     total_written = all_data.len(),
-            //     "Writing part to destination file"
-            // );
 
             dest_file.write_all(&data).await.inspect_err(
                 |e| error!(part_number=%part_number, "Failed to write part {}: {}", part_number, e),
