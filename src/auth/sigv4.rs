@@ -371,12 +371,16 @@ pub fn extract_bucket_and_key(path: &str) -> (Option<String>, Option<String>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::constants::{DEFAULT_REGION, TEST_ALLOWED_BUCKET};
+    use crate::{
+        constants::{DEFAULT_REGION, TEST_ALLOWED_BUCKET},
+        logging::setup_test_logging,
+    };
 
     use super::*;
 
     #[test]
     fn test_parse_access_key() {
+        setup_test_logging();
         let auth = "AWS4-HMAC-SHA256 Credential=alice/20231201/crabcakes/s3/aws4_request";
         assert_eq!(
             AuthContext::parse_access_key(auth),
@@ -410,6 +414,7 @@ mod tests {
 
     #[test]
     fn test_http_method_to_s3_action() {
+        setup_test_logging();
         assert_eq!(
             http_method_to_s3_action(&Method::GET, "/", "", false).expect("Failed to convert"),
             S3Action::ListAllMyBuckets
@@ -465,6 +470,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_required() {
+        setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
@@ -492,6 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_missing_auth_header_not_required() {
+        setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
@@ -519,6 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_sigv4_with_malformed_auth_header() {
+        setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
         let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
