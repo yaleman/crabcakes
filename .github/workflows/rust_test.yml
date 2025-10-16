@@ -33,7 +33,7 @@ jobs:
       - name: "Run cargo test"
         run: |
           cargo binstall cargo-tarpaulin
-          cargo-tarpaulin --coveralls ${{ secrets.COVERALLS_REPO_TOKEN }}
+          find / -name cargo-tarpaulin -exec '{}' --coveralls ${{ secrets.COVERALLS_REPO_TOKEN }} \;
       - name: "Build the workspace (release)"
         run: cargo build --workspace --release
       - name: Run sccache stat for check
