@@ -64,9 +64,6 @@ pub struct ListBucketsResponse {
 pub struct Owner {
     #[serde(rename = "ID")]
     pub id: String,
-    /// This is being deprecated 2025-11-21 by AWS, but we include it for compatibility.
-    #[serde(rename = "DisplayName")]
-    pub display_name: String,
 }
 
 #[derive(Serialize)]
@@ -135,7 +132,6 @@ impl ListBucketsResponse {
         Self {
             owner: Owner {
                 id: "crabcakes".to_string(),
-                display_name: "Crabcakes".to_string(),
             },
             buckets: Buckets { bucket: buckets },
         }
