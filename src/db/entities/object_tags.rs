@@ -2,6 +2,8 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::error::CrabCakesError;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "object_tags")]
 pub struct Model {
@@ -18,3 +20,17 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+pub(crate) async fn delete_bucket(
+    db: &DatabaseConnection,
+    bucket: &str,
+) -> Result<usize, CrabCakesError> {
+    use sea_orm::QueryFilter;
+
+    Entity::delete_many()
+        .filter(Column::Bucket.eq(bucket))
+        .exec(db)
+        .await
+        .map_err(CrabCakesError::from)
+        .map(|res| res.rows_affected as usize)
+}

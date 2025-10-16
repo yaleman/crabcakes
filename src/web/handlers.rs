@@ -25,10 +25,10 @@ use serde_json::json;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
-use crate::filesystem::FilesystemService;
 use crate::policy::PolicyStore;
 use crate::policy_analyzer;
 use crate::{auth::OAuthClient, db::entities::temporary_credentials};
+use crate::{constants::TRACE_STATUS_CODE, filesystem::FilesystemService};
 use crate::{
     constants::{CSRF_TOKEN_LENGTH, SessionKey, WebPage},
     web::serde::PolicyInfo,
@@ -300,12 +300,15 @@ impl WebHandler {
 
         match result {
             Ok(response) => {
-                span.record("status_code", response.status().as_u16());
+                span.record(TRACE_STATUS_CODE, response.status().as_u16());
 
                 Ok(response)
             }
             Err(e) => {
-                span.record("status_code", StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+                span.record(
+                    TRACE_STATUS_CODE,
+                    StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                );
                 if is_api_request {
                     debug!("API request error: {:?}", e);
                     match self.build_json_response(json!({
