@@ -3,13 +3,13 @@
 //! Implements bucket and object operations using the local filesystem,
 //! with metadata extraction and validation.
 
-use std::fs;
+use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 use mime_guess::MimeGuess;
-use tokio::fs as async_fs;
+use tokio::fs::{self, read_dir};
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 
@@ -67,11 +67,11 @@ impl FilesystemService {
         self.root_dir.join(key)
     }
 
-    pub fn get_file_metadata(&self, key: &str) -> Result<FileMetadata, std::io::Error> {
+    pub async fn get_file_metadata(&self, key: &str) -> Result<FileMetadata, std::io::Error> {
         let file_path = self.root_dir.join(key);
         debug!(key = %key, path = ?file_path, "Getting file metadata");
 
-        let metadata = fs::metadata(&file_path)?;
+        let metadata = fs::metadata(&file_path).await?;
 
         if !metadata.is_file() {
             warn!(key = %key, "Path is not a file");
@@ -108,13 +108,13 @@ impl FilesystemService {
         file_path.exists() && file_path.is_file()
     }
 
-    pub fn list_buckets(&self) -> Result<Vec<String>, std::io::Error> {
+    pub async fn list_buckets(&self) -> Result<Vec<String>, std::io::Error> {
         debug!("Listing buckets (top-level directories)");
         let mut buckets = Vec::new();
 
-        for entry in std::fs::read_dir(&self.root_dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir()
+        let mut readdir = read_dir(&self.root_dir).await?;
+        while let Some(entry) = readdir.next_entry().await? {
+            if entry.file_type().await?.is_dir()
                 && let Some(name) = entry.file_name().to_str()
             {
                 // Filter out excluded bucket names
@@ -132,7 +132,7 @@ impl FilesystemService {
         Ok(buckets)
     }
 
-    pub fn list_directory(
+    pub async fn list_directory(
         &self,
         prefix: Option<&str>,
         max_keys: usize,
@@ -147,15 +147,15 @@ impl FilesystemService {
         let mut entries = Vec::new();
         let start_after = continuation_token.unwrap_or("");
 
-        fn collect_files(
+        async fn collect_files(
             dir: &Path,
             root: &Path,
             prefix: Option<&str>,
             entries: &mut Vec<DirectoryEntry>,
             start_after: &str,
         ) -> Result<(), std::io::Error> {
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
+            let mut reader = fs::read_dir(dir).await?;
+            while let Some(entry) = reader.next_entry().await? {
                 let path = entry.path();
 
                 if path.is_file() {
@@ -172,7 +172,7 @@ impl FilesystemService {
                         continue;
                     }
 
-                    let metadata = entry.metadata()?;
+                    let metadata = entry.metadata().await?;
                     let last_modified = metadata
                         .modified()?
                         .duration_since(SystemTime::UNIX_EPOCH)
@@ -189,7 +189,7 @@ impl FilesystemService {
                         etag,
                     });
                 } else if path.is_dir() {
-                    collect_files(&path, root, prefix, entries, start_after)?;
+                    Box::pin(collect_files(&path, root, prefix, entries, start_after)).await?;
                 }
             }
             Ok(())
@@ -201,7 +201,8 @@ impl FilesystemService {
             prefix,
             &mut entries,
             start_after,
-        )?;
+        )
+        .await?;
 
         entries.sort_by(|a, b| a.key.cmp(&b.key));
 
@@ -214,7 +215,7 @@ impl FilesystemService {
         Ok((entries, next_continuation_token))
     }
 
-    fn calculate_etag(&self, metadata: &fs::Metadata) -> String {
+    fn calculate_etag(&self, metadata: &Metadata) -> String {
         calculate_etag_from_metadata(metadata)
     }
 
@@ -224,21 +225,21 @@ impl FilesystemService {
 
         // Create parent directories if they don't exist
         if let Some(parent) = file_path.parent() {
-            async_fs::create_dir_all(parent).await?;
+            fs::create_dir_all(parent).await?;
         }
 
         // Write file atomically by writing to temp file and renaming
         let temp_path = file_path.with_extension("tmp");
-        let mut file = async_fs::File::create(&temp_path).await?;
+        let mut file = fs::File::create(&temp_path).await?;
         file.write_all(body).await?;
         file.sync_all().await?;
         drop(file);
 
         // Atomic rename
-        async_fs::rename(&temp_path, &file_path).await?;
+        fs::rename(&temp_path, &file_path).await?;
 
         // Get metadata for the newly written file
-        self.get_file_metadata(key)
+        self.get_file_metadata(key).await
     }
 
     pub async fn create_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
@@ -290,7 +291,7 @@ impl FilesystemService {
         }
 
         // Create the directory
-        async_fs::create_dir(&bucket_path).await?;
+        fs::create_dir(&bucket_path).await?;
         debug!(bucket = %bucket, "Bucket created successfully");
         Ok(())
     }
@@ -316,13 +317,13 @@ impl FilesystemService {
         }
 
         // Check if bucket is empty
-        let mut entries = async_fs::read_dir(&bucket_path).await?;
+        let mut entries = fs::read_dir(&bucket_path).await?;
         if entries.next_entry().await?.is_some() {
             return Err(std::io::Error::other("Bucket is not empty"));
         }
 
         // Remove the directory
-        async_fs::remove_dir(&bucket_path).await?;
+        fs::remove_dir(&bucket_path).await?;
         debug!(bucket = %bucket, "Bucket deleted successfully");
         Ok(())
     }
@@ -346,7 +347,7 @@ impl FilesystemService {
         }
 
         // Delete the file
-        async_fs::remove_file(&file_path).await?;
+        fs::remove_file(&file_path).await?;
         debug!(key = %key, "File deleted successfully");
         Ok(())
     }
@@ -376,19 +377,19 @@ impl FilesystemService {
 
         // Ensure destination directory exists
         if let Some(parent) = dest_path.parent() {
-            async_fs::create_dir_all(parent).await?;
+            fs::create_dir_all(parent).await?;
         }
 
         // Copy the file
-        async_fs::copy(&source_path, &dest_path).await?;
+        fs::copy(&source_path, &dest_path).await?;
         debug!(source = %source_key, dest = %dest_key, "File copied successfully");
 
         // Get metadata for the newly copied file
-        self.get_file_metadata(dest_key)
+        self.get_file_metadata(dest_key).await
     }
 }
 
-fn calculate_etag_from_metadata(metadata: &fs::Metadata) -> String {
+fn calculate_etag_from_metadata(metadata: &Metadata) -> String {
     format!(
         "{:x}-{:x}",
         metadata.len(),

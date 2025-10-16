@@ -1,14 +1,30 @@
 use iam_rs::{Decision, IAMPolicy};
 use tracing::debug;
 
-use crate::{constants::S3Action, logging::setup_test_logging, policy::PolicyStore};
-use std::path::PathBuf;
+use crate::{
+    constants::S3Action,
+    logging::setup_test_logging,
+    policy::PolicyStore,
+    tests::{copy_dir_all, setup_test_files},
+};
 
 #[tokio::test]
 async fn test_policy_loading() {
-    let policy_store =
-        PolicyStore::new(&PathBuf::from("test_config/policies")).expect("Failed to load policies");
-
+    setup_test_logging();
+    let tempdir = setup_test_files().await;
+    copy_dir_all(
+        "test_config/policies".into(),
+        tempdir.path().join("policies"),
+    )
+    .await
+    .expect("Failed to copy test policies");
+    let policy_store = PolicyStore::new(&tempdir.path().join("policies/"))
+        .await
+        .expect("Failed to create PolicyStore");
+    policy_store
+        .load_policies()
+        .await
+        .expect("Failed to load policies");
     let count = policy_store.policy_count().await;
     assert!(count >= 1, "Expected at least 1 policy, got {}", count);
 }
@@ -17,7 +33,7 @@ async fn test_policy_loading() {
 async fn test_wildcard_principal() {
     setup_test_logging();
 
-    let (_foo, policy_store) = PolicyStore::new_test();
+    let (_foo, policy_store) = PolicyStore::new_test().await;
 
     // inject a wildcard policy
     let allow_all_policy = r#"
@@ -55,7 +71,7 @@ async fn test_wildcard_principal() {
         result.err()
     );
     assert_eq!(
-        result.unwrap(),
+        result.expect("Failed to evaluate policy request"),
         Decision::Allow,
         "Expected allow-all policy to allow wildcard access"
     );
@@ -74,7 +90,7 @@ async fn test_wildcard_principal() {
         result.err()
     );
     assert_eq!(
-        result.unwrap(),
+        result.expect("Failed to evaluate policy request"),
         Decision::Deny,
         "Expected allow-all policy to deny access"
     );
@@ -83,7 +99,7 @@ async fn test_wildcard_principal() {
 #[tokio::test]
 async fn test_alice_policy() {
     setup_test_logging();
-    let (_foo, policy_store) = PolicyStore::new_test();
+    let (_foo, policy_store) = PolicyStore::new_test().await;
 
     let policy: IAMPolicy = serde_json::from_str(
         r#"
@@ -115,7 +131,7 @@ async fn test_alice_policy() {
             "arn:aws:iam:::user/alice".to_string(),
         )),
         S3Action::GetObject,
-        iam_rs::Arn::parse("arn:aws:s3:::bucket1/alice/test.txt").unwrap(),
+        iam_rs::Arn::parse("arn:aws:s3:::bucket1/alice/test.txt").expect("Failed to parse ARN"),
     );
     debug!("Evaluating request for alice: {:?}", iam_request);
 
@@ -129,7 +145,7 @@ async fn test_alice_policy() {
         result.err()
     );
     assert_eq!(
-        result.unwrap(),
+        result.expect("Failed to evaluate policy request"),
         Decision::Allow,
         "Expected alice policy to allow alice's access"
     );

@@ -162,7 +162,7 @@ async fn test_put_tags_too_many() {
         .await;
     assert!(result.is_err(), "Should reject more than 10 tags");
     assert!(
-        result.unwrap_err().to_string().contains("Too many tags"),
+        result.expect_err("Should have returned error").to_string().contains("Too many tags"),
         "Error should mention too many tags"
     );
 }
@@ -178,7 +178,7 @@ async fn test_put_tags_empty_key() {
 
     assert!(result.is_err(), "Should reject empty tag key");
     assert!(
-        result.unwrap_err().to_string().contains("cannot be empty"),
+        result.expect_err("Should have returned error").to_string().contains("cannot be empty"),
         "Error should mention empty key"
     );
 }
@@ -196,7 +196,7 @@ async fn test_put_tags_key_too_long() {
 
     assert!(result.is_err(), "Should reject tag key > 128 characters");
     assert!(
-        result.unwrap_err().to_string().contains("Tag key too long"),
+        result.expect_err("Should have returned error").to_string().contains("Tag key too long"),
         "Error should mention key too long"
     );
 }
@@ -215,7 +215,7 @@ async fn test_put_tags_value_too_long() {
     assert!(result.is_err(), "Should reject tag value > 256 characters");
     assert!(
         result
-            .unwrap_err()
+            .expect_err("Should have returned error")
             .to_string()
             .contains("Tag value too long"),
         "Error should mention value too long"
@@ -272,15 +272,15 @@ async fn test_tags_isolated_by_bucket_and_key() {
     let retrieved1 = db_service
         .get_tags(TEST_ALLOWED_BUCKET, "testuser/file1.txt")
         .await
-        .unwrap();
+        .expect("Failed to get tags for file1");
     let retrieved2 = db_service
         .get_tags(TEST_ALLOWED_BUCKET, "testuser/file2.txt")
         .await
-        .unwrap();
+        .expect("Failed to get tags for file2");
     let retrieved3 = db_service
         .get_tags(TEST_ALLOWED_BUCKET, "testuser/file1.txt")
         .await
-        .unwrap();
+        .expect("Failed to get tags for file1");
 
     assert_eq!(retrieved1.len(), 1);
     assert_eq!(retrieved1[0].0, "Tag3");
@@ -322,7 +322,7 @@ async fn test_special_characters_in_bucket_and_key() {
     let retrieved = db_service
         .get_tags("bucket-with-dashes", "path/to/file.txt")
         .await
-        .unwrap();
+        .expect("Failed to get tags for bucket with dashes");
     assert_eq!(retrieved.len(), 1);
 }
 
@@ -343,7 +343,7 @@ async fn test_unicode_in_tags() {
     let retrieved = db_service
         .get_tags(TEST_ALLOWED_BUCKET, "file.txt")
         .await
-        .unwrap();
+        .expect("Failed to get tags for unicode test");
     assert_eq!(retrieved.len(), 2);
     assert!(
         retrieved

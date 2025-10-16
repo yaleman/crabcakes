@@ -43,12 +43,14 @@ impl RequestHandler {
 
     #[cfg(test)]
     pub async fn new_test() -> Self {
+        use tokio::fs;
+
         use crate::{
             db::initialize_in_memory_database,
             tests::{copy_dir_all, setup_test_files},
         };
 
-        let tempdir = setup_test_files();
+        let tempdir = setup_test_files().await;
 
         let db = Arc::new(
             initialize_in_memory_database()
@@ -68,16 +70,24 @@ impl RequestHandler {
 
         // Create temp policy directory and copy test policies
         let policy_dir = tempfile::tempdir().expect("Failed to create temp policy dir");
-        std::fs::create_dir_all(policy_dir.path()).expect("Failed to create policy dir");
-        copy_dir_all("test_config/policies", policy_dir.path())
+        fs::create_dir_all(policy_dir.path())
+            .await
+            .expect("Failed to create policy dir");
+
+        copy_dir_all("test_config/policies".into(), policy_dir.path().into())
+            .await
             .expect("Failed to copy test policies");
         let policy_store = Arc::new(
-            PolicyStore::new(&policy_dir.path().to_path_buf()).expect("Failed to load policies"),
+            PolicyStore::new(&policy_dir.path().to_path_buf())
+                .await
+                .expect("Failed to load policies"),
         );
 
         // Ensure data directory exists for filesystem operations
         let data_dir = tempdir.path().join("data/");
-        std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
+        fs::create_dir_all(&data_dir)
+            .await
+            .expect("Failed to create data dir");
         let filesystem = Arc::new(FilesystemService::new(data_dir));
 
         Self {
@@ -159,6 +169,7 @@ impl RequestHandler {
             let (entries, _) = self
                 .filesystem
                 .list_directory(Some(&format!("{bucket}/")), 10000, None)
+                .await
                 .map_err(CrabCakesError::from)?;
 
             // Delete each object

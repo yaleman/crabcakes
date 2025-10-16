@@ -9,33 +9,68 @@ use crate::constants::SECRET_ACCESS_KEY_LENGTH;
 use crate::xml_responses::to_xml;
 
 use super::*;
-use std::fs;
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use tempfile::TempDir;
+use tokio::fs;
+use tracing::debug;
 
-pub(crate) fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
-    fs::create_dir_all(&dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        if ty.is_dir() {
-            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+pub(crate) async fn copy_dir_all(src: PathBuf, dst: PathBuf) -> std::io::Result<()> {
+    let mut targets = vec![(src, dst)];
+    let mut dirs_done = HashSet::new();
+
+    while let Some((src_dir, dest_dir)) = targets.pop() {
+        if dirs_done.contains(&src_dir) {
+            debug!(
+                src = %src_dir.display(),
+                dest = %dest_dir.display(),
+                "Skipping done directory"
+            );
+            continue;
         } else {
-            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+            debug!(
+                src = %src_dir.display(),
+                dest = %dest_dir.display(),
+                "Copying directory"
+            );
         }
+        fs::create_dir_all(&dest_dir).await?;
+        let mut dir_reader = fs::read_dir(&src_dir).await?;
+        while let Some(entry) = dir_reader.next_entry().await? {
+            let ty = entry.file_type().await?;
+            if ty.is_dir() {
+                debug!(
+                    "Found a new directory: {:?}",
+                    src_dir.join(entry.file_name())
+                );
+                if !dirs_done.contains(&entry.path()) {
+                    targets.push((
+                        src_dir.join(entry.file_name()),
+                        dest_dir.join(entry.file_name()),
+                    ));
+                    fs::create_dir_all(dest_dir.join(entry.file_name())).await?;
+                }
+            } else {
+                fs::copy(entry.path(), dest_dir.join(entry.file_name())).await?;
+            }
+        }
+        debug!("Finished copying directory: {:?}", src_dir.as_path());
+        dirs_done.insert(src_dir);
     }
     Ok(())
 }
 
-pub(crate) fn setup_test_files() -> TempDir {
+pub(crate) async fn setup_test_files() -> TempDir {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    copy_dir_all("testfiles", temp_dir.path()).expect("Failed to copy test files");
+    copy_dir_all("testfiles".into(), temp_dir.path().into())
+        .await
+        .expect("Failed to copy test files");
     temp_dir
 }
 
 #[tokio::test]
 async fn test_filesystem_service_file_exists() {
-    let temp_dir = setup_test_files();
+    let temp_dir = setup_test_files().await;
     let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
 
     assert!(fs_service.file_exists("bucket1/test.txt"));
@@ -44,11 +79,12 @@ async fn test_filesystem_service_file_exists() {
 
 #[tokio::test]
 async fn test_filesystem_service_get_metadata() {
-    let temp_dir = setup_test_files();
+    let temp_dir = setup_test_files().await;
     let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
 
     let metadata = fs_service
         .get_file_metadata("bucket1/test.txt")
+        .await
         .expect("File should exist");
     assert_eq!(metadata.size, 29); // "hello world this is test.txt\n" is 29 bytes
     assert!(metadata.etag.starts_with("\""));
@@ -57,11 +93,12 @@ async fn test_filesystem_service_get_metadata() {
 
 #[tokio::test]
 async fn test_list_directory() {
-    let temp_dir = setup_test_files();
+    let temp_dir = setup_test_files().await;
     let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
 
     let (entries, _) = fs_service
         .list_directory(None, 1000, None)
+        .await
         .expect("Should list directory");
     assert!(!entries.is_empty());
     assert!(entries.iter().any(|e| e.key == "bucket1/test.txt"));
@@ -112,7 +149,13 @@ fn test_generate_temp_credentials() {
         // Check that access key ID is alphanumeric
         assert!(access_key_id.chars().all(|c| c.is_ascii_alphanumeric()));
 
-        assert!(access_key_id.chars().next().unwrap().is_ascii_alphabetic());
+        assert!(
+            access_key_id
+                .chars()
+                .next()
+                .expect("Access key ID is empty")
+                .is_ascii_alphabetic()
+        );
 
         assert!(
             secret_access_key
