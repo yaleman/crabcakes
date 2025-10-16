@@ -13,10 +13,8 @@
   "devDependencies": {
     "@swc/cli": "^0.7.8",
     "@swc/core": "^1.13.5",
-    "@testing-library/dom": "^10.4.1",
     "esbuild": "^0.25.10",
     "eslint": "^9.37.0",
-    "jsdom": "^27.0.0",
     "stylelint": "^16.25.0",
     "stylelint-config-standard": "^39.0.1",
     "typescript": "^5.9.3"
