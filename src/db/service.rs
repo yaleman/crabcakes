@@ -117,6 +117,10 @@ impl DBService {
         Ok(())
     }
 
+    pub async fn delete_bucket_tags(&self, bucket: &str) -> Result<usize, CrabCakesError> {
+        object_tags::delete_bucket(&self.db, bucket).await
+    }
+
     // ===== OAuth PKCE State Operations =====
 
     pub async fn store_pkce_state(

@@ -181,7 +181,7 @@ impl AuthContext {
     /// - Check for x-amz-user header (custom header for testing)
     /// - Check for AWS_ACCESS_KEY_ID from Authorization header (basic parsing)
     /// - Default to anonymous if no auth found
-    pub fn from_request(req: &Request<hyper::body::Incoming>) -> Self {
+    pub fn from_request<B>(req: &Request<B>) -> Self {
         // Check for custom x-amz-user header (simplified for testing)
         if let Some(user_header) = req.headers().get("x-amz-user")
             && let Ok(username) = user_header.to_str()
@@ -372,21 +372,11 @@ pub fn extract_bucket_and_key(path: &str) -> (Option<String>, Option<String>) {
 #[cfg(test)]
 mod tests {
     use crate::{
-        constants::{DEFAULT_REGION, TEST_ALLOWED_BUCKET},
+        constants::{AWS4_HMAC_SHA256, DEFAULT_REGION, TEST_ALLOWED_BUCKET},
         logging::setup_test_logging,
     };
 
     use super::*;
-
-    #[test]
-    fn test_parse_access_key() {
-        setup_test_logging();
-        let auth = "AWS4-HMAC-SHA256 Credential=alice/20231201/crabcakes/s3/aws4_request";
-        assert_eq!(
-            AuthContext::parse_access_key(auth),
-            Some("alice".to_string())
-        );
-    }
 
     #[test]
     fn test_extract_bucket_and_key() {
@@ -410,6 +400,30 @@ mod tests {
             (None, Some("test.txt".to_string()))
         );
         assert_eq!(extract_bucket_and_key("/"), (None, None));
+
+        // nested path
+        assert_eq!(
+            extract_bucket_and_key("/bucket/dir1/dir2/file.txt"),
+            (
+                Some("bucket".to_string()),
+                Some("dir1/dir2/file.txt".to_string())
+            )
+        );
+
+        // extract with multiple_dots
+        assert_eq!(
+            extract_bucket_and_key("/bucket/my.file.tar.gz"),
+            (
+                Some("bucket".to_string()),
+                Some("my.file.tar.gz".to_string())
+            )
+        );
+        // bucket_without_extension
+        // Without a dot, should be treated as bucket
+        assert_eq!(
+            extract_bucket_and_key("/mybucket"),
+            (Some("mybucket".to_string()), None)
+        );
     }
 
     #[test]
@@ -546,5 +560,313 @@ mod tests {
             result.is_err(),
             "Malformed auth header should fail verification"
         );
+    }
+
+    // AuthContext::from_request() tests
+    #[test]
+    fn test_auth_context_from_x_amz_user_header() {
+        setup_test_logging();
+        let request = Request::builder()
+            .header("x-amz-user", "testuser")
+            .body(())
+            .unwrap();
+
+        let auth_context = AuthContext::from_request(&request);
+
+        assert_eq!(auth_context.username, Some("testuser".to_string()));
+        match auth_context.principal {
+            Principal::Aws(PrincipalId::String(arn)) => {
+                assert_eq!(arn, "arn:aws:iam:::user/testuser");
+            }
+            _ => panic!("Expected AWS principal"),
+        }
+    }
+
+    #[test]
+    fn test_auth_context_from_authorization_header() {
+        setup_test_logging();
+        let request = Request::builder()
+            .header(
+                AUTHORIZATION,
+                format!(
+                    "{} Credential=alice/20231201/crabcakes/s3/aws4_request",
+                    AWS4_HMAC_SHA256
+                ),
+            )
+            .body(())
+            .unwrap();
+
+        let auth_context = AuthContext::from_request(&request);
+
+        assert_eq!(auth_context.username, Some("alice".to_string()));
+        match auth_context.principal {
+            Principal::Aws(PrincipalId::String(arn)) => {
+                assert_eq!(arn, "arn:aws:iam:::user/alice");
+            }
+            _ => panic!("Expected AWS principal"),
+        }
+    }
+
+    #[test]
+    fn test_auth_context_anonymous_fallback() {
+        setup_test_logging();
+        let request = Request::builder().body(()).unwrap();
+
+        let auth_context = AuthContext::from_request(&request);
+
+        assert_eq!(auth_context.username, None);
+        assert!(matches!(auth_context.principal, Principal::Wildcard));
+    }
+
+    #[test]
+    fn test_auth_context_invalid_authorization_header() {
+        setup_test_logging();
+        let request = Request::builder()
+            .header(AUTHORIZATION, "InvalidAuthFormat")
+            .body(())
+            .unwrap();
+
+        let auth_context = AuthContext::from_request(&request);
+
+        // Should fall back to anonymous since parsing failed
+        assert_eq!(auth_context.username, None);
+        assert!(matches!(auth_context.principal, Principal::Wildcard));
+    }
+
+    // AuthContext::build_iam_request() tests
+    #[test]
+    fn test_build_iam_request_with_bucket_and_key() {
+        setup_test_logging();
+        let auth_context = AuthContext {
+            principal: Principal::Aws(PrincipalId::String(
+                "arn:aws:iam:::user/testuser".to_string(),
+            )),
+            username: Some("testuser".to_string()),
+        };
+
+        let iam_request = auth_context
+            .build_iam_request(S3Action::GetObject, Some("mybucket"), Some("mykey.txt"))
+            .expect("Should build IAM request");
+
+        assert_eq!(iam_request.action, "s3:GetObject");
+        assert_eq!(
+            iam_request.resource.to_string(),
+            "arn:aws:s3:::mybucket/mykey.txt"
+        );
+        assert!(iam_request.context.get("aws:username").is_some());
+    }
+
+    #[test]
+    fn test_build_iam_request_bucket_only() {
+        setup_test_logging();
+        let auth_context = AuthContext {
+            principal: Principal::Aws(PrincipalId::String(
+                "arn:aws:iam:::user/testuser".to_string(),
+            )),
+            username: Some("testuser".to_string()),
+        };
+
+        let iam_request = auth_context
+            .build_iam_request(S3Action::ListBucket, Some("mybucket"), None)
+            .expect("Should build IAM request");
+
+        assert_eq!(iam_request.action, "s3:ListBucket");
+        assert_eq!(iam_request.resource.to_string(), "arn:aws:s3:::mybucket");
+    }
+
+    #[test]
+    fn test_build_iam_request_wildcard() {
+        setup_test_logging();
+        let auth_context = AuthContext {
+            principal: Principal::Wildcard,
+            username: None,
+        };
+
+        let iam_request = auth_context
+            .build_iam_request(S3Action::ListAllMyBuckets, None, None)
+            .expect("Should build IAM request");
+
+        assert_eq!(iam_request.action, "s3:ListAllMyBuckets");
+        assert_eq!(iam_request.resource.to_string(), "arn:aws:s3:::*");
+    }
+
+    #[test]
+    fn test_build_iam_request_with_username_context() {
+        setup_test_logging();
+        let auth_context = AuthContext {
+            principal: Principal::Aws(PrincipalId::String("arn:aws:iam:::user/alice".to_string())),
+            username: Some("alice".to_string()),
+        };
+
+        let iam_request = auth_context
+            .build_iam_request(S3Action::PutObject, Some("bucket"), Some("key"))
+            .expect("Should build IAM request");
+
+        // Check context has username
+        let username_value = iam_request.context.get("aws:username");
+        assert!(username_value.is_some());
+        if let Some(iam_rs::ContextValue::String(username)) = username_value {
+            assert_eq!(username, "alice");
+        } else {
+            panic!("Expected username context value");
+        }
+    }
+
+    #[test]
+    fn test_build_iam_request_without_username_context() {
+        setup_test_logging();
+        let auth_context = AuthContext {
+            principal: Principal::Wildcard,
+            username: None,
+        };
+
+        let iam_request = auth_context
+            .build_iam_request(S3Action::GetObject, Some("bucket"), Some("key"))
+            .expect("Should build IAM request");
+
+        // Context should not have username
+        assert!(iam_request.context.get("aws:username").is_none());
+    }
+
+    // http_method_to_s3_action() multipart operation tests
+    #[test]
+    fn test_http_method_initiate_multipart() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::POST, "/bucket/key", "uploads", false)
+                .expect("Should map to PutObject"),
+            S3Action::PutObject
+        );
+    }
+
+    #[test]
+    fn test_http_method_upload_part() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(
+                &Method::PUT,
+                "/bucket/key",
+                "uploadId=abc&partNumber=1",
+                false
+            )
+            .expect("Should map to PutObject"),
+            S3Action::PutObject
+        );
+    }
+
+    #[test]
+    fn test_http_method_abort_multipart() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::DELETE, "/bucket/key", "uploadId=abc", false)
+                .expect("Should map to AbortMultipartUpload"),
+            S3Action::AbortMultipartUpload
+        );
+    }
+
+    #[test]
+    fn test_http_method_list_multipart_uploads() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::GET, "/bucket", "uploads", true)
+                .expect("Should map to ListBucketMultipartUploads"),
+            S3Action::ListBucketMultipartUploads
+        );
+    }
+
+    #[test]
+    fn test_http_method_list_multipart_parts() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::GET, "/bucket/key", "uploadId=abc", false)
+                .expect("Should map to ListMultipartUploadParts"),
+            S3Action::ListMultipartUploadParts
+        );
+    }
+
+    #[test]
+    fn test_http_method_complete_multipart() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::POST, "/bucket/key", "uploadId=abc", false)
+                .expect("Should map to PutObject"),
+            S3Action::PutObject
+        );
+    }
+
+    // http_method_to_s3_action() tagging operation tests
+    #[test]
+    fn test_http_method_get_object_tagging() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::GET, "/bucket/key", "tagging", false)
+                .expect("Should map to GetObjectTagging"),
+            S3Action::GetObjectTagging
+        );
+    }
+
+    #[test]
+    fn test_http_method_put_object_tagging() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::PUT, "/bucket/key", "tagging", false)
+                .expect("Should map to PutObjectTagging"),
+            S3Action::PutObjectTagging
+        );
+    }
+
+    #[test]
+    fn test_http_method_delete_object_tagging() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::DELETE, "/bucket/key", "tagging", false)
+                .expect("Should map to DeleteObjectTagging"),
+            S3Action::DeleteObjectTagging
+        );
+    }
+
+    #[test]
+    fn test_http_method_get_object_attributes() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::GET, "/bucket/key", "attributes", false)
+                .expect("Should map to GetObjectAttributes"),
+            S3Action::GetObjectAttributes
+        );
+    }
+
+    #[test]
+    fn test_http_method_delete_objects_batch() {
+        setup_test_logging();
+        assert_eq!(
+            http_method_to_s3_action(&Method::POST, "/bucket", "delete", true)
+                .expect("Should map to DeleteObject"),
+            S3Action::DeleteObject
+        );
+    }
+
+    // parse_access_key() edge case tests
+    #[test]
+    fn test_parse_access_key() {
+        setup_test_logging();
+        //valid case
+        let auth = format!(
+            "{} Credential=alice/20231201/crabcakes/s3/aws4_request",
+            AWS4_HMAC_SHA256
+        );
+        assert_eq!(
+            AuthContext::parse_access_key(&auth),
+            Some("alice".to_string())
+        );
+
+        // missing_credential
+        let auth = format!("{} NoCredentialHere", AWS4_HMAC_SHA256);
+        assert_eq!(AuthContext::parse_access_key(&auth), None);
+
+        // missing_slash
+        let auth = format!("{} Credential=alice_no_slash", AWS4_HMAC_SHA256);
+        assert_eq!(AuthContext::parse_access_key(&auth), None);
+        // empty_string
+        assert_eq!(AuthContext::parse_access_key(""), None);
     }
 }

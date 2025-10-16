@@ -320,10 +320,7 @@ async fn test_complete_upload_success() {
 
     // Complete the upload
     let dest_path = temp_dir.path().join("completed-file.txt");
-    let parts = vec![
-        (1, part1.etag.clone()),
-        (2, part2.etag.clone()),
-    ];
+    let parts = vec![(1, part1.etag.clone()), (2, part2.etag.clone())];
 
     let final_etag = manager
         .complete_upload("test-bucket", &metadata.upload_id, &parts, &dest_path)
@@ -357,10 +354,7 @@ async fn test_complete_upload_missing_part() {
 
     // Try to complete with part 2 that doesn't exist
     let dest_path = temp_dir.path().join("completed-file.txt");
-    let parts = vec![
-        (1, part1.etag.clone()),
-        (2, "\"fake-etag\"".to_string()),
-    ];
+    let parts = vec![(1, part1.etag.clone()), (2, "\"fake-etag\"".to_string())];
 
     let result = manager
         .complete_upload("test-bucket", &metadata.upload_id, &parts, &dest_path)
@@ -461,11 +455,7 @@ async fn test_full_multipart_workflow() {
 
     // 4. Complete upload
     let dest_path = temp_dir.path().join("completed-file.bin");
-    let parts = vec![
-        (1, part1.etag),
-        (2, part2.etag),
-        (3, part3.etag),
-    ];
+    let parts = vec![(1, part1.etag), (2, part2.etag), (3, part3.etag)];
 
     let final_etag = manager
         .complete_upload("test-bucket", &metadata.upload_id, &parts, &dest_path)

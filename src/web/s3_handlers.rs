@@ -32,13 +32,18 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action, verify_sigv4};
 use crate::body_buffer::BufferedBody;
-use crate::constants::{MOCK_ACCOUNT_ID, RESERVED_BUCKET_NAMES, S3, S3Action};
+use crate::constants::{
+    AWS4_HMAC_SHA256, MOCK_ACCOUNT_ID, RESERVED_BUCKET_NAMES, S3, S3Action, TRACE_BUCKET,
+    TRACE_COPY_SOURCE, TRACE_HAS_RANGE_HEADER, TRACE_KEY, TRACE_METHOD, TRACE_REMOTE_ADDR,
+    TRACE_S3_ACTION, TRACE_STATUS_CODE, TRACE_URI, TRACE_USER,
+};
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
 use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::web::handlers::respond_404;
+use crate::web::response_body_status;
 use crate::xml_responses::{
     CompleteMultipartUploadRequest, CompleteMultipartUploadResponse, CopyObjectResponse,
     CopyPartResponse, DeleteError, DeleteRequest, DeleteResponse, DeletedObject,
@@ -725,30 +730,30 @@ impl S3Handler {
         };
 
         let span = tracing::Span::current();
-        span.record("method", tracing::field::display(method));
-        span.record("uri", tracing::field::display(parts.uri));
-        span.record("bucket", tracing::field::display(&bucket_name));
+        span.record(TRACE_METHOD, tracing::field::display(method));
+        span.record(TRACE_URI, tracing::field::display(parts.uri));
+        span.record(TRACE_BUCKET, tracing::field::display(&bucket_name));
         if let Some(copy_source) = copy_source {
-            span.record("copy_source", tracing::field::display(copy_source));
+            span.record(TRACE_COPY_SOURCE, tracing::field::display(copy_source));
         }
-        span.record("s3_action", tracing::field::display(&s3_action));
+        span.record(TRACE_S3_ACTION, tracing::field::display(&s3_action));
 
-        span.record("remote_addr", tracing::field::display(remote_addr));
+        span.record(TRACE_REMOTE_ADDR, tracing::field::display(remote_addr));
         span.record(
-            "has_range_header",
+            TRACE_HAS_RANGE_HEADER,
             tracing::field::display(parts.headers.contains_key("range")),
         );
-        span.record("key", tracing::field::display(&key));
+        span.record(TRACE_KEY, tracing::field::display(&key));
 
-        if !span.has_field("status_code") {
+        if !span.has_field(TRACE_STATUS_CODE) {
             span.record(
-                "status_code",
+                TRACE_STATUS_CODE,
                 tracing::field::display(response.status().as_u16()),
             );
         }
 
         span.record(
-            "user",
+            TRACE_USER,
             tracing::field::display(auth_context.username.as_deref().unwrap_or("-")),
         );
         info!("S3 Request completed");
@@ -1171,47 +1176,76 @@ impl S3Handler {
                             }
                         };
 
+                        let content_length = contents.len();
+
                         debug!(
                             key = %key,
                             is_range = is_range_request,
                             start = start,
                             end = end,
-                            bytes_read = contents.len(),
+                            bytes_read = content_length,
                             metadata_size = metadata.size,
                             path = %metadata.path.display(),
                             "GetObject success"
                         );
 
-                        let mut response = Response::builder()
-                            .header(CONTENT_TYPE, metadata.content_type)
-                            .header(
-                                "Last-Modified",
-                                metadata
-                                    .last_modified
-                                    .format("%a, %d %b %Y %H:%M:%S GMT")
-                                    .to_string(),
-                            )
-                            .header(ETAG, metadata.etag)
-                            .header(ACCEPT_RANGES, "bytes");
+                        let mut response = Response::new(Full::new(Bytes::from(contents)));
+                        let response_headers = response.headers_mut();
 
-                        if is_range_request {
-                            response = response
-                                .status(StatusCode::PARTIAL_CONTENT)
-                                .header(CONTENT_LENGTH, contents.len())
-                                .header(
-                                    CONTENT_RANGE,
-                                    format!("bytes {}-{}/{}", start, end, metadata.size),
+                        match HeaderValue::from_str(&metadata.content_type) {
+                            Ok(hv) => {
+                                response_headers.insert(CONTENT_TYPE, hv);
+                            }
+                            Err(e) => {
+                                error!(key = %key, error = %e, "Invalid content type, returning application/octet-stream");
+                                response_headers.insert(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static("application/octet-stream"),
                                 );
-                        } else {
-                            response = response
-                                .status(StatusCode::OK)
-                                .header(CONTENT_LENGTH, metadata.size);
+                            }
                         }
 
-                        #[allow(clippy::expect_used)]
+                        if let Ok(lm) = HeaderValue::from_str(
+                            &metadata
+                                .last_modified
+                                .format("%a, %d %b %Y %H:%M:%S GMT")
+                                .to_string(),
+                        ) {
+                            response_headers.insert(LAST_MODIFIED, lm);
+                        } else {
+                            error!(ket = %key, "Failed to format Last-Modified header");
+                            return self.internal_error_response();
+                        }
+
+                        if let Ok(etag) = HeaderValue::from_str(&metadata.etag) {
+                            response_headers.insert(ETAG, etag);
+                        } else {
+                            error!(key = %key, "Invalid ETag");
+                            return self.internal_error_response();
+                        }
+
+                        response_headers.insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+
+                        let status = if is_range_request {
+                            response_headers.insert(CONTENT_LENGTH, content_length.into());
+
+                            if let Ok(cr) = HeaderValue::from_str(&format!(
+                                "bytes {}-{}/{}",
+                                start, end, metadata.size
+                            )) {
+                                response_headers.insert(CONTENT_RANGE, cr);
+                            } else {
+                                error!(key = %key, "Failed to format Content-Range header");
+                                return self.internal_error_response();
+                            }
+                            StatusCode::PARTIAL_CONTENT
+                        } else {
+                            response_headers
+                                .insert(CONTENT_LENGTH, HeaderValue::from(metadata.size));
+                            StatusCode::OK
+                        };
+                        *response.status_mut() = status;
                         response
-                            .body(Full::new(Bytes::from(contents)))
-                            .expect("Failed to generate GetObject response")
                     }
                     Err(e) => {
                         error!(key = %key, error = %e, "Failed to open file");
@@ -1246,12 +1280,14 @@ impl S3Handler {
         match self.filesystem.write_file(key, &body).await {
             Ok(metadata) => {
                 debug!(key = %key, size = metadata.size, "PutObject success");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(ETAG, metadata.etag)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate a PutObject response")
+                let mut response = response_body_status(Bytes::new(), StatusCode::OK);
+                if let Ok(hv) = HeaderValue::from_str(&metadata.etag) {
+                    (*response.headers_mut()).insert(ETAG, hv);
+                    response
+                } else {
+                    error!(key = %key, "Invalid ETag");
+                    self.internal_error_response()
+                }
             }
             Err(e) => {
                 error!(key = %key, error = %e, "Failed to write file");
@@ -1266,12 +1302,16 @@ impl S3Handler {
         match self.filesystem.create_bucket(bucket).await {
             Ok(()) => {
                 debug!(bucket = %bucket, "CreateBucket success");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(LOCATION, format!("/{}", bucket))
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to build CreateBucket response")
+
+                let mut res = response_body_status(Bytes::new(), StatusCode::OK);
+
+                if let Ok(location) = HeaderValue::from_str(&format!("/{}", bucket)) {
+                    res.headers_mut().insert(LOCATION, location);
+                } else {
+                    res.headers_mut()
+                        .insert(LOCATION, HeaderValue::from_static("/"));
+                };
+                res
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -1293,12 +1333,12 @@ impl S3Handler {
 
         match self.filesystem.delete_bucket(bucket).await {
             Ok(()) => {
+                if let Err(err) = self.db_service.delete_bucket_tags(bucket).await {
+                    error!(bucket = %bucket, error = %err, "Failed to delete bucket tags from DB during DeleteBucket, will be cleaned up later");
+                };
+
                 debug!(bucket = %bucket, "DeleteBucket success");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::NO_CONTENT)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate a DeleteBucket response")
+                response_body_status(Bytes::new(), StatusCode::NO_CONTENT)
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -1323,11 +1363,7 @@ impl S3Handler {
         match self.filesystem.delete_file(key).await {
             Ok(()) => {
                 debug!(key = %key, "DeleteObject success");
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::NO_CONTENT)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate a DeleteObject response")
+                response_body_status(Bytes::new(), StatusCode::NO_CONTENT)
             }
             Err(e) => {
                 error!(key = %key, error = %e, "Failed to delete file");
@@ -1356,11 +1392,10 @@ impl S3Handler {
             Ok(req) => req,
             Err(e) => {
                 error!(error = %e, "Failed to parse DeleteObjects XML request");
-                #[allow(clippy::expect_used)]
-                return Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Full::new(Bytes::from("Invalid XML request")))
-                    .expect("Failed to generate a DeleteObjects response");
+                return response_body_status(
+                    Bytes::from("Invalid XML request"),
+                    StatusCode::BAD_REQUEST,
+                );
             }
         };
 
@@ -1512,11 +1547,13 @@ impl S3Handler {
 
         if self.filesystem.bucket_exists(bucket) {
             debug!(bucket = %bucket, "HeadBucket success - bucket exists");
-            #[allow(clippy::expect_used)]
-            Response::builder()
-                .status(StatusCode::OK)
-                .body(Full::new(Bytes::new()))
-                .expect("Failed to generate a head bucket response")
+
+            let mut res = response_body_status(Bytes::new(), StatusCode::OK);
+            res.headers_mut().insert("x-amz-bucket-region", HeaderValue::from_str(&self.region).unwrap_or_else(|err| {
+                error!(original_region = %self.region, error=%err,"Failed to parse region for x-amz-bucket-region header");
+                HeaderValue::from_static("crabcakes")
+        }));
+            res
         } else {
             warn!(bucket = %bucket, "Bucket does not exist");
             self.no_such_bucket_response(bucket)
@@ -1621,12 +1658,14 @@ impl S3Handler {
                     "UploadPart success"
                 );
 
-                #[allow(clippy::expect_used)]
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(ETAG, part_info.etag)
-                    .body(Full::new(Bytes::new()))
-                    .expect("Failed to generate UploadPart response")
+                let mut res = response_body_status(Bytes::new(), StatusCode::OK);
+                if let Ok(etag) = HeaderValue::from_str(&part_info.etag) {
+                    res.headers_mut().insert(ETAG, etag);
+                    res
+                } else {
+                    error!(upload_id = %upload_id, part_number = %part_number, "Invalid ETag");
+                    self.internal_error_response()
+                }
             }
             Err(e) => {
                 error!(
@@ -1726,22 +1765,20 @@ impl S3Handler {
                         Ok(s) => s,
                         Err(_) => {
                             warn!(range = %range_str, "Invalid range format");
-                            #[allow(clippy::expect_used)]
-                            return Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(Full::new(Bytes::from("Invalid range format")))
-                                .expect("Failed to generate error response");
+                            return response_body_status(
+                                Bytes::from("Invalid range format"),
+                                StatusCode::BAD_REQUEST,
+                            );
                         }
                     };
                     let end: u64 = match end_str.parse() {
                         Ok(e) => e,
                         Err(_) => {
                             warn!(range = %range_str, "Invalid range format");
-                            #[allow(clippy::expect_used)]
-                            return Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(Full::new(Bytes::from("Invalid range format")))
-                                .expect("Failed to generate error response");
+                            return response_body_status(
+                                Bytes::from("Invalid range format"),
+                                StatusCode::BAD_REQUEST,
+                            );
                         }
                     };
 
@@ -1763,19 +1800,17 @@ impl S3Handler {
                     }
                 } else {
                     warn!(range = %range_str, "Invalid range format - missing dash");
-                    #[allow(clippy::expect_used)]
-                    return Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Full::new(Bytes::from("Invalid range format")))
-                        .expect("Failed to generate error response");
+                    return response_body_status(
+                        Bytes::from("Invalid range format"),
+                        StatusCode::BAD_REQUEST,
+                    );
                 }
             } else {
                 warn!(range = %range_str, "Invalid range format - must start with bytes=");
-                #[allow(clippy::expect_used)]
-                return Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Full::new(Bytes::from("Invalid range format")))
-                    .expect("Failed to generate error response");
+                return response_body_status(
+                    Bytes::from("Invalid range format"),
+                    StatusCode::BAD_REQUEST,
+                );
             }
         } else {
             // Read entire file
@@ -2226,7 +2261,7 @@ impl S3Handler {
     }
 
     fn access_denied_response(&self) -> Response<Full<Bytes>> {
-        tracing::Span::current().record("status_code", tracing::field::display(403));
+        tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(403));
         let mut res = Response::new(Full::new(Bytes::from(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
         )));
@@ -2237,7 +2272,7 @@ impl S3Handler {
     }
 
     fn unauthorized_response(&self, reason: &str) -> Response<Full<Bytes>> {
-        tracing::Span::current().record("status_code", tracing::field::display(401));
+        tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(401));
         let mut response = Response::new(Full::new(Bytes::from(format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidAccessKeyId</Code><Message>{}</Message></Error>",
             reason
@@ -2245,15 +2280,12 @@ impl S3Handler {
         *response.status_mut() = StatusCode::UNAUTHORIZED;
         let headers = response.headers_mut();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
-        headers.insert(
-            WWW_AUTHENTICATE,
-            HeaderValue::from_static("AWS4-HMAC-SHA256"),
-        );
+        headers.insert(WWW_AUTHENTICATE, HeaderValue::from_static(AWS4_HMAC_SHA256));
         response
     }
 
     fn internal_error_response(&self) -> Response<Full<Bytes>> {
-        tracing::Span::current().record("status_code", tracing::field::display(500));
+        tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(500));
         let mut res = Response::new(Full::new(Bytes::from(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>",
         )));
@@ -2264,7 +2296,7 @@ impl S3Handler {
     }
 
     fn bucket_already_exists_response(&self, bucket: &str) -> Response<Full<Bytes>> {
-        tracing::Span::current().record("status_code", tracing::field::display(409));
+        tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(409));
         let mut res = Response::new(Full::new(Bytes::from(format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketAlreadyExists</Code><Message>The requested bucket name '{}' is not available.</Message></Error>",
             bucket
@@ -2276,7 +2308,7 @@ impl S3Handler {
     }
 
     fn bucket_not_empty_response(&self, bucket: &str) -> Response<Full<Bytes>> {
-        tracing::Span::current().record("status_code", tracing::field::display(409));
+        tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(409));
         let mut res = Response::new(Full::new(Bytes::from(format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketNotEmpty</Code><Message>The bucket '{}' you tried to delete is not empty.</Message></Error>",
             bucket
@@ -2288,7 +2320,7 @@ impl S3Handler {
     }
 
     fn no_such_bucket_response(&self, bucket: &str) -> Response<Full<Bytes>> {
-        tracing::Span::current().record("status_code", tracing::field::display(404));
+        tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(404));
         let mut res = Response::new(Full::new(Bytes::from(format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchBucket</Code><Message>The specified bucket '{}' does not exist.</Message></Error>",
             bucket
@@ -2306,7 +2338,7 @@ impl S3Handler {
         ))));
         *response.status_mut() = StatusCode::BAD_REQUEST;
         tracing::Span::current().record(
-            "status_code",
+            TRACE_STATUS_CODE,
             tracing::field::display(StatusCode::BAD_REQUEST.as_u16()),
         );
         response

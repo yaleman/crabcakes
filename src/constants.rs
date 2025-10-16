@@ -12,6 +12,9 @@ pub(crate) static TEMP_ACCESS_KEY_LENGTH: usize = 20;
 /// This is related to the AWS secret access key length
 pub(crate) static SECRET_ACCESS_KEY_LENGTH: usize = 40;
 
+/// The signature header value for AWS Signature Version 4
+pub static AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
+
 /// How long a OAuth-provided temporary credential will live
 pub(crate) static MAX_TEMP_CREDS_DURATION: LazyLock<Duration> =
     LazyLock::new(|| Duration::seconds(3600));
@@ -24,6 +27,18 @@ pub(crate) static CSRF_TOKEN_LENGTH: usize = 32;
 
 /// Mock AWS Account ID for generated principals
 pub(crate) const MOCK_ACCOUNT_ID: &str = "000000000000";
+
+/// Used for logging
+pub(crate) static TRACE_STATUS_CODE: &str = "status_code";
+pub(crate) static TRACE_S3_ACTION: &str = "s3_action";
+pub(crate) static TRACE_METHOD: &str = "method";
+pub(crate) static TRACE_URI: &str = "uri";
+pub(crate) static TRACE_REMOTE_ADDR: &str = "remote_addr";
+pub(crate) static TRACE_BUCKET: &str = "bucket";
+pub(crate) static TRACE_KEY: &str = "key";
+pub(crate) static TRACE_COPY_SOURCE: &str = "copy_source";
+pub(crate) static TRACE_HAS_RANGE_HEADER: &str = "has_range_header";
+pub(crate) static TRACE_USER: &str = "user";
 
 /// Reserved bucket names that cannot be used as S3 buckets
 /// These are reserved for the admin UI and API endpoints
