@@ -1,0 +1,21 @@
+---
+name: Only exists test-workflows branch
+
+"on":
+    push:
+        branches:
+            - test-workflows
+    pull_request:
+
+permissions:
+    contents: read
+jobs:
+    test_workflow:
+        runs-on: ubuntu-latest
+        concurrency:
+            group: ${{ github.workflow }}-${{ github.ref }}
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: hello world
+              run: echo "hello world"
