@@ -1,6 +1,7 @@
 //! IAM policy storage and evaluation.
 //!
 //! Loads JSON IAM policies and evaluates requests against them with caching support.
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::{collections::HashMap, sync::Arc};
@@ -11,9 +12,9 @@ use iam_rs::{
     PolicyEvaluator, Principal,
 };
 use sha2::{Digest, Sha256};
-use std::fs;
 #[cfg(test)]
 use tempfile::TempDir;
+use tokio::fs::{self, read_dir};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -72,12 +73,10 @@ static NAME_VALIDATOR: LazyLock<regex::Regex> = LazyLock::new(|| {
 
 impl PolicyStore {
     /// Create a new PolicyStore by loading policies from the given directory
-    pub fn new(policy_dir: &PathBuf) -> Result<Self, CrabCakesError> {
-        let mut policies = HashMap::new();
-
+    pub async fn new(policy_dir: &PathBuf) -> Result<Self, CrabCakesError> {
         if !policy_dir.exists() {
             warn!(policy_dir = ?policy_dir, "Policy directory does not exist, creating it...");
-            fs::create_dir_all(policy_dir).inspect_err(|err| {
+            fs::create_dir_all(policy_dir).await.inspect_err(|err| {
                 error!(
                     policy_dir = ?policy_dir,
                     error = %err,
@@ -94,40 +93,16 @@ impl PolicyStore {
         }
 
         // Read all JSON files from the policy directory
-        for entry in fs::read_dir(policy_dir)? {
-            let entry = entry.inspect_err(|err| {
-                debug!(
-                    "Failed to read an entry from the policy directory:  {:?}",
-                    err
-                )
-            })?;
-            let path = entry.path();
 
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-                match Self::load_policy(&path) {
-                    Ok(policy) => {
-                        let policy_name = path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        debug!(policy_name = %policy_name, path = ?path, "Loaded policy");
-                        policies.insert(policy_name, policy);
-                    }
-                    Err(e) => {
-                        error!(path = ?path, error = %e, "Failed to load policy");
-                    }
-                }
-            }
-        }
-
-        info!(count = policies.len(), "Loaded IAM policies");
-        Ok(Self {
-            policies: Arc::new(RwLock::new(policies)),
+        let res = Self {
+            policies: Arc::new(RwLock::new(HashMap::new())),
             result_cache: Arc::new(RwLock::new(Default::default())),
             policy_dir: policy_dir.clone(),
             expiry_secs: Arc::new(RwLock::new(300)), // cache expiry in seconds
-        })
+        };
+        let loaded_count = res.load_policies().await?;
+        info!(count = loaded_count, "Loaded IAM policies");
+        Ok(res)
     }
 
     #[cfg(test)]
@@ -136,19 +111,57 @@ impl PolicyStore {
     /// use crate::policy::PolicyStore;
     /// let (_tempdir, policy_store) = PolicyStore::test_empty_store();
     /// ```
-    pub fn new_test() -> (TempDir, Self) {
+    pub async fn new_test() -> (TempDir, Self) {
         let tempdir = tempfile::tempdir().expect("failed to create temp dir");
 
         let path = tempdir.path().to_path_buf();
         (
             tempdir,
-            Self::new(&path).expect("failed to create policystore"),
+            Self::new(&path)
+                .await
+                .expect("failed to create policystore"),
         )
+    }
+    pub(crate) async fn load_policies(&self) -> Result<usize, CrabCakesError> {
+        let policies = self.policies.clone();
+        let mut policy_writer = policies.write().await;
+
+        let mut loaded_policies = HashSet::new();
+        let mut reader = read_dir(&self.policy_dir).await?;
+        while let Some(entry) = reader.next_entry().await? {
+            let path = entry.path();
+
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                match Self::load_policy(&path).await {
+                    Ok(policy) => {
+                        let policy_name = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        debug!(policy_name = %policy_name, path = ?path, "Loaded policy");
+                        loaded_policies.insert(policy_name.clone());
+                        policy_writer.insert(policy_name, policy);
+                    }
+                    Err(e) => {
+                        error!(path = ?path, error = %e, "Failed to load policy");
+                    }
+                }
+            }
+            let known_policies: Vec<String> = policy_writer.keys().cloned().collect();
+            for existing_policy in known_policies {
+                if !loaded_policies.contains(&existing_policy) {
+                    warn!(policy_name = %existing_policy, "Policy file no longer exists, removing from store");
+                    policy_writer.remove(&existing_policy);
+                }
+            }
+        }
+        Ok(loaded_policies.len())
     }
 
     /// Load a single policy from a JSON file
-    fn load_policy(path: &PathBuf) -> Result<IAMPolicy, CrabCakesError> {
-        let contents = fs::read_to_string(path).inspect_err(
+    async fn load_policy(path: &PathBuf) -> Result<IAMPolicy, CrabCakesError> {
+        let contents = fs::read_to_string(path).await.inspect_err(
             |err| error!(policy_path = path.display().to_string(), error = ?err, "Failed to read policy file"),
         )?;
         debug!(contents = contents.replace("\\n", ""), "Loaded policy JSON");
@@ -360,7 +373,7 @@ impl PolicyStore {
         let policy_json = fix_mock_id(&serde_json::to_string_pretty(&policy)?);
 
         fs::write(&policy_path, &policy_json)
-        .inspect_err(|e| error!(policy_path = policy_path.display().to_string(), error = %e, "Failed to write policy to file!"))?;
+        .await.inspect_err(|e| error!(policy_path = policy_path.display().to_string(), error = %e, "Failed to write policy to file!"))?;
 
         // Update in-memory store
         {
@@ -401,7 +414,7 @@ impl PolicyStore {
         let policy_path = self.policy_dir.join(format!("{}.json", name));
 
         let policy_json = serde_json::to_string_pretty(&policy)?;
-        fs::write(&policy_path, policy_json)?;
+        fs::write(&policy_path, policy_json).await?;
 
         // Update in-memory store
         {
@@ -443,7 +456,7 @@ impl PolicyStore {
             error!("Attempted path traversal in policy deletion: {}", name);
             return Err(CrabCakesError::InvalidPath);
         }
-        fs::remove_file(&policy_path)?;
+        fs::remove_file(&policy_path).await?;
 
         // Remove from in-memory store
         {
@@ -464,11 +477,9 @@ impl PolicyStore {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_invalid_name() {
-        let tempdir = tempfile::tempdir().expect("failed to create temp dir");
-        let store = super::PolicyStore::new(&tempdir.path().to_path_buf())
-            .expect("failed to create policystore");
+    #[tokio::test]
+    async fn test_invalid_name() {
+        let (_tempdir, store) = super::PolicyStore::new_test().await;
         for name in [
             "valid-name",
             "another_valid_name123",

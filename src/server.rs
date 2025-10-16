@@ -3,7 +3,6 @@
 //! Configures and runs the S3-compatible server with optional TLS support
 //! and dynamic worker thread allocation.
 
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::num::NonZeroU16;
 use std::path::PathBuf;
@@ -15,7 +14,9 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use std::fs::File;
+use std::io::BufReader;
+use tokio::fs::File;
+
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio_rustls::TlsAcceptor;
@@ -128,7 +129,7 @@ impl Server {
         let credentials_dir = self.config_dir.join("credentials");
 
         // Load IAM policies
-        let policy_store = Arc::new(PolicyStore::new(&policy_dir)?);
+        let policy_store = Arc::new(PolicyStore::new(&policy_dir).await?);
 
         // Load credentials
         let credentials_store = Arc::new(CredentialStore::new(&credentials_dir).await?);
@@ -272,8 +273,8 @@ impl Server {
 
         match self.tls_cert.is_some() && self.tls_key.is_some() {
             true => {
-                let certs = self.load_cert()?;
-                let key = self.load_private_key()?;
+                let certs = self.load_cert().await?;
+                let key = self.load_private_key().await?;
 
                 let mut tls_server_config = ServerConfig::builder()
                     .with_no_client_auth()
@@ -346,12 +347,11 @@ impl Server {
     }
 
     // Load public certificate from file.
-    fn load_cert(&self) -> Result<Vec<CertificateDer<'static>>, CrabCakesError> {
+    async fn load_cert(&self) -> Result<Vec<CertificateDer<'static>>, CrabCakesError> {
         // Open certificate file.
         if let Some(cert_file) = self.tls_cert.as_ref() {
-            let certfile = File::open(cert_file)?;
-            let mut reader = BufReader::new(certfile);
-
+            let certfile = File::open(cert_file).await?;
+            let mut reader = BufReader::new(certfile.into_std().await);
             // Load and return certificate.
             rustls_pemfile::certs(&mut reader)
                 .collect::<Result<Vec<_>, _>>()
@@ -362,11 +362,11 @@ impl Server {
     }
 
     // Load private key from file.
-    fn load_private_key(&self) -> Result<PrivateKeyDer<'static>, CrabCakesError> {
+    async fn load_private_key(&self) -> Result<PrivateKeyDer<'static>, CrabCakesError> {
         // Open keyfile.
         if let Some(key_file) = self.tls_key.as_ref() {
-            let keyfile = File::open(key_file)?;
-            let mut reader = BufReader::new(keyfile);
+            let keyfile = File::open(key_file).await?;
+            let mut reader = BufReader::new(keyfile.into_std().await);
 
             // Load and return a single private key.
             match rustls_pemfile::private_key(&mut reader) {

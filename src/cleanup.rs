@@ -78,11 +78,13 @@ mod tests {
     async fn test_cleanup_task_no_expired_data() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database().await.unwrap();
+        let db = initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         let cleanup = CleanupTask::new(db_service, 1);
-        let (pkce_count, creds_count) = cleanup.run_cleanup().await.unwrap();
+        let (pkce_count, creds_count) = cleanup.run_cleanup().await.expect("Failed to run cleanup");
 
         assert_eq!(pkce_count, 0, "Should not clean up any PKCE states");
         assert_eq!(creds_count, 0, "Should not clean up any credentials");
@@ -92,7 +94,9 @@ mod tests {
     async fn test_cleanup_task_cleans_expired_pkce() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database().await.unwrap();
+        let db = initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired PKCE state (expired 1 hour ago)
@@ -107,10 +111,11 @@ mod tests {
                 expired_at,
             )
             .await
-            .unwrap();
+            .expect("Failed to store expired PKCE state");
 
         // Store valid PKCE state (expires in 10 minutes)
-        let valid_expires = chrono::Utc::now() + chrono::Duration::try_minutes(10).unwrap();
+        let valid_expires = chrono::Utc::now()
+            + chrono::Duration::try_minutes(10).expect("Failed to create duration");
         db_service
             .store_pkce_state(
                 "valid_state",
@@ -121,20 +126,26 @@ mod tests {
                 valid_expires,
             )
             .await
-            .unwrap();
+            .expect("Failed to store valid PKCE state");
 
         // Run cleanup
         let cleanup = CleanupTask::new(db_service.clone(), 1);
-        let (pkce_count, _) = cleanup.run_cleanup().await.unwrap();
+        let (pkce_count, _) = cleanup.run_cleanup().await.expect("Failed to run cleanup");
 
         assert_eq!(pkce_count, 1, "Should clean up 1 expired PKCE state");
 
         // Verify expired state was deleted
-        let expired_state = db_service.get_pkce_state("expired_state").await.unwrap();
+        let expired_state = db_service
+            .get_pkce_state("expired_state")
+            .await
+            .expect("Failed to get PKCE state");
         assert!(expired_state.is_none(), "Expired state should be deleted");
 
         // Verify valid state still exists
-        let valid_state = db_service.get_pkce_state("valid_state").await.unwrap();
+        let valid_state = db_service
+            .get_pkce_state("valid_state")
+            .await
+            .expect("Failed to get valid PKCE state");
         assert!(valid_state.is_some(), "Valid state should still exist");
     }
 
@@ -142,7 +153,9 @@ mod tests {
     async fn test_cleanup_task_cleans_expired_credentials() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database().await.unwrap();
+        let db = initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired credentials (expired 1 hour ago)
@@ -157,10 +170,11 @@ mod tests {
                 expired_at,
             )
             .await
-            .unwrap();
+            .expect("Failed to store expired credentials");
 
         // Store valid credentials (expires in 10 minutes)
-        let valid_expires = chrono::Utc::now() + chrono::Duration::try_minutes(10).unwrap();
+        let valid_expires = chrono::Utc::now()
+            + chrono::Duration::try_minutes(10).expect("Failed to create duration");
         db_service
             .store_temporary_credentials(
                 "VALID_KEY_456",
@@ -171,11 +185,11 @@ mod tests {
                 valid_expires,
             )
             .await
-            .unwrap();
+            .expect("Failed to store valid credentials");
 
         // Run cleanup
         let cleanup = CleanupTask::new(db_service.clone(), 1);
-        let (_, creds_count) = cleanup.run_cleanup().await.unwrap();
+        let (_, creds_count) = cleanup.run_cleanup().await.expect("Failed to run cleanup");
 
         assert_eq!(creds_count, 1, "Should clean up 1 expired credential");
 
@@ -183,7 +197,7 @@ mod tests {
         let expired_creds = db_service
             .get_temporary_credentials("EXPIRED_KEY_123")
             .await
-            .unwrap();
+            .expect("Failed to get expired credentials");
         assert!(
             expired_creds.is_none(),
             "Expired credentials should be deleted"
@@ -193,7 +207,7 @@ mod tests {
         let valid_creds = db_service
             .get_temporary_credentials("VALID_KEY_456")
             .await
-            .unwrap();
+            .expect("Failed to get valid credentials");
         assert!(
             valid_creds.is_some(),
             "Valid credentials should still exist"
@@ -204,7 +218,9 @@ mod tests {
     async fn test_cleanup_task_cleans_both_types() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database().await.unwrap();
+        let db = initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         let expired_at = chrono::Utc::now() - *MAX_TEMP_CREDS_DURATION;
@@ -220,7 +236,7 @@ mod tests {
                 expired_at,
             )
             .await
-            .unwrap();
+            .expect("Failed to store expired PKCE state");
 
         // Store expired credentials
         db_service
@@ -233,11 +249,11 @@ mod tests {
                 expired_at,
             )
             .await
-            .unwrap();
+            .expect("Failed to store expired credentials");
 
         // Run cleanup
         let cleanup = CleanupTask::new(db_service, 1);
-        let (pkce_count, creds_count) = cleanup.run_cleanup().await.unwrap();
+        let (pkce_count, creds_count) = cleanup.run_cleanup().await.expect("Failed to run cleanup");
 
         assert_eq!(pkce_count, 1, "Should clean up 1 PKCE state");
         assert_eq!(creds_count, 1, "Should clean up 1 credential");

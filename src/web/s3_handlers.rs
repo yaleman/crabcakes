@@ -870,11 +870,11 @@ impl S3Handler {
             prefix = Some(query_prefix);
         }
 
-        match self.filesystem.list_directory(
-            prefix.as_deref(),
-            max_keys,
-            continuation_token.as_deref(),
-        ) {
+        match self
+            .filesystem
+            .list_directory(prefix.as_deref(), max_keys, continuation_token.as_deref())
+            .await
+        {
             Ok((entries, next_token)) => {
                 debug!(
                     count = entries.len(),
@@ -990,6 +990,7 @@ impl S3Handler {
         match self
             .filesystem
             .list_directory(Some(prefix_str), max_keys, marker_opt)
+            .await
         {
             Ok((entries, next_marker)) => {
                 debug!(count = entries.len(), "Listed objects (V1)");
@@ -1020,7 +1021,7 @@ impl S3Handler {
 
     async fn handle_list_buckets(&self, _bucket_name: &str) -> Response<Full<Bytes>> {
         // List all top-level directories as buckets
-        match self.filesystem.list_buckets() {
+        match self.filesystem.list_buckets().await {
             Ok(buckets) => {
                 debug!(count = buckets.len(), "Listed buckets");
                 let response = ListBucketsResponse::from_buckets(buckets);
@@ -1041,7 +1042,7 @@ impl S3Handler {
     }
 
     async fn handle_head_object(&self, key: &str) -> Response<Full<Bytes>> {
-        match self.filesystem.get_file_metadata(key) {
+        match self.filesystem.get_file_metadata(key).await {
             Ok(metadata) => {
                 debug!(key = %key, size = metadata.size, "HeadObject success");
 
@@ -1114,7 +1115,7 @@ impl S3Handler {
         key: &str,
         range_header: Option<&str>,
     ) -> Response<Full<Bytes>> {
-        match self.filesystem.get_file_metadata(key) {
+        match self.filesystem.get_file_metadata(key).await {
             Ok(metadata) => {
                 // Parse range header if present
                 let (start, end, is_range_request) = if let Some(range_str) = range_header {

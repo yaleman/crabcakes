@@ -3,6 +3,7 @@
 //! Tests all extracted API handler business logic methods without HTTP concerns.
 //! Uses in-memory database and temporary directories for isolation.
 
+use crate::logging::setup_test_logging;
 use crate::request_handler::RequestHandler;
 use crate::web::serde::{CredentialInfo, VacuumResult};
 
@@ -15,7 +16,11 @@ async fn test_api_create_bucket_valid() {
     assert!(result.is_ok(), "Should create valid bucket");
 
     // Verify bucket exists
-    let buckets = handler.filesystem.list_buckets().unwrap();
+    let buckets = handler
+        .filesystem
+        .list_buckets()
+        .await
+        .expect("Should list buckets");
     assert!(buckets.contains(&"test-bucket-123".to_string()));
 }
 
@@ -104,7 +109,11 @@ async fn test_api_delete_bucket_empty() {
     assert!(result.is_ok(), "Should delete empty bucket");
 
     // Verify bucket is gone
-    let buckets = handler.filesystem.list_buckets().unwrap();
+    let buckets = handler
+        .filesystem
+        .list_buckets()
+        .await
+        .expect("Should list buckets");
     assert!(!buckets.contains(&"delete-me".to_string()));
 }
 
@@ -156,7 +165,11 @@ async fn test_api_delete_bucket_with_objects_force() {
     assert!(result.is_ok(), "Should force delete non-empty bucket");
 
     // Verify bucket is gone
-    let buckets = handler.filesystem.list_buckets().unwrap();
+    let buckets = handler
+        .filesystem
+        .list_buckets()
+        .await
+        .expect("Should list buckets");
     assert!(!buckets.contains(&"force-delete-bucket".to_string()));
 }
 
@@ -198,6 +211,7 @@ async fn test_api_list_policies_sorted() {
 
 #[tokio::test]
 async fn test_api_create_policy_valid() {
+    setup_test_logging();
     let handler = RequestHandler::new_test().await;
 
     // Create a simple policy
@@ -211,13 +225,17 @@ async fn test_api_create_policy_valid() {
         }]
     });
 
-    let policy: iam_rs::IAMPolicy = serde_json::from_value(policy_json).unwrap();
+    let policy: iam_rs::IAMPolicy =
+        serde_json::from_value(policy_json).expect("Failed to parse policy JSON");
     let result = handler.api_create_policy("test-policy", policy).await;
 
     assert!(result.is_ok(), "Should create valid policy");
 
     // Verify policy exists
-    let policies = handler.api_list_policies().await.unwrap();
+    let policies = handler
+        .api_list_policies()
+        .await
+        .expect("Failed to list policies");
     assert!(policies.iter().any(|p| p.name == "test-policy"));
 }
 
@@ -226,7 +244,10 @@ async fn test_api_update_policy_existing() {
     let handler = RequestHandler::new_test().await;
 
     // Get an existing policy from test setup
-    let policies = handler.api_list_policies().await.unwrap();
+    let policies = handler
+        .api_list_policies()
+        .await
+        .expect("Failed to list policies");
     let first_policy = policies.first().expect("Should have at least one policy");
 
     // Update it
@@ -240,7 +261,8 @@ async fn test_api_update_policy_existing() {
         }]
     });
 
-    let updated_policy: iam_rs::IAMPolicy = serde_json::from_value(updated_policy_json).unwrap();
+    let updated_policy: iam_rs::IAMPolicy =
+        serde_json::from_value(updated_policy_json).expect("Failed to parse updated policy JSON");
     let result = handler
         .api_update_policy(first_policy.name.clone(), updated_policy)
         .await;
@@ -262,7 +284,8 @@ async fn test_api_update_policy_nonexistent() {
         }]
     });
 
-    let policy: iam_rs::IAMPolicy = serde_json::from_value(policy_json).unwrap();
+    let policy: iam_rs::IAMPolicy =
+        serde_json::from_value(policy_json).expect("Failed to parse policy JSON");
     let result = handler
         .api_update_policy("nonexistent-policy".to_string(), policy)
         .await;
@@ -285,7 +308,8 @@ async fn test_api_delete_policy_existing() {
         }]
     });
 
-    let policy: iam_rs::IAMPolicy = serde_json::from_value(policy_json).unwrap();
+    let policy: iam_rs::IAMPolicy =
+        serde_json::from_value(policy_json).expect("Failed to parse policy JSON");
     handler
         .api_create_policy("policy-to-delete", policy)
         .await
@@ -296,7 +320,10 @@ async fn test_api_delete_policy_existing() {
     assert!(result.is_ok(), "Should delete existing policy");
 
     // Verify it's gone
-    let policies = handler.api_list_policies().await.unwrap();
+    let policies = handler
+        .api_list_policies()
+        .await
+        .expect("Failed to list policies");
     assert!(!policies.iter().any(|p| p.name == "policy-to-delete"));
 }
 
@@ -330,7 +357,10 @@ async fn test_api_list_credentials_empty() {
 async fn test_api_list_credentials_sorted() {
     let handler = RequestHandler::new_test().await;
 
-    let creds = handler.api_list_credentials().await.unwrap();
+    let creds = handler
+        .api_list_credentials()
+        .await
+        .expect("Failed to list credentials");
 
     // Verify credentials are sorted
     let keys: Vec<String> = creds.iter().map(|c| c.access_key_id.clone()).collect();
@@ -344,7 +374,10 @@ async fn test_api_list_credentials_sorted() {
 async fn test_api_list_credentials_no_secrets() {
     let handler = RequestHandler::new_test().await;
 
-    let creds = handler.api_list_credentials().await.unwrap();
+    let creds = handler
+        .api_list_credentials()
+        .await
+        .expect("Failed to list credentials");
 
     // CredentialInfo struct should only have access_key_id, not secret
     for cred in &creds {
@@ -366,7 +399,10 @@ async fn test_api_create_credential_valid() {
     assert!(result.is_ok(), "Should create valid credential");
 
     // Verify credential exists
-    let creds = handler.api_list_credentials().await.unwrap();
+    let creds = handler
+        .api_list_credentials()
+        .await
+        .expect("Failed to list credentials");
     assert!(creds.iter().any(|c| c.access_key_id == "newuser"));
 }
 
@@ -447,7 +483,10 @@ async fn test_api_delete_credential_existing() {
     assert!(result.is_ok(), "Should delete existing credential");
 
     // Verify it's gone
-    let creds = handler.api_list_credentials().await.unwrap();
+    let creds = handler
+        .api_list_credentials()
+        .await
+        .expect("Failed to list credentials");
     assert!(!creds.iter().any(|c| c.access_key_id == "deleteuser"));
 }
 
@@ -485,7 +524,7 @@ async fn test_api_delete_temp_credential_existing() {
             "session-123",
             "test@example.com",
             "user-123",
-            chrono::Utc::now() + chrono::Duration::try_hours(1).unwrap(),
+            chrono::Utc::now() + chrono::Duration::try_hours(1).expect("Failed to create duration"),
         )
         .await
         .expect("Should store temp credential");
@@ -499,7 +538,7 @@ async fn test_api_delete_temp_credential_existing() {
         .db
         .get_temporary_credentials("temp-key-123")
         .await
-        .unwrap();
+        .expect("Failed to get temporary credentials");
     assert!(creds.is_none(), "Temp credential should be deleted");
 }
 
@@ -546,7 +585,7 @@ async fn test_api_database_vacuum_with_confirm() {
     let result = handler.api_database_vacuum(true).await;
     assert!(result.is_ok(), "Should vacuum with confirmation");
 
-    let vacuum_result = result.unwrap();
+    let vacuum_result = result.expect("Failed to get vacuum result");
     assert!(vacuum_result.success, "Vacuum should succeed");
     assert!(
         vacuum_result.pages_freed >= 0,

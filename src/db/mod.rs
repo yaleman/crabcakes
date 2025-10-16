@@ -12,6 +12,7 @@ pub use service::DBService;
 use sea_orm::{Database, DatabaseConnection, DbErr};
 use sea_orm_migration::prelude::*;
 use std::path::Path;
+use tokio::fs::create_dir_all;
 use tracing::{debug, info};
 
 use migration::Migrator;
@@ -22,7 +23,8 @@ pub async fn initialize_database(config_dir: &Path) -> Result<DatabaseConnection
 
     // Create config directory if it doesn't exist
     if !config_dir.exists() {
-        std::fs::create_dir_all(config_dir)
+        create_dir_all(config_dir)
+            .await
             .map_err(|e| DbErr::Custom(format!("Failed to create config dir: {}", e)))?;
     }
 

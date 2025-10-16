@@ -988,6 +988,7 @@ impl WebHandler {
         let buckets = self
             .filesystem
             .list_buckets()
+            .await
             .map_err(CrabCakesError::from)?;
 
         let template = BucketsTemplate {
@@ -1015,6 +1016,7 @@ impl WebHandler {
         let (entries, _) = self
             .filesystem
             .list_directory(Some(&format!("{}/", bucket_name)), 1000, None)
+            .await
             .map_err(CrabCakesError::from)?;
 
         let objects: Vec<ObjectInfo> = entries
@@ -1117,6 +1119,7 @@ impl WebHandler {
         let (entries, _) = self
             .filesystem
             .list_directory(Some(&format!("{}/", bucket_name)), 10000, None)
+            .await
             .map_err(CrabCakesError::from)?;
 
         let template = BucketDeleteTemplate {

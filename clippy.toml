@@ -12,9 +12,37 @@ too-many-arguments-threshold = 8
 # default's 250
 type-complexity-threshold = 300
 
-disallowed-types = []
+disallowed-types = [
+    { path = "std::fs::File", reason = "Use tokio::fs::File instead for async operations" },
+    { path = "std::fs::OpenOptions", reason = "Use tokio::fs::OpenOptions instead for async operations" },
+    { path = "std::fs::Permissions", reason = "Use tokio::fs::Permissions instead for async operations" },
+    { path = "std::fs::DirEntry", reason = "Use tokio::fs::DirEntry instead for async operations" },
+    { path = "std::fs::DirBuilder", reason = "Use tokio::fs::DirBuilder instead for async operations" },
+    { path = "std::fs::ReadDir", reason = "Use tokio::fs::ReadDir instead for async operations" },
+]
+
+disallowed-methods = [
+    { path = "std::fs::read", reason = "Use tokio::fs::read instead for async operations" },
+    { path = "std::fs::read_to_string", reason = "Use tokio::fs::read_to_string instead for async operations" },
+    { path = "std::fs::write", reason = "Use tokio::fs::write instead for async operations" },
+    { path = "std::fs::create_dir", reason = "Use tokio::fs::create_dir instead for async operations" },
+    { path = "std::fs::create_dir_all", reason = "Use tokio::fs::create_dir_all instead for async operations" },
+    { path = "std::fs::remove_file", reason = "Use tokio::fs::remove_file instead for async operations" },
+    { path = "std::fs::remove_dir", reason = "Use tokio::fs::remove_dir instead for async operations" },
+    { path = "std::fs::remove_dir_all", reason = "Use tokio::fs::remove_dir_all instead for async operations" },
+    { path = "std::fs::rename", reason = "Use tokio::fs::rename instead for async operations" },
+    { path = "std::fs::copy", reason = "Use tokio::fs::copy instead for async operations" },
+    { path = "std::fs::metadata", reason = "Use tokio::fs::metadata instead for async operations" },
+    { path = "std::fs::read_dir", reason = "Use tokio::fs::read_dir instead for async operations" },
+    { path = "std::fs::read_link", reason = "Use tokio::fs::read_link instead for async operations" },
+    { path = "std::fs::canonicalize", reason = "Use tokio::fs::canonicalize instead for async operations" },
+    { path = "std::fs::hard_link", reason = "Use tokio::fs::hard_link instead for async operations" },
+    { path = "std::fs::soft_link", reason = "Use tokio::fs::soft_link instead for async operations" },
+    { path = "std::fs::symlink_metadata", reason = "Use tokio::fs::symlink_metadata instead for async operations" },
+    { path = "std::fs::set_permissions", reason = "Use tokio::fs::set_permissions instead for async operations" },
+]
 
 allow-expect-in-tests = true
-allow-unwrap-in-tests = true
+allow-unwrap-in-tests = false
 allow-panic-in-tests = true
 allow-dbg-in-tests = true

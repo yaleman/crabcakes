@@ -486,7 +486,9 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
+        let db_conn = crate::db::initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -494,7 +496,7 @@ mod tests {
             .method(&Method::GET)
             .uri("http://localhost:9000/bucket1/test.txt")
             .body(vec![])
-            .unwrap();
+            .expect("Failed to build test request");
 
         // Verify with signature required - should fail
         let result = verify_sigv4(request, cred_store, db, DEFAULT_REGION).await;
@@ -514,7 +516,9 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_not_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
+        let db_conn = crate::db::initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -522,7 +526,7 @@ mod tests {
             .method(&Method::GET)
             .uri("http://localhost:9000/bucket1/test.txt")
             .body(vec![])
-            .unwrap();
+            .expect("Failed to build test request");
 
         // Verify with signature not required - should return error indicating no auth
         let result = verify_sigv4(request, cred_store, db, DEFAULT_REGION).await;
@@ -542,7 +546,9 @@ mod tests {
     async fn test_verify_sigv4_with_malformed_auth_header() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database().await.unwrap();
+        let db_conn = crate::db::initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request with malformed Authorization header
@@ -551,7 +557,7 @@ mod tests {
             .uri("http://localhost:9000/bucket1/test.txt")
             .header(AUTHORIZATION, "Not a valid signature")
             .body(vec![])
-            .unwrap();
+            .expect("Failed to build test request");
 
         // Verify - should fail
         let result = verify_sigv4(request, cred_store, db, DEFAULT_REGION).await;
@@ -569,7 +575,7 @@ mod tests {
         let request = Request::builder()
             .header("x-amz-user", "testuser")
             .body(())
-            .unwrap();
+            .expect("Failed to build test request");
 
         let auth_context = AuthContext::from_request(&request);
 
@@ -594,7 +600,7 @@ mod tests {
                 ),
             )
             .body(())
-            .unwrap();
+            .expect("Failed to build test request");
 
         let auth_context = AuthContext::from_request(&request);
 
@@ -610,7 +616,9 @@ mod tests {
     #[test]
     fn test_auth_context_anonymous_fallback() {
         setup_test_logging();
-        let request = Request::builder().body(()).unwrap();
+        let request = Request::builder()
+            .body(())
+            .expect("Failed to build test request");
 
         let auth_context = AuthContext::from_request(&request);
 
@@ -624,7 +632,7 @@ mod tests {
         let request = Request::builder()
             .header(AUTHORIZATION, "InvalidAuthFormat")
             .body(())
-            .unwrap();
+            .expect("Failed to build test request");
 
         let auth_context = AuthContext::from_request(&request);
 
