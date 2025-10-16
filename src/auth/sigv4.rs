@@ -486,7 +486,9 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database().await.expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -514,7 +516,9 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_not_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database().await.expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -542,7 +546,9 @@ mod tests {
     async fn test_verify_sigv4_with_malformed_auth_header() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database().await.expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database()
+            .await
+            .expect("Failed to initialize test database");
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request with malformed Authorization header
@@ -610,7 +616,9 @@ mod tests {
     #[test]
     fn test_auth_context_anonymous_fallback() {
         setup_test_logging();
-        let request = Request::builder().body(()).expect("Failed to build test request");
+        let request = Request::builder()
+            .body(())
+            .expect("Failed to build test request");
 
         let auth_context = AuthContext::from_request(&request);
 

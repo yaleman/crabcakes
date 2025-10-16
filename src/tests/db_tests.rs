@@ -162,7 +162,10 @@ async fn test_put_tags_too_many() {
         .await;
     assert!(result.is_err(), "Should reject more than 10 tags");
     assert!(
-        result.expect_err("Should have returned error").to_string().contains("Too many tags"),
+        result
+            .expect_err("Should have returned error")
+            .to_string()
+            .contains("Too many tags"),
         "Error should mention too many tags"
     );
 }
@@ -178,7 +181,10 @@ async fn test_put_tags_empty_key() {
 
     assert!(result.is_err(), "Should reject empty tag key");
     assert!(
-        result.expect_err("Should have returned error").to_string().contains("cannot be empty"),
+        result
+            .expect_err("Should have returned error")
+            .to_string()
+            .contains("cannot be empty"),
         "Error should mention empty key"
     );
 }
@@ -196,7 +202,10 @@ async fn test_put_tags_key_too_long() {
 
     assert!(result.is_err(), "Should reject tag key > 128 characters");
     assert!(
-        result.expect_err("Should have returned error").to_string().contains("Tag key too long"),
+        result
+            .expect_err("Should have returned error")
+            .to_string()
+            .contains("Tag key too long"),
         "Error should mention key too long"
     );
 }
