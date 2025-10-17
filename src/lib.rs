@@ -36,7 +36,6 @@ pub mod request_handler;
 pub mod router;
 pub mod server;
 pub mod web;
-pub mod xml_responses;
 
 #[cfg(test)]
 mod tests;

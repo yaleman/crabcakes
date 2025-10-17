@@ -94,3 +94,10 @@ pub(crate) struct VacuumResult {
     pub(crate) success: bool,
     pub(crate) pages_freed: i64,
 }
+
+// Parse request body
+#[derive(serde::Deserialize)]
+pub(crate) struct PolicyRequest {
+    pub(crate) name: String,
+    pub(crate) policy: iam_rs::IAMPolicy,
+}

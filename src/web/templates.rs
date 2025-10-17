@@ -1,5 +1,5 @@
 use super::serde::*;
-use crate::constants::{S3Action, WebPage};
+use crate::constants::{PolicyAction, S3Action, WebPage};
 use crate::web::serde::PolicyInfo;
 
 use askama::Template;
@@ -53,6 +53,7 @@ pub(crate) struct PolicyDetailTemplate {
 #[template(path = "policy_form.html")]
 pub(crate) struct PolicyFormTemplate {
     pub(crate) page: &'static str,
+    pub(crate) action: PolicyAction,
     pub(crate) policy_name: String,
     pub(crate) policy_json: String,
 }

@@ -5,7 +5,7 @@ use std::{
 
 use chrono::Duration;
 use enum_iterator::Sequence;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// This is the temporary access key length
 pub(crate) static TEMP_ACCESS_KEY_LENGTH: usize = 20;
@@ -176,5 +176,27 @@ impl AsRef<str> for WebPage {
 impl Display for WebPage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_ref())
+    }
+}
+
+#[derive(Copy, Clone, Deserialize, Serialize)]
+#[serde(rename = "lowercase")]
+pub(crate) enum PolicyAction {
+    Create,
+    Edit,
+}
+
+impl PolicyAction {
+    pub(crate) fn is_edit(self) -> bool {
+        matches!(self, PolicyAction::Edit)
+    }
+}
+
+impl AsRef<str> for PolicyAction {
+    fn as_ref(&self) -> &'static str {
+        match self {
+            PolicyAction::Create => "create",
+            PolicyAction::Edit => "edit",
+        }
     }
 }

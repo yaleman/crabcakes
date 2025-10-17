@@ -44,13 +44,13 @@ use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
 use crate::web::handlers::respond_404;
 use crate::web::response_body_status;
-use crate::xml_responses::{
+use crate::web::xml_responses::{
     CompleteMultipartUploadRequest, CompleteMultipartUploadResponse, CopyObjectResponse,
     CopyPartResponse, DeleteError, DeleteRequest, DeleteResponse, DeletedObject,
     GetBucketLocationResponse, GetObjectAttributesResponse, GetObjectTaggingResponse,
-    InitiateMultipartUploadResponse, ListBucketResponse, ListBucketV1Response, ListBucketsResponse,
-    ListMultipartUploadsResponse, ListPartsResponse, MultipartUploadItem, PartItem, Tag, TagSet,
-    TaggingRequest, to_xml,
+    InitiateMultipartUploadResponse, ListAllMyBucketsResult, ListBucketResponse,
+    ListBucketV1Response, ListMultipartUploadsResponse, ListPartsResponse, MultipartUploadItem,
+    PartItem, Tag, TagSet, TaggingRequest, to_xml,
 };
 
 static CT_APPLICATION_XML: &str = "application/xml";
@@ -142,6 +142,12 @@ impl S3Handler {
         // Verify signature using appropriate method
         let (parts, authenticatorresponse) = if is_streaming {
             debug!("Using streaming signature verification");
+            debug!(
+                uri = %parts.uri,
+                method = %parts.method,
+                headers = ?parts.headers,
+                "Streaming request details before verification"
+            );
 
             let creds = self.credentials_store.credentials.clone();
 
@@ -1024,7 +1030,7 @@ impl S3Handler {
         match self.filesystem.list_buckets().await {
             Ok(buckets) => {
                 debug!(count = buckets.len(), "Listed buckets");
-                let response = ListBucketsResponse::from_buckets(buckets);
+                let response = ListAllMyBucketsResult::from_buckets(buckets);
 
                 match to_xml(response) {
                     Ok(xml) => Self::to_xml_response(xml),

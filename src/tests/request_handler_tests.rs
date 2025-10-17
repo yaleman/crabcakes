@@ -264,7 +264,7 @@ async fn test_api_update_policy_existing() {
     let updated_policy: iam_rs::IAMPolicy =
         serde_json::from_value(updated_policy_json).expect("Failed to parse updated policy JSON");
     let result = handler
-        .api_update_policy(first_policy.name.clone(), updated_policy)
+        .api_update_policy(&first_policy.name, updated_policy)
         .await;
 
     assert!(result.is_ok(), "Should update existing policy");
@@ -287,7 +287,7 @@ async fn test_api_update_policy_nonexistent() {
     let policy: iam_rs::IAMPolicy =
         serde_json::from_value(policy_json).expect("Failed to parse policy JSON");
     let result = handler
-        .api_update_policy("nonexistent-policy".to_string(), policy)
+        .api_update_policy("nonexistent-policy", policy)
         .await;
 
     assert!(result.is_err(), "Should fail to update nonexistent policy");
