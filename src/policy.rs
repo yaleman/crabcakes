@@ -298,7 +298,7 @@ impl PolicyStore {
                 }
             }
         };
-        debug!(result = format!("{:?}", res), "Finished evaluating result");
+        debug!(decision = %res.decision, context = ?res.context, matched_statements = ?res.matched_statements, "Finished evaluating result");
         Ok((Some(res.clone()), res.decision))
     }
 
