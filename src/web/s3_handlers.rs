@@ -305,7 +305,7 @@ impl S3Handler {
                             return Some(self.internal_error_response());
                         }
                     };
-                debug!(request = ?iam_request, "asdfasfsEvaluating IAM policy for request");
+                debug!(request = ?iam_request, "Evaluating IAM policy for request");
 
                 match self.policy_store.evaluate_request(&iam_request).await {
                     Ok(Decision::Allow) => {
