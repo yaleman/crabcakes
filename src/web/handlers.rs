@@ -25,9 +25,9 @@ use serde_json::json;
 use tower_sessions::Session;
 use tracing::{debug, instrument};
 
-use crate::policy::PolicyStore;
 use crate::policy_analyzer;
 use crate::{auth::OAuthClient, db::entities::temporary_credentials};
+use crate::{constants::PolicyAction, policy::PolicyStore};
 use crate::{constants::TRACE_STATUS_CODE, filesystem::FilesystemService};
 use crate::{
     constants::{CSRF_TOKEN_LENGTH, SessionKey, WebPage},
@@ -113,13 +113,8 @@ impl WebHandler {
             (Method::POST, "/admin/api/policies") => {
                 self.handle_api_create_policy(req, session).await
             }
-            (Method::PUT, path) if path.starts_with("/admin/api/policies/") => {
-                self.handle_api_update_policy(
-                    req,
-                    session,
-                    path.strip_prefix("/admin/api/policies/").unwrap_or(""),
-                )
-                .await
+            (Method::PUT, "/admin/api/policies") => {
+                self.handle_api_update_policy(req, session).await
             }
             (Method::DELETE, path) if path.starts_with("/admin/api/policies/") => {
                 self.handle_api_delete_policy(
@@ -211,17 +206,15 @@ impl WebHandler {
                 (Method::GET, "/admin/policy_troubleshooter") => {
                     self.get_policy_troubleshooter(req, session).await
                 }
-                (Method::GET, path)
-                    if path.starts_with("/admin/policies/") && path.ends_with("/edit") =>
-                {
-                    let policy_name = path
-                        .strip_prefix("/admin/policies/")
-                        .and_then(|s| s.strip_suffix("/edit"))
-                        .unwrap_or("");
-                    self.get_policy_edit(session, policy_name).await
+                (Method::GET, path) if path.strip_prefix("/admin/policies/edit/").is_some() => {
+                    if let Some(policy_name) = path.strip_prefix("/admin/policies/edit/") {
+                        self.get_policy_edit(session, policy_name).await
+                    } else {
+                        Ok(respond_404())
+                    }
                 }
-                (Method::GET, path) if path.starts_with("/admin/policies/") => {
-                    let policy_name = path.strip_prefix("/admin/policies/").unwrap_or("");
+                (Method::GET, path) if path.strip_prefix("/admin/policies/view/").is_some() => {
+                    let policy_name = path.strip_prefix("/admin/policies/view/").unwrap_or("");
                     self.get_policy_detail(session, policy_name).await
                 }
                 (Method::GET, "/admin/identities") => {
@@ -660,7 +653,7 @@ impl WebHandler {
         self.build_html_response(template)
     }
 
-    /// GET /admin/policies/{name} - View policy details
+    /// GET /admin/policies/view/{name} - View policy details
     async fn get_policy_detail(
         &self,
         session: Session,
@@ -769,6 +762,7 @@ impl WebHandler {
 
         let template = PolicyFormTemplate {
             page: WebPage::Policies.as_ref(),
+            action: PolicyAction::Create,
             policy_name: String::new(),
             policy_json: String::new(),
         };
@@ -776,7 +770,7 @@ impl WebHandler {
         self.build_html_response(template)
     }
 
-    /// GET /admin/policies/{name}/edit - Show form for editing a policy
+    /// GET /admin/policies/edit/{name} - Show form for editing a policy
     async fn get_policy_edit(
         &self,
         session: Session,
@@ -797,6 +791,7 @@ impl WebHandler {
 
         let template = PolicyFormTemplate {
             page: WebPage::Policies.as_ref(),
+            action: PolicyAction::Edit,
             policy_name: policy_name.to_string(),
             policy_json,
         };
@@ -1298,17 +1293,9 @@ impl WebHandler {
         let body_str = std::str::from_utf8(&body_bytes)
             .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
 
-        // Parse request body
-        #[derive(serde::Deserialize)]
-        struct CreatePolicyRequest {
-            name: String,
-            policy: iam_rs::IAMPolicy,
-        }
-
-        let request: CreatePolicyRequest = serde_json::from_str(body_str)
+        let request: PolicyRequest = serde_json::from_str(body_str)
             .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
 
-        // Call extracted business logic
         self.request_handler
             .api_create_policy(&request.name, request.policy)
             .await?;
@@ -1325,7 +1312,6 @@ impl WebHandler {
         &self,
         req: Request<Incoming>,
         session: Session,
-        policy_name: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Check authentication
         self.check_auth(&session).await?;
@@ -1342,7 +1328,7 @@ impl WebHandler {
             .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
 
         // Parse policy from request body
-        let policy: iam_rs::IAMPolicy = match serde_json::from_str(body_str) {
+        let policy: PolicyRequest = match serde_json::from_str(body_str) {
             Ok(p) => p,
             Err(e) => {
                 return self.build_json_response(json!({
@@ -1354,13 +1340,13 @@ impl WebHandler {
 
         // Call extracted business logic
         self.request_handler
-            .api_update_policy(policy_name.to_string(), policy)
+            .api_update_policy(&policy.name, policy.policy)
             .await?;
 
         // Return success
         let json = json!({
             "success": true,
-            "name": policy_name
+            "name": policy.name
         });
 
         self.build_json_response(json)

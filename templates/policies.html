@@ -21,13 +21,13 @@
         {% for policy in policies %}
         <tr>
             <td>
-                <a href="/admin/policies/{{ policy.name }}" class="policy-link">
+                <a href="/admin/policies/view/{{ policy.name }}" class="policy-link">
                     {{ policy.name }}
                 </a>
             </td>
             <td>{{ policy.statement_count }}</td>
             <td>
-                <a href="/admin/policies/{{ policy.name }}"
+                <a href="/admin/policies/view/{{ policy.name }}"
                     class="btn btn-primary btn-small">
                     View Details
                 </a>

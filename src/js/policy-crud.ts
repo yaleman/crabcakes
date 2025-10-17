@@ -3,6 +3,7 @@ import { authenticatedFetch } from './csrf';
 import { ErrorMessage } from './shared';
 
 interface PolicyResponse {
+    error?: any;
     name?: string;
     message?: string;
 }
@@ -32,28 +33,41 @@ async function deletePolicy(policyName: string): Promise<void> {
 }
 
 
-async function savePolicy(policyName: string, policyData: any): Promise<PolicyResponse> {
+async function savePolicy(policyName: string, policyAction: string, policyData: any): Promise<PolicyResponse> {
     try {
-        const isUpdate = policyName && policyName !== '';
-        const url = isUpdate ? `/admin/api/policies/${policyName}` : '/admin/api/policies';
-        const method = isUpdate ? 'PUT' : 'POST';
-
-        const body = isUpdate ? policyData : { name: policyName, policy: policyData };
+        const url = `/admin/api/policies`;
+        const method = policyAction === 'update' ? 'PUT' : 'POST';
+        const body = { name: policyName, policy: policyData };
 
         const response = await authenticatedFetch(url, {
             method: method,
             body: body,
         });
-
-        if (!response.ok) {
-            const error = await response.json() as ErrorMessage;
-            throw new Error(`Failed to save policy: ${error.error}`);
+        const jsonResponse = await response.json();
+        if (!response.ok || "error" in jsonResponse) {
+            const error = jsonResponse as ErrorMessage;
+            console.error(`Error saving policy: ${error.error}`);
+            throw new Error(JSON.stringify(error));
         }
-
+        console.debug!(`Policy saved successfully method=${method} name=${policyName}`);
         const result: PolicyResponse = await response.json();
         return result;
     } catch (error) {
-        console.error('Error saving policy:', error);
+        console.error!('Error saving policy:', error);
+        const errorMessage = error instanceof Error ? JSON.parse(error.message) as ErrorMessage : { error: String(error) };
+        const message = typeof errorMessage.error === 'object' ? JSON.stringify(errorMessage.error) : `${errorMessage.error}` || 'An unknown error occurred';
+
+        const errorNotification = document.getElementById('error-notification') as HTMLDivElement | null;
+
+        if (errorNotification) {
+            errorNotification.textContent = message;
+            while (errorNotification.classList.contains('error-notification-hide')) {
+                errorNotification.classList.remove('error-notification-hide');
+            }
+            errorNotification.classList.remove('error-notification-empty');
+        } else {
+            console.error("Error notification element not found");
+        }
         throw error;
     }
 }
@@ -64,18 +78,25 @@ function initPolicyForm(): void {
     if (!form) return;
 
     form.addEventListener('submit', async (e: Event) => {
+        console.debug("Submitting policy form");
         e.preventDefault();
 
         const policyNameInput = document.getElementById('policy-name') as HTMLInputElement;
         const policyJsonInput = document.getElementById('policy-json') as HTMLTextAreaElement;
+        const policyActionInput = document.getElementById('policy-action') as HTMLTextAreaElement;
         // strip all non-url-safe characters from policy name for redirect
         const policyName = encodeURIComponent(policyNameInput.value);
         const policyJson = policyJsonInput.value;
+        const policyAction = policyActionInput.value;
 
         try {
             const policyData = JSON.parse(policyJson);
-            await savePolicy(policyName, policyData);
-            window.location.href = `/admin/policies/${policyName}`;
+            await savePolicy(policyName, policyAction, policyData).then((res) => {
+                console.debug(`Policy saved successfully: ${JSON.stringify(res)}`);
+                window.location.href = `/admin/policies/view/${policyName}`;
+            }).catch((err) => {
+                console.error(`Error saving policy: ${err}`);
+            });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
 
@@ -114,9 +135,10 @@ function initPolicyPages(): void {
     Array.from(errors).forEach((errorNotification) => {
         console.debug(errorNotification.textContent.trim().length);
         if (errorNotification.textContent.trim().length == 0) {
-            console.debug("empty");
+            console.debug("error notification is empty");
             errorNotification.classList.add('error-notification-hide');
         } else {
+            console.debug("error notification is not empty");
             errorNotification.classList.remove('error-notification-hide');
         }
     });
