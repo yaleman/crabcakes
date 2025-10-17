@@ -23,7 +23,7 @@ if [[ -z "$(which -a aws)" ]]; then
     exit 1
 fi
 
-pkill -f target/debug/crabcakes
+pkill -f 'target/debug/crabcakes.*--port.*test_config'
 
 
 # Use test credentials from test_config/credentials/testuser.json
