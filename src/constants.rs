@@ -187,7 +187,7 @@ pub(crate) enum PolicyAction {
 }
 
 impl PolicyAction {
-    pub(crate) fn is_edit(&self) -> bool {
+    pub(crate) fn is_edit(self) -> bool {
         matches!(self, PolicyAction::Edit)
     }
 }
