@@ -78,9 +78,7 @@ mod tests {
     async fn test_cleanup_task_no_expired_data() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db = initialize_in_memory_database().await;
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         let cleanup = CleanupTask::new(db_service, 1);
@@ -94,9 +92,7 @@ mod tests {
     async fn test_cleanup_task_cleans_expired_pkce() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db = initialize_in_memory_database().await;
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired PKCE state (expired 1 hour ago)
@@ -153,9 +149,7 @@ mod tests {
     async fn test_cleanup_task_cleans_expired_credentials() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db = initialize_in_memory_database().await;
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         // Store expired credentials (expired 1 hour ago)
@@ -218,9 +212,7 @@ mod tests {
     async fn test_cleanup_task_cleans_both_types() {
         setup_test_logging();
 
-        let db = initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db = initialize_in_memory_database().await;
         let db_service = Arc::new(DBService::new(Arc::new(db)));
 
         let expired_at = chrono::Utc::now() - *MAX_TEMP_CREDS_DURATION;

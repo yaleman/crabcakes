@@ -93,9 +93,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_no_orphans() {
         setup_test_logging();
-        let db = initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize in-memory database");
+        let db = initialize_in_memory_database().await;
         let temp_dir = setup_test_files().await;
         let fs = Arc::new(FilesystemService::new(temp_dir.path().to_path_buf())); // Use a temp directory for testing
 

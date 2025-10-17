@@ -141,7 +141,7 @@ impl Server {
         let db = if use_in_memory_db {
             #[cfg(test)]
             {
-                initialize_in_memory_database().await?
+                initialize_in_memory_database().await
             }
             #[cfg(not(test))]
             {

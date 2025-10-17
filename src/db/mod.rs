@@ -72,14 +72,20 @@ async fn configure_sqlite_pragmas(db: &DatabaseConnection) -> Result<(), DbErr> 
 
 /// Initialize in-memory database for testing
 #[cfg(test)]
-pub async fn initialize_in_memory_database() -> Result<DatabaseConnection, DbErr> {
-    let db = Database::connect("sqlite::memory:").await?;
+pub async fn initialize_in_memory_database() -> DatabaseConnection {
+    let db = Database::connect("sqlite::memory:")
+        .await
+        .expect("Failed to connect to in-memory database");
 
     // Configure SQLite PRAGMAs (even for in-memory, for consistency)
-    configure_sqlite_pragmas(&db).await?;
+    configure_sqlite_pragmas(&db)
+        .await
+        .expect("Failed to configure SQLite PRAGMAs for in-memory database");
 
     // Run migrations
-    Migrator::up(&db, None).await?;
+    Migrator::up(&db, None)
+        .await
+        .expect("Failed to run migrations on in-memory database");
 
-    Ok(db)
+    db
 }

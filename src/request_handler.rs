@@ -52,11 +52,7 @@ impl RequestHandler {
 
         let tempdir = setup_test_files().await;
 
-        let db = Arc::new(
-            initialize_in_memory_database()
-                .await
-                .expect("Failed to init in-memory DB"),
-        );
+        let db = Arc::new(initialize_in_memory_database().await);
         let db = Arc::new(DBService::new(db));
 
         // Create temp credential directory for testing

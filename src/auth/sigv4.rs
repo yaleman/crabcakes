@@ -486,9 +486,7 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database().await;
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -516,9 +514,7 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_not_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database().await;
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -546,9 +542,7 @@ mod tests {
     async fn test_verify_sigv4_with_malformed_auth_header() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database().await;
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request with malformed Authorization header
