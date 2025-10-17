@@ -227,7 +227,7 @@ impl RequestHandler {
 
     pub(crate) async fn api_update_policy(
         &self,
-        name: String,
+        name: &str,
         policy: iam_rs::IAMPolicy,
     ) -> Result<(), CrabCakesError> {
         // PolicyStore handles validation and file writing

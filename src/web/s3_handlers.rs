@@ -142,6 +142,12 @@ impl S3Handler {
         // Verify signature using appropriate method
         let (parts, authenticatorresponse) = if is_streaming {
             debug!("Using streaming signature verification");
+            debug!(
+                uri = %parts.uri,
+                method = %parts.method,
+                headers = ?parts.headers,
+                "Streaming request details before verification"
+            );
 
             let creds = self.credentials_store.credentials.clone();
 

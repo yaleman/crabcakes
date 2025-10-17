@@ -392,20 +392,16 @@ impl PolicyStore {
     }
 
     /// Update an existing policy
-    pub async fn update_policy(
-        &self,
-        name: String,
-        policy: IAMPolicy,
-    ) -> Result<(), CrabCakesError> {
+    pub async fn update_policy(&self, name: &str, policy: IAMPolicy) -> Result<(), CrabCakesError> {
         // Validate policy name (no path traversal)
-        if !self.is_valid_name(&name) {
+        if !self.is_valid_name(name) {
             return Err(CrabCakesError::InvalidPolicyName);
         }
 
         // Check if policy exists
         {
             let policies = self.policies.read().await;
-            if !policies.contains_key(&name) {
+            if !policies.contains_key(name) {
                 return Err(CrabCakesError::InvalidPolicyName);
             }
         }
@@ -419,7 +415,7 @@ impl PolicyStore {
         // Update in-memory store
         {
             let mut policies = self.policies.write().await;
-            policies.insert(name.clone(), policy);
+            policies.insert(name.to_string(), policy);
         }
 
         // Clear cache
