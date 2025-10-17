@@ -52,8 +52,7 @@ pub struct S3Object {
 }
 
 #[derive(Serialize)]
-#[serde(rename = "ListAllMyBucketsResult")]
-pub struct ListBucketsResponse {
+pub struct ListAllMyBucketsResult {
     #[serde(rename = "Owner")]
     pub owner: Owner,
     #[serde(rename = "Buckets")]
@@ -115,7 +114,7 @@ impl ListBucketResponse {
     }
 }
 
-impl ListBucketsResponse {
+impl ListAllMyBucketsResult {
     pub fn from_buckets(bucket_names: Vec<String>) -> Self {
         let now = Utc::now();
         // TODO: this should really be the actual bucket creation date from the filesystem

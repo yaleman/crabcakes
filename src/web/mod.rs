@@ -9,6 +9,7 @@ pub(crate) mod serde;
 pub(crate) mod service;
 /// Web templates
 pub(crate) mod templates;
+pub mod xml_responses;
 
 pub(crate) fn response_body_status(body: Bytes, status: StatusCode) -> Response<Full<Bytes>> {
     let mut res = Response::new(Full::new(body));

@@ -6,7 +6,7 @@ pub(crate) mod server_tests;
 pub(crate) mod web_handlers_tests;
 
 use crate::constants::SECRET_ACCESS_KEY_LENGTH;
-use crate::xml_responses::to_xml;
+use crate::web::xml_responses::{ListAllMyBucketsResult, ListBucketResponse, to_xml};
 
 use super::*;
 use std::collections::HashSet;
@@ -114,7 +114,7 @@ async fn test_xml_responses() {
         etag: "\"abc123\"".to_string(),
     }];
 
-    let response = xml_responses::ListBucketResponse::new(
+    let response = ListBucketResponse::new(
         "test-bucket".to_string(),
         "".to_string(),
         1000,
@@ -130,13 +130,12 @@ async fn test_xml_responses() {
 
 #[tokio::test]
 async fn test_list_buckets_xml() {
-    let response =
-        xml_responses::ListBucketsResponse::from_buckets(vec!["test-bucket".to_string()]);
+    let response = ListAllMyBucketsResult::from_buckets(vec!["test-bucket".to_string()]);
     let xml = to_xml(response).expect("Should serialize to XML");
-
+    dbg!(&xml);
     assert!(xml.contains("<ListAllMyBucketsResult>"));
     assert!(xml.contains("<Name>test-bucket</Name>"));
-    assert!(xml.contains("<Owner>"));
+    assert!(xml.contains("<Owner><ID>crabcakes</ID></Owner>"));
 }
 
 #[test]
