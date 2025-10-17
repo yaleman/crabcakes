@@ -35,7 +35,7 @@ use crate::body_buffer::BufferedBody;
 use crate::constants::{
     AWS4_HMAC_SHA256, MOCK_ACCOUNT_ID, RESERVED_BUCKET_NAMES, S3, S3Action, TRACE_BUCKET,
     TRACE_COPY_SOURCE, TRACE_HAS_RANGE_HEADER, TRACE_KEY, TRACE_METHOD, TRACE_REMOTE_ADDR,
-    TRACE_S3_ACTION, TRACE_STATUS_CODE, TRACE_URI, TRACE_USER,
+    TRACE_S3_ACTION, TRACE_STATUS_CODE, TRACE_URI, TRACE_USER, X_AMZ_DECODED_CONTENT_LENGTH,
 };
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
@@ -63,6 +63,27 @@ pub struct S3Handler {
     multipart_manager: Arc<RwLock<MultipartManager>>,
     db_service: Arc<DBService>,
     region: String,
+}
+
+fn is_streaming_request(parts: &Parts) -> bool {
+    if parts.headers.get(X_AMZ_DECODED_CONTENT_LENGTH).is_none() {
+        debug!("{X_AMZ_DECODED_CONTENT_LENGTH} header not found, not a streaming request");
+        return false;
+    }
+    if let Some(content_sha256) = parts.headers.get(X_AMZ_CONTENT_SHA256) {
+        debug!("{X_AMZ_CONTENT_SHA256} header found");
+        if let Ok(sha_str) = content_sha256.to_str() {
+            if sha_str.starts_with("STREAMING-") {
+                debug!("Detected streaming signature in request");
+                return true;
+            } else if sha_str == "UNSIGNED-PAYLOAD" {
+                debug!("Detected unsigned payload in request");
+                return true;
+            }
+        }
+    }
+    debug!("{X_AMZ_CONTENT_SHA256} and other streaming header checks failed.");
+    false
 }
 
 impl S3Handler {
@@ -119,16 +140,10 @@ impl S3Handler {
                 }
             };
 
+        debug!(x_amz_decoded_content_length = ?parts.headers.get(X_AMZ_DECODED_CONTENT_LENGTH), "Checking for {X_AMZ_DECODED_CONTENT_LENGTH} header");
+
         // Check if this is a streaming/chunked request
-        let is_streaming = if let Some(content_sha256) = parts.headers.get(X_AMZ_CONTENT_SHA256) {
-            if let Ok(sha_str) = content_sha256.to_str() {
-                sha_str.starts_with("STREAMING-") || sha_str == "UNSIGNED-PAYLOAD"
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+        let is_streaming = is_streaming_request(&parts);
 
         // Verify signature using appropriate method
         let (parts, authenticatorresponse) = if is_streaming {

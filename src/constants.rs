@@ -15,6 +15,9 @@ pub(crate) static SECRET_ACCESS_KEY_LENGTH: usize = 40;
 /// The signature header value for AWS Signature Version 4
 pub static AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
+/// Header for AWS S3 requests that use chunked transfer encoding with signature v4
+pub(crate) static X_AMZ_DECODED_CONTENT_LENGTH: &str = "x-amz-decoded-content-length";
+
 /// How long a OAuth-provided temporary credential will live
 pub(crate) static MAX_TEMP_CREDS_DURATION: LazyLock<Duration> =
     LazyLock::new(|| Duration::seconds(3600));
