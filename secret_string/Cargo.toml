@@ -1,0 +1,12 @@
+[package]
+name = "secret-string"
+version = "0.0.1"
+readme = "README.md"
+description = "A wrapper around strings that hides their contents when printed or formatted for debugging."
+
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
