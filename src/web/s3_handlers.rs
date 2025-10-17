@@ -119,15 +119,6 @@ impl S3Handler {
                 }
             };
 
-        // Get the body as Vec<u8> for signature verification
-        let body_vec = match buffered_body.to_vec().await {
-            Ok(vec) => vec,
-            Err(e) => {
-                error!(error = %e, "Failed to read buffered body");
-                return Err(self.internal_error_response());
-            }
-        };
-
         // Check if this is a streaming/chunked request
         let is_streaming = if let Some(content_sha256) = parts.headers.get(X_AMZ_CONTENT_SHA256) {
             if let Ok(sha_str) = content_sha256.to_str() {
@@ -226,6 +217,14 @@ impl S3Handler {
                 );
             }
 
+            // Get the body as Vec<u8> for signature verification
+            let body_vec = match buffered_body.to_vec().await {
+                Ok(vec) => vec,
+                Err(e) => {
+                    error!(error = %e, "Failed to read buffered body");
+                    return Err(self.internal_error_response());
+                }
+            };
             let http_request = http::Request::from_parts(normalized_parts, body_vec.clone());
 
             match verify_sigv4(
