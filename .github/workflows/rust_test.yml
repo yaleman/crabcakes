@@ -30,10 +30,15 @@ jobs:
         with:
           packages: cargo-tarpaulin
 
-      - name: "Run cargo test"
+      - name: "Run cargo test with coverage"
         run: |
           cargo install cargo-tarpaulin
-          cargo tarpaulin --coveralls ${{ secrets.COVERALLS_REPO_TOKEN }}
+          cargo tarpaulin --workspace --all-features --coveralls ${{ secrets.COVERALLS_REPO_TOKEN }}
+        if: github.actor != 'dependabot[bot]'
+      - name: "Run cargo test without coverage"
+        run: |
+          cargo test --workspace --all-features
+        if: github.actor != 'dependabot[bot]'
       - name: "Build the workspace (release)"
         run: cargo build --workspace --release
       - name: Run sccache stat for check
