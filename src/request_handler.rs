@@ -2,6 +2,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use iam_rs::{Arn, EvaluationOptions, IAMRequest, PolicyEvaluator, PrincipalId};
+use secret_string::SecretString;
 use tracing::debug;
 
 use crate::{
@@ -250,7 +251,7 @@ impl RequestHandler {
     pub(crate) async fn api_create_credential(
         &self,
         access_key_id: String,
-        secret_access_key: String,
+        secret_access_key: SecretString<String>,
     ) -> Result<(), CrabCakesError> {
         // CredentialStore handles validation and file writing
         self.credentials_store
@@ -261,7 +262,7 @@ impl RequestHandler {
     pub(crate) async fn api_update_credential(
         &self,
         access_key_id: String,
-        secret_access_key: String,
+        secret_access_key: SecretString<String>,
     ) -> Result<(), CrabCakesError> {
         // CredentialStore handles validation and file writing
         self.credentials_store

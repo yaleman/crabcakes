@@ -17,6 +17,8 @@ pub static AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
 /// Header for AWS S3 requests that use chunked transfer encoding with signature v4
 pub(crate) static X_AMZ_DECODED_CONTENT_LENGTH: &str = "x-amz-decoded-content-length";
+/// Trailer header
+pub(crate) static X_AMZ_TRAILER: &str = "x-amz-trailer";
 
 /// How long a OAuth-provided temporary credential will live
 pub(crate) static MAX_TEMP_CREDS_DURATION: LazyLock<Duration> =
@@ -43,9 +45,12 @@ pub(crate) static TRACE_COPY_SOURCE: &str = "copy_source";
 pub(crate) static TRACE_HAS_RANGE_HEADER: &str = "has_range_header";
 pub(crate) static TRACE_USER: &str = "user";
 
+pub(crate) static MULTIPART_PATH_PREFIX: &str = ".multipart";
+
 /// Reserved bucket names that cannot be used as S3 buckets
 /// These are reserved for the admin UI and API endpoints
 pub(crate) static RESERVED_BUCKET_NAMES: &[&str] = &[
+    MULTIPART_PATH_PREFIX,
     "admin",
     "api",
     "login",

@@ -20,6 +20,7 @@ use hyper::{
     Request, Response, StatusCode,
     body::{Bytes, Incoming},
 };
+use secret_string::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tower_sessions::Session;
@@ -1424,7 +1425,10 @@ impl WebHandler {
 
         // Call extracted business logic
         self.request_handler
-            .api_create_credential(request.access_key_id.clone(), request.secret_access_key)
+            .api_create_credential(
+                request.access_key_id.clone(),
+                request.secret_access_key.into(),
+            )
             .await?;
 
         // Return success
@@ -1466,7 +1470,10 @@ impl WebHandler {
 
         // Call extracted business logic
         self.request_handler
-            .api_update_credential(access_key_id.to_string(), request.secret_access_key)
+            .api_update_credential(
+                access_key_id.to_string(),
+                SecretString::from(request.secret_access_key),
+            )
             .await?;
 
         // Return success

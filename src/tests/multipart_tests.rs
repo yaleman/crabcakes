@@ -1,6 +1,6 @@
 //! Tests for multipart upload functionality
 
-use crate::multipart::MultipartManager;
+use crate::{logging::setup_test_logging, multipart::MultipartManager};
 
 #[tokio::test]
 async fn test_create_multipart_upload() {
@@ -37,12 +37,13 @@ async fn test_get_metadata_success() {
 
 #[tokio::test]
 async fn test_get_metadata_not_found() {
+    setup_test_logging();
     let (manager, _temp_dir) = MultipartManager::new_test();
 
     let result = manager
         .get_metadata("test-bucket", "nonexistent-upload-id")
         .await;
-
+    dbg!(&result);
     assert!(result.is_err());
 }
 

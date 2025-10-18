@@ -1,6 +1,6 @@
 //! Centralized error types for the crabcakes S3 server.
 
-use std::{error::Error, net::AddrParseError};
+use std::{error::Error, net::AddrParseError, path::PathBuf};
 
 use askama::Template;
 use http::{
@@ -21,6 +21,7 @@ use crate::web::templates::ErrorTemplate;
 #[derive(Serialize, Debug)]
 pub enum CrabCakesError {
     BucketNotFound(String),
+    FileNotFound(PathBuf),
     Configuration(String),
     CredentialAlreadyExists,
     Database(String),
@@ -109,6 +110,9 @@ impl std::fmt::Display for CrabCakesError {
                 f.write_str("Invalid Secret Length, should be 40 characters")
             }
             CrabCakesError::InvalidBucketName => f.write_str("Invalid Bucket Name"),
+            CrabCakesError::FileNotFound(path) => {
+                write!(f, "File not found: {}", path.display())
+            }
         }
     }
 }

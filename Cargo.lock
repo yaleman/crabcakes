@@ -1099,6 +1099,7 @@ dependencies = [
  "scratchstack-aws-signature",
  "sea-orm",
  "sea-orm-migration",
+ "secret-string",
  "serde",
  "serde_json",
  "serde_with",
@@ -3967,6 +3968,15 @@ dependencies = [
  "pkcs8 0.10.2",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "secret-string"
+version = "0.0.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_with",
 ]
 
 [[package]]
