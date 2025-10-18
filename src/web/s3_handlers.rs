@@ -35,7 +35,8 @@ use crate::body_buffer::BufferedBody;
 use crate::constants::{
     AWS4_HMAC_SHA256, MOCK_ACCOUNT_ID, RESERVED_BUCKET_NAMES, S3, S3Action, TRACE_BUCKET,
     TRACE_COPY_SOURCE, TRACE_HAS_RANGE_HEADER, TRACE_KEY, TRACE_METHOD, TRACE_REMOTE_ADDR,
-    TRACE_S3_ACTION, TRACE_STATUS_CODE, TRACE_URI, TRACE_USER,
+    TRACE_S3_ACTION, TRACE_STATUS_CODE, TRACE_URI, TRACE_USER, X_AMZ_DECODED_CONTENT_LENGTH,
+    X_AMZ_TRAILER,
 };
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
@@ -63,6 +64,31 @@ pub struct S3Handler {
     multipart_manager: Arc<RwLock<MultipartManager>>,
     db_service: Arc<DBService>,
     region: String,
+}
+
+/// Checks the request headers to determine if this is a streaming request
+fn is_streaming_request(parts: &Parts) -> bool {
+    if let Some(content_sha256) = parts.headers.get(X_AMZ_CONTENT_SHA256) {
+        debug!("{X_AMZ_CONTENT_SHA256} header found");
+        if let Ok(sha_str) = content_sha256.to_str() {
+            if let Some(decoded_content_length) = parts.headers.get(X_AMZ_DECODED_CONTENT_LENGTH) {
+                debug!(decoded_content_length = ?decoded_content_length, "{X_AMZ_DECODED_CONTENT_LENGTH} header found");
+            } else {
+                debug!(
+                    "{X_AMZ_DECODED_CONTENT_LENGTH} header not found, might not be a vaid streaming request!"
+                );
+            }
+            if sha_str.starts_with("STREAMING-") {
+                debug!("Detected streaming signature in request");
+                return true;
+            } else if sha_str == "UNSIGNED-PAYLOAD" {
+                debug!("Detected unsigned payload in request");
+                return true;
+            }
+        }
+    }
+    debug!("{X_AMZ_CONTENT_SHA256} and other streaming header checks failed.");
+    false
 }
 
 impl S3Handler {
@@ -119,16 +145,10 @@ impl S3Handler {
                 }
             };
 
+        debug!(x_amz_trailer = ?parts.headers.get(X_AMZ_TRAILER), "Checking for {X_AMZ_TRAILER} header");
+
         // Check if this is a streaming/chunked request
-        let is_streaming = if let Some(content_sha256) = parts.headers.get(X_AMZ_CONTENT_SHA256) {
-            if let Ok(sha_str) = content_sha256.to_str() {
-                sha_str.starts_with("STREAMING-") || sha_str == "UNSIGNED-PAYLOAD"
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+        let is_streaming = is_streaming_request(&parts);
 
         // Verify signature using appropriate method
         let (parts, authenticatorresponse) = if is_streaming {
@@ -147,7 +167,7 @@ impl S3Handler {
                 async move {
                     let creds_reader = creds.read().await;
                     if let Some(sec) = (*creds_reader).get(req.access_key()) {
-                        let secret_key = KSecretKey::from_str(&sec.clone()).map_err(|err| {
+                        let secret_key = KSecretKey::from_str(sec.value()).map_err(|err| {
                             error!(error=%err, "Failed to parse secret key");
                             tower::BoxError::from("Failed to parse secret key")
                         })?;
@@ -215,6 +235,7 @@ impl S3Handler {
                         self.internal_error_response()
                     })?,
                 );
+                debug!(host = %authority.as_str(), "Added missing Host header from URI authority");
             }
 
             // Get the body as Vec<u8> for signature verification
@@ -225,10 +246,8 @@ impl S3Handler {
                     return Err(self.internal_error_response());
                 }
             };
-            let http_request = http::Request::from_parts(normalized_parts, body_vec.clone());
-
             match verify_sigv4(
-                http_request,
+                http::Request::from_parts(normalized_parts, body_vec),
                 self.credentials_store.clone(),
                 self.db_service.clone(),
                 &self.region,
@@ -237,7 +256,11 @@ impl S3Handler {
             {
                 Ok((parts, _body, response)) => (parts, response),
                 Err(e) => {
-                    warn!(error = %e, "Signature verification failed");
+                    debug!(headers = ?parts.headers, "Request headers at time of signature failure");
+                    warn!(
+                        method = parts.method.as_str(),
+                        uri = parts.uri.path(),
+                        error = %e, "Signature verification failed");
                     return Err(self
                         .unauthorized_response(&format!("Signature verification failed: {}", e)));
                 }
@@ -305,7 +328,7 @@ impl S3Handler {
                             return Some(self.internal_error_response());
                         }
                     };
-                debug!(request = ?iam_request, "asdfasfsEvaluating IAM policy for request");
+                debug!(request = ?iam_request, "Evaluating IAM policy for request");
 
                 match self.policy_store.evaluate_request(&iam_request).await {
                     Ok(Decision::Allow) => {
@@ -523,22 +546,12 @@ impl S3Handler {
                         && part_number_opt.is_some()
                         && copy_source.is_some() =>
                 {
-                    let upload_id = upload_id_opt.as_deref().unwrap_or("");
-                    let part_number = part_number_opt.unwrap_or(0);
-                    let source = copy_source.unwrap_or("");
-                    debug!(
-                        key = %key,
-                        upload_id = %upload_id,
-                        part_number = %part_number,
-                        copy_source = %source,
-                        "Handling UploadPartCopy request"
-                    );
                     self.handle_upload_part_copy(
                         bucket_for_operation,
                         key,
-                        upload_id,
-                        part_number,
-                        source,
+                        upload_id_opt.as_deref().unwrap_or(""),
+                        part_number_opt.unwrap_or(0),
+                        copy_source.unwrap_or(""),
                         copy_source_range,
                         &auth_context,
                     )
@@ -1568,16 +1581,17 @@ impl S3Handler {
 
     // Multipart upload handlers
 
+    #[instrument(level = "debug", skip(self))]
     async fn handle_create_multipart_upload(
         &self,
         bucket: &str,
         key: &str,
     ) -> Response<Full<Bytes>> {
-        debug!(bucket = %bucket, key = %key, "Handling CreateMultipartUpload request");
+        debug!("Handling CreateMultipartUpload request");
 
         // Verify bucket exists
         if !self.filesystem.bucket_exists(bucket) {
-            warn!(bucket = %bucket, "Bucket does not exist");
+            warn!("Bucket does not exist");
             return self.no_such_bucket_response(bucket);
         }
 
@@ -1592,8 +1606,6 @@ impl S3Handler {
             Ok(metadata) => {
                 debug!(
                     upload_id = %metadata.upload_id,
-                    bucket = %bucket,
-                    key = %key,
                     "CreateMultipartUpload success"
                 );
 
@@ -1613,8 +1625,6 @@ impl S3Handler {
             }
             Err(e) => {
                 error!(
-                    bucket = %bucket,
-                    key = %key,
                     error = %e,
                     "Failed to create multipart upload"
                 );
@@ -1623,6 +1633,7 @@ impl S3Handler {
         }
     }
 
+    #[instrument(level = "debug", skip(self, body))]
     async fn handle_upload_part(
         &self,
         bucket: &str,
@@ -1631,13 +1642,7 @@ impl S3Handler {
         part_number: u32,
         body: &mut BufferedBody,
     ) -> Response<Full<Bytes>> {
-        debug!(
-            bucket = %bucket,
-            key = %key,
-            upload_id = %upload_id,
-            part_number = %part_number,
-            "Handling UploadPart request"
-        );
+        debug!("Handling UploadPart request");
 
         // Get body data
         let body_vec = match body.to_vec().await {

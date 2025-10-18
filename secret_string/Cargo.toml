@@ -1,0 +1,21 @@
+[package]
+name = "secret-string"
+version = "0.0.2"
+readme = "README.md"
+description = "A wrapper around strings that hides their contents when printed or formatted for debugging."
+
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+serde = { workspace = true, optional = true, features = ["derive"] }
+serde_with = { workspace = true, optional = true, features = ["json"] }
+
+[dev-dependencies]
+serde_json = "1.0.145"
+
+[features]
+default = []
+serde = ["dep:serde", "dep:serde_with"]

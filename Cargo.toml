@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["crabcakes-async-spooled-tempfile", "."]
+members = ["crabcakes-async-spooled-tempfile", "secret_string", "."]
 
 [workspace.package]
 version = "0.0.1"
@@ -12,6 +12,8 @@ homepage = "https://github.com/yaleman/crabcakes"
 [workspace.dependencies]
 tokio = { version = "1.47.1", features = ["io-util", "fs"] }
 tempfile = "3.23"
+serde = { version = "1.0", features = ["derive"] }
+serde_with = { version = "3.15.0" }
 
 [package]
 name = "crabcakes"
@@ -49,7 +51,7 @@ scratchstack-aws-principal = "0.4.9"
 iam-rs = { rev = "65dabe70638b058c8431345f29c51702919faee1", git = "https://github.com/yaleman/iam-rs/", version = "0.0.23" }
 mime_guess = "2.0"
 quick-xml = { version = "0.38.3", features = ["serialize"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json = "1.0.145"
 sha2 = "0.10.9"
 tempfile = { workspace = true }
@@ -97,10 +99,13 @@ tower-http = { version = "0.6.6", features = [
 ], default-features = false }
 scratchstack-arn = "0.4.9"
 futures = "0.3.31"
-serde_with = { version = "3.15.0", features = ["json"] }
+serde_with = { workspace = true, features = ["json"] }
 enum-iterator = "2.3.0"
 regex = "1.11.3"
 urlencoding = "2.1.3"
+secret-string = { version = "0.0.2", path = "secret_string", features = [
+    "serde",
+] }
 
 [dev-dependencies]
 aws-config = "1.8.8"

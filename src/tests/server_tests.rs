@@ -98,7 +98,7 @@ async fn create_s3_client(port: u16) -> Client {
 
     let creds = Credentials::new(
         test_creds.access_key_id,
-        test_creds.secret_access_key,
+        test_creds.secret_access_key.value(),
         None,
         None,
         "test",

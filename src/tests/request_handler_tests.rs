@@ -3,6 +3,8 @@
 //! Tests all extracted API handler business logic methods without HTTP concerns.
 //! Uses in-memory database and temporary directories for isolation.
 
+use secret_string::SecretString;
+
 use crate::logging::setup_test_logging;
 use crate::request_handler::RequestHandler;
 use crate::web::serde::{CredentialInfo, VacuumResult};
@@ -393,7 +395,7 @@ async fn test_api_create_credential_valid() {
     // Secret must be exactly 40 characters
     let secret = "a".repeat(40);
     let result = handler
-        .api_create_credential("newuser".to_string(), secret)
+        .api_create_credential("newuser".to_string(), secret.into())
         .await;
 
     assert!(result.is_ok(), "Should create valid credential");
@@ -416,13 +418,13 @@ async fn test_api_create_credential_duplicate() {
 
     // Create first credential
     handler
-        .api_create_credential("dupuser".to_string(), secret1)
+        .api_create_credential("dupuser".to_string(), secret1.into())
         .await
         .expect("First creation should succeed");
 
     // Try to create duplicate
     let result = handler
-        .api_create_credential("dupuser".to_string(), secret2)
+        .api_create_credential("dupuser".to_string(), secret2.into())
         .await;
 
     assert!(result.is_err(), "Should reject duplicate access_key_id");
@@ -438,13 +440,13 @@ async fn test_api_update_credential_existing() {
 
     // Create a credential
     handler
-        .api_create_credential("updateuser".to_string(), old_secret)
+        .api_create_credential("updateuser".to_string(), old_secret.into())
         .await
         .expect("Should create credential");
 
     // Update it
     let result = handler
-        .api_update_credential("updateuser".to_string(), new_secret)
+        .api_update_credential("updateuser".to_string(), new_secret.into())
         .await;
 
     assert!(result.is_ok(), "Should update existing credential");
@@ -456,7 +458,7 @@ async fn test_api_update_credential_nonexistent() {
 
     // Try to update non-existent credential
     let result = handler
-        .api_update_credential("nosuchuser".to_string(), "secret".to_string())
+        .api_update_credential("nosuchuser".to_string(), "secret".to_string().into())
         .await;
 
     assert!(
@@ -470,7 +472,7 @@ async fn test_api_delete_credential_existing() {
     let handler = RequestHandler::new_test().await;
 
     // Secret must be exactly 40 characters
-    let secret = "a".repeat(40);
+    let secret = SecretString::new("a".repeat(40));
 
     // Create credential to delete
     handler

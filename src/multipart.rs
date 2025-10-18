@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, instrument, warn};
 use uuid::Uuid;
 
-use crate::error::CrabCakesError;
+use crate::{constants::MULTIPART_PATH_PREFIX, error::CrabCakesError};
 
 static MULTIPART_PREFIX: &str = "part-";
 
@@ -59,7 +59,7 @@ impl MultipartManager {
 
     /// Get the multipart base directory
     fn multipart_base(&self) -> PathBuf {
-        self.root_dir.join(".multipart")
+        self.root_dir.join(MULTIPART_PATH_PREFIX)
     }
 
     /// Get the directory for a specific upload
@@ -67,7 +67,7 @@ impl MultipartManager {
         self.multipart_base().join(bucket).join(upload_id)
     }
 
-    /// Get the metadata file path
+    /// Get the metadata file path for a given upload
     fn metadata_path(&self, bucket: &str, upload_id: &str) -> PathBuf {
         self.upload_dir(bucket, upload_id).join("metadata.json")
     }
@@ -79,6 +79,7 @@ impl MultipartManager {
     }
 
     /// Create a new multipart upload
+    #[instrument(level = "info", skip(self))]
     pub(crate) async fn create_upload(
         &self,
         bucket: &str,
@@ -94,22 +95,21 @@ impl MultipartManager {
 
         let upload_dir = self.upload_dir(bucket, &upload_id);
         fs::create_dir_all(&upload_dir).await.map_err(|e: std::io::Error| {
-            error!(upload_dir=%upload_dir.display(), "Failed to create upload directory: {}", e);
-            CrabCakesError::other(&format!("Failed to create upload directory: {}", e))
+            error!(upload_dir=%upload_dir.display(), upload_id = &upload_id, "Failed to create multipart upload directory: {e}");
+            CrabCakesError::other(&format!("Failed to create multipart upload directory: error={e} upload_id={upload_id}"))
         })?;
 
         let metadata_path = self.metadata_path(bucket, &upload_id);
-        let metadata_json = serde_json::to_string_pretty(&metadata)
-            .inspect_err(|e| error!("Failed to serialize metadata: {}", e))?;
+        let metadata_json = serde_json::to_string_pretty(&metadata).inspect_err(
+            |e| error!(upload_id = %upload_id, "Failed to serialize metadata: {}", e),
+        )?;
 
         fs::write(&metadata_path, metadata_json)
             .await
-            .inspect_err(|e| error!("Failed to write metadata: {}", e))?;
+            .inspect_err(|e| error!(upload_id = %upload_id, "Failed to write metadata: {e}"))?;
 
         debug!(
             upload_id = %upload_id,
-            bucket = %bucket,
-            key = %key,
             "Created multipart upload"
         );
 
@@ -117,6 +117,7 @@ impl MultipartManager {
     }
 
     /// Get metadata for an upload
+    #[instrument(level = "debug", skip(self))]
     pub(crate) async fn get_metadata(
         &self,
         bucket: &str,
@@ -125,9 +126,10 @@ impl MultipartManager {
         let metadata_path = self.metadata_path(bucket, upload_id);
         let metadata_json = fs::read_to_string(&metadata_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                CrabCakesError::Other("Upload not found".to_string())
+                CrabCakesError::FileNotFound(metadata_path)
             } else {
-                CrabCakesError::Other(format!("Failed to read metadata: {e}"))
+                error!("Failed to read metadata: {}", e);
+                CrabCakesError::Io(e)
             }
         })?;
 

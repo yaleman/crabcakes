@@ -18,6 +18,7 @@ use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
     SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
+use secret_string::SecretString;
 use tower::BoxError;
 use tracing::{debug, trace};
 
@@ -95,19 +96,20 @@ pub async fn verify_sigv4(
                         }
 
                         debug!(access_key = %access_key, "Found valid temporary credential in database");
-                        temp_cred.secret_access_key
+                        SecretString::new(temp_cred.secret_access_key)
                     }
                 };
 
                 // Convert secret key to KSecretKey
                 trace!(access_key = %access_key, secret_key_length = secret_access_key.len(), "About to parse secret key");
-                let secret_key = KSecretKey::from_str(&secret_access_key).map_err(|err| {
-                    debug!(
-                        access_key_id = access_key,
-                        "Failed to parse secret key: {}", err
-                    );
-                    BoxError::from(format!("Failed to parse secret key: {}", err))
-                })?;
+                let secret_key =
+                    KSecretKey::from_str(secret_access_key.value()).map_err(|err| {
+                        debug!(
+                            access_key_id = access_key,
+                            "Failed to parse secret key: {}", err
+                        );
+                        BoxError::from(format!("Failed to parse secret key: {}", err))
+                    })?;
 
                 // Generate signing key
                 let signing_key = secret_key.to_ksigning(
@@ -486,9 +488,7 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database().await;
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -516,9 +516,7 @@ mod tests {
     async fn test_verify_sigv4_missing_auth_header_not_required() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database().await;
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request without Authorization header
@@ -546,9 +544,7 @@ mod tests {
     async fn test_verify_sigv4_with_malformed_auth_header() {
         setup_test_logging();
         let cred_store = CredentialStore::new_test().await;
-        let db_conn = crate::db::initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize test database");
+        let db_conn = crate::db::initialize_in_memory_database().await;
         let db = Arc::new(DBService::new(Arc::new(db_conn)));
 
         // Create request with malformed Authorization header

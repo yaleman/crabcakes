@@ -34,12 +34,13 @@ impl TagCleaner {
                 .cleanup()
                 .await
                 .inspect_err(|err| error!(error = %err, "Orphaned tag cleanup failed"))?;
-            info!(deleted = %deleted, "Orphaned tag cleanup complete");
+
             if let Some(interval) = self.timer {
                 // If timer is set, sleep and continue
-                debug!(interval = %interval, "Sleeping before next tag cleanup");
+                info!(deleted = %deleted, interval = %interval, "Orphaned tag cleanup complete, sleeping before next tag cleanup");
                 tokio::time::sleep(std::time::Duration::from_secs(interval as u64)).await;
             } else {
+                info!(deleted = %deleted, "Orphaned tag cleanup complete");
                 // If no timer, return the count and exit
                 return Ok(Some(deleted));
             }
@@ -59,7 +60,6 @@ impl TagCleaner {
                 // Check if the file exists in storage
                 // If not, delete the tag
                 // Note: Actual storage check logic is not implemented here
-
                 let tag: object_tags::Model = tag;
                 let path = self.fs.resolve_path(&format!("{}/{}", tag.bucket, tag.key));
                 if !path.exists() {
@@ -93,9 +93,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_no_orphans() {
         setup_test_logging();
-        let db = initialize_in_memory_database()
-            .await
-            .expect("Failed to initialize in-memory database");
+        let db = initialize_in_memory_database().await;
         let temp_dir = setup_test_files().await;
         let fs = Arc::new(FilesystemService::new(temp_dir.path().to_path_buf())); // Use a temp directory for testing
 
@@ -106,13 +104,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_with_orphans() {
-        let db = Arc::new(
-            initialize_in_memory_database()
-                .await
-                .expect("Failed to initialize in-memory database"),
-        );
-
         setup_test_logging();
+        let db = Arc::new(initialize_in_memory_database().await);
+
         // Insert a tag for a non-existent file
         let tag_db = db.clone();
         {

@@ -10,10 +10,9 @@ use crate::{
 
 /// Create an in-memory test database
 async fn setup_test_db() -> Arc<DBService> {
-    let db = initialize_in_memory_database()
-        .await
-        .expect("Failed to initialize in-memory database");
-    Arc::new(DBService::new(Arc::new(db)))
+    Arc::new(DBService::new(Arc::new(
+        initialize_in_memory_database().await,
+    )))
 }
 
 #[tokio::test]

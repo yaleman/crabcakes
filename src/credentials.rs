@@ -2,6 +2,7 @@
 //!
 //! Loads and manages AWS access key credentials from JSON files for signature verification.
 
+use secret_string::SecretString;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,10 +14,22 @@ use tracing::{debug, error, info, warn};
 
 use crate::{constants::SECRET_ACCESS_KEY_LENGTH, error::CrabCakesError};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde_with::serde_as]
 pub struct Credential {
     pub access_key_id: String,
-    pub secret_access_key: String,
+    pub secret_access_key: SecretString<String>,
+}
+
+impl<T> TryFrom<(&str, SecretString<T>)> for Credential
+where
+    T: AsRef<str>,
+{
+    type Error = CrabCakesError;
+
+    fn try_from(input: (&str, SecretString<T>)) -> Result<Self, CrabCakesError> {
+        Self::try_from((input.0, input.1.value()))
+    }
 }
 
 impl TryFrom<(&str, &str)> for Credential {
@@ -37,7 +50,7 @@ impl TryFrom<(&str, &str)> for Credential {
 
         Ok(Self {
             access_key_id: access_key_id.to_string(),
-            secret_access_key: secret_access_key.to_string(),
+            secret_access_key: secret_access_key.to_string().into(),
         })
     }
 }
@@ -49,20 +62,20 @@ impl Credential {
         // this also implements name checks
         Credential::try_from((
             credential.access_key_id.as_ref(),
-            credential.secret_access_key.as_ref(),
+            credential.secret_access_key,
         ))
     }
 }
 
 pub struct CredentialStore {
-    pub(crate) credentials: Arc<RwLock<HashMap<String, String>>>,
+    pub(crate) credentials: Arc<RwLock<HashMap<String, SecretString<String>>>>,
     credentials_dir: PathBuf,
 }
 
 impl CredentialStore {
     /// Create a new CredentialStore by loading credentials from the given directory
     pub async fn new(credentials_dir: &PathBuf) -> Result<Self, CrabCakesError> {
-        let mut credentials = HashMap::new();
+        let mut credentials: HashMap<String, SecretString<String>> = HashMap::new();
 
         info!(credentials_dir = ?credentials_dir, "Loading credentials");
 
@@ -103,7 +116,7 @@ impl CredentialStore {
                     |e| error!(path = ?path, error = %e, "Failed to load credential"),
                 )?;
 
-                if credential.secret_access_key.len() != SECRET_ACCESS_KEY_LENGTH {
+                if credential.secret_access_key.value().len() != SECRET_ACCESS_KEY_LENGTH {
                     error!(access_key = %credential.access_key_id, err="Secret length is not {SECRET_ACCESS_KEY_LENGTH} characters, this is an invalid key, ignoring!");
                     continue;
                 }
@@ -138,7 +151,7 @@ impl CredentialStore {
     }
 
     /// Get a credential by access key ID
-    pub(crate) async fn get_credential(&self, access_key_id: &str) -> Option<String> {
+    pub(crate) async fn get_credential(&self, access_key_id: &str) -> Option<SecretString<String>> {
         self.credentials.read().await.get(access_key_id).cloned()
     }
 
@@ -154,7 +167,7 @@ impl CredentialStore {
     pub(crate) async fn write_credential(
         &self,
         access_key_id: String,
-        secret_access_key: String,
+        secret_access_key: SecretString<String>,
     ) -> Result<(), CrabCakesError> {
         // Validate access key ID (no path traversal)
         if access_key_id.contains("..")
@@ -180,14 +193,13 @@ impl CredentialStore {
 
         // Write to file
         let credential_path = self.credential_path(&access_key_id)?;
-        let credential =
-            Credential::try_from((access_key_id.as_ref(), secret_access_key.as_ref()))?;
+        let credential = Credential::try_from((access_key_id.as_str(), secret_access_key.clone()))?;
         fs::write(&credential_path, serde_json::to_string_pretty(&credential)?).await?;
 
         // Update in-memory store
         {
             let mut credentials = self.credentials.write().await;
-            credentials.insert(access_key_id.clone(), secret_access_key.clone());
+            credentials.insert(access_key_id.clone(), secret_access_key);
         }
 
         info!(access_key_id = %access_key_id, "Added credential");
@@ -198,20 +210,17 @@ impl CredentialStore {
     pub async fn update_credential(
         &self,
         access_key_id: String,
-        secret_access_key: String,
+        secret_access_key: SecretString<String>,
     ) -> Result<(), CrabCakesError> {
         // Check if credential exists
         {
             let credentials = self.credentials.read().await;
             if !credentials.contains_key(&access_key_id) {
-                return Err(CrabCakesError::other(&format!(
-                    "Credential '{}' not found",
-                    access_key_id
-                )));
+                debug!(access_key_id = %access_key_id, "Credential not found while attempgin got update");
+                return Err(CrabCakesError::InvalidCredential);
             }
         }
-        let credential =
-            Credential::try_from((access_key_id.as_ref(), secret_access_key.as_ref()))?;
+        let credential = Credential::try_from((access_key_id.as_ref(), secret_access_key.value()))?;
 
         // Write to file
         fs::write(
