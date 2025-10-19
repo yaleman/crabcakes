@@ -11,6 +11,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use iam_rs::EvaluationError;
 use mime_guess::mime::TEXT_HTML_UTF_8;
+use openidconnect::DiscoveryError;
 use scratchstack_aws_signature::{SignatureError, auth::SigV4AuthenticatorResponseBuilderError};
 use serde::Serialize;
 use serde_with::{DisplayFromStr, serde_as};
@@ -192,6 +193,12 @@ impl From<serde_json::Error> for CrabCakesError {
 impl From<std::io::Error> for CrabCakesError {
     fn from(err: std::io::Error) -> Self {
         CrabCakesError::Io(err)
+    }
+}
+
+impl From<DiscoveryError<reqwest::Error>> for CrabCakesError {
+    fn from(err: DiscoveryError<reqwest::Error>) -> Self {
+        CrabCakesError::OidcDiscovery(err.to_string())
     }
 }
 
