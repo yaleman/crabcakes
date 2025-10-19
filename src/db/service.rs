@@ -8,7 +8,9 @@ use sea_orm::{
 use std::sync::Arc;
 use tracing::{debug, error};
 
-use super::entities::{oauth_pkce_state, object_tags, temporary_credentials};
+use super::entities::{
+    bucket_website_config, oauth_pkce_state, object_tags, temporary_credentials,
+};
 use crate::{constants::MAX_TEMP_CREDS_DURATION, error::CrabCakesError};
 
 const MAX_TAGS: usize = 10;
@@ -444,6 +446,77 @@ impl DBService {
         );
 
         Ok(reclaimed)
+    }
+
+    // ===== Bucket Website Configuration Operations =====
+
+    /// Store or update website configuration for a bucket
+    pub async fn put_website_config(
+        &self,
+        bucket: &str,
+        index_document_suffix: &str,
+        error_document_key: Option<&str>,
+    ) -> Result<(), CrabCakesError> {
+        // Validate inputs
+        if index_document_suffix.is_empty() {
+            return Err(CrabCakesError::other(
+                &"Index document suffix cannot be empty".to_string(),
+            ));
+        }
+
+        let now = chrono::Utc::now();
+
+        // Check if config already exists
+        let existing = bucket_website_config::Entity::find_by_id(bucket)
+            .one(&*self.db)
+            .await?;
+
+        if let Some(existing_config) = existing {
+            // Update existing config
+            let mut active_model: bucket_website_config::ActiveModel = existing_config.into();
+            active_model.index_document_suffix = Set(index_document_suffix.to_string());
+            active_model.error_document_key = Set(error_document_key.map(|s| s.to_string()));
+            active_model.updated_at = Set(now);
+            active_model.update(&*self.db).await?;
+            debug!(bucket = %bucket, "Website config updated");
+        } else {
+            // Create new config
+            let config = bucket_website_config::ActiveModel {
+                bucket: Set(bucket.to_string()),
+                index_document_suffix: Set(index_document_suffix.to_string()),
+                error_document_key: Set(error_document_key.map(|s| s.to_string())),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            config.insert(&*self.db).await?;
+            debug!(bucket = %bucket, "Website config created");
+        }
+
+        Ok(())
+    }
+
+    /// Get website configuration for a bucket
+    pub async fn get_website_config(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<bucket_website_config::Model>, CrabCakesError> {
+        let config = bucket_website_config::Entity::find_by_id(bucket)
+            .one(&*self.db)
+            .await?;
+        Ok(config)
+    }
+
+    /// Delete website configuration for a bucket
+    pub async fn delete_website_config(&self, bucket: &str) -> Result<(), CrabCakesError> {
+        let result = bucket_website_config::Entity::delete_by_id(bucket)
+            .exec(&*self.db)
+            .await?;
+        debug!(
+            bucket = %bucket,
+            rows_deleted = result.rows_affected,
+            "Website config deleted"
+        );
+        Ok(())
     }
 
     // ===== Future: Object Metadata Operations =====

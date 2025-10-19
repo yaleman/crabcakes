@@ -160,102 +160,97 @@ Removes all tags from an object. Returns 204 No Content.
 
 Returns object metadata including ETag, LastModified, and ObjectSize.
 
+### Bucket Website Configuration
+
+The server supports S3-compatible static website hosting mode. When enabled for a bucket, GET requests automatically serve configured index and error documents.
+
+#### PutBucketWebsite (PUT /bucket?website)
+
+Configures website hosting for a bucket. Accepts XML request body with website configuration:
+
+```xml
+<WebsiteConfiguration>
+  <IndexDocument>
+    <Suffix>index.html</Suffix>
+  </IndexDocument>
+  <ErrorDocument>
+    <Key>error.html</Key>
+  </ErrorDocument>
+</WebsiteConfiguration>
+```
+
+- `IndexDocument.Suffix` - Required. Document to serve for directory requests (e.g., "index.html")
+- `ErrorDocument.Key` - Optional. Document to serve for 404 errors (e.g., "error.html")
+- Configuration stored in SQLite `bucket_website_configs` table
+- Returns 200 OK on success
+
+#### GetBucketWebsite (GET /bucket?website)
+
+Retrieves website configuration for a bucket. Returns:
+
+- 200 OK with XML configuration if website mode enabled
+- 404 Not Found with `NoSuchWebsiteConfiguration` error if not configured
+
+#### DeleteBucketWebsite (DELETE /bucket?website)
+
+Removes website configuration from a bucket. Returns 204 No Content on success.
+
+#### Automatic Website Behavior
+
+When website mode is enabled for a bucket:
+
+**Index Document Serving:**
+- `GET /bucket/` → serves `/bucket/index.html` (or configured suffix)
+- `GET /bucket/subdir/` → serves `/bucket/subdir/index.html`
+- Applies to any path ending with `/`
+- Falls back to 404 if index document doesn't exist
+
+**Error Document Serving:**
+- 404 errors automatically serve configured error document
+- Error document served with 404 status code
+- Includes proper Content-Type and Content-Length headers
+- Falls back to standard XML error if error document not found or not configured
+
+**Website Mode Detection:**
+- Server checks `bucket_website_configs` table for each request
+- Configuration cached during request processing
+- No performance impact when website mode disabled
+
 ## Metadata Storage
 
-The server uses SQLite for storing object metadata, OAuth PKCE state, and temporary credentials.
+The server uses SQLite for storing object metadata, OAuth PKCE state, temporary credentials, and bucket website configurations.
 
-### Database Location
+### Database Overview
 
 - Database file: `{config_dir}/crabcakes.sqlite3` (default: `./config/crabcakes.sqlite3`)
 - Automatically created on first startup
 - Migrations run automatically on startup using SeaORM migration framework
 - Sessions managed by tower-sessions (auto-creates its own table)
 
-### Schema
+**For complete database schema, ERD diagrams, and migration details, see [docs/src/database.md](docs/src/database.md)**
 
-**`object_tags` table:**
+### Key Database Tables
 
-- `id` INTEGER PRIMARY KEY
-- `bucket` TEXT NOT NULL
-- `key` TEXT NOT NULL
-- `tag_key` TEXT NOT NULL
-- `tag_value` TEXT NOT NULL
-- `created_at` DATETIME NOT NULL
-- Unique index on `(bucket, key, tag_key)`
-- Lookup index on `(bucket, key)`
+- `object_tags` - S3 object tags storage with validation
+- `bucket_website_configs` - Static website hosting configuration per bucket
+- `oauth_pkce_state` - OAuth PKCE flow state (temporary)
+- `temporary_credentials` - AWS-style temporary credentials for web UI users
+- `tower_sessions` - Session storage (auto-managed by tower-sessions)
 
-**`oauth_pkce_state` table:**
+### DBService Operations
 
-- `state` TEXT PRIMARY KEY (OAuth state parameter)
-- `code_verifier` TEXT NOT NULL (PKCE code verifier)
-- `nonce` TEXT NOT NULL (OIDC nonce)
-- `pkce_challenge` TEXT NOT NULL (PKCE code challenge)
-- `redirect_uri` TEXT NOT NULL (OAuth redirect URI)
-- `expires_at` DATETIME NOT NULL
-- `created_at` DATETIME NOT NULL
-- Index on `expires_at` for cleanup
+The `DBService` struct (`src/db/service.rs`) provides database operations for:
 
-**`temporary_credentials` table:**
+- **Tag Operations** - put_tags, get_tags, delete_tags
+- **Bucket Website Configuration** - put_website_config, get_website_config, delete_website_config
+- **OAuth PKCE State** - store_pkce_state, get_pkce_state, delete_pkce_state, cleanup_expired_pkce_states
+- **Temporary Credentials** - store_temporary_credentials, get_temporary_credentials, delete_temporary_credentials, cleanup_expired_credentials
 
-- `access_key_id` TEXT PRIMARY KEY
-- `secret_access_key` TEXT NOT NULL
-- `session_id` TEXT NOT NULL (links to tower-sessions)
-- `user_email` TEXT NOT NULL
-- `user_id` TEXT NOT NULL (from OIDC sub claim)
-- `expires_at` DATETIME NOT NULL
-- `created_at` DATETIME NOT NULL
-- Index on `session_id` for lookups
-- Index on `expires_at` for cleanup
+**See [docs/src/database.md](docs/src/database.md) for complete API signatures and details.**
 
-### Migrations
+### Background Cleanup
 
-New database migrations should be added to `src/db/migration/`:
-
-1. Create new migration file: `src/db/migration/mYYYYMMDD_HHMMSS_description.rs`
-2. Implement `up()` and `down()` methods using SeaORM schema builder
-3. Add to migration list in `src/db/migration/mod.rs`
-4. Migrations run automatically on server startup
-
-### DBService
-
-The `DBService` struct in `src/db/service.rs` provides database operations:
-
-**Tag Operations:**
-
-- `put_tags(bucket, key, tags)` - Store/replace tags with validation
-- `get_tags(bucket, key)` - Retrieve all tags for an object
-- `delete_tags(bucket, key)` - Remove all tags for an object
-
-**OAuth PKCE State Operations:**
-
-- `store_pkce_state(...)` - Store PKCE state for OAuth flow
-- `get_pkce_state(state)` - Retrieve PKCE state by state parameter
-- `delete_pkce_state(state)` - Delete PKCE state after use
-- `cleanup_expired_pkce_states()` - Remove expired PKCE states
-
-**Temporary Credentials Operations:**
-
-- `store_temporary_credentials(...)` - Store temp AWS credentials for session
-- `get_temporary_credentials(access_key_id)` - Get credentials by access key
-- `get_credentials_by_session(session_id)` - Get all credentials for a session
-- `delete_temporary_credentials(access_key_id)` - Delete specific credentials
-- `delete_credentials_by_session(session_id)` - Delete all session credentials
-- `cleanup_expired_credentials()` - Remove expired credentials
-
-### Background Cleanup Task
-
-The server spawns a background cleanup task (`CleanupTask` in `src/cleanup.rs`) on startup:
-
-- Runs every 5 minutes (configurable interval)
-- Calls `cleanup_expired_pkce_states()` to remove expired OAuth PKCE states
-- Calls `cleanup_expired_credentials()` to remove expired temporary credentials
-- Logs info messages when records are cleaned up
-- Logs errors if cleanup fails (but continues running)
-- Task is spawned with `tokio::spawn()` and runs independently
-
-This ensures that expired sessions and credentials don't accumulate in the database.
-
-Future: ACL operations, object attributes
+A background task (`src/cleanup.rs`) runs every 5 minutes to automatically remove expired OAuth PKCE states and temporary credentials, preventing database bloat.
 
 ## AWS Signature V4 Authentication
 
@@ -635,3 +630,4 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - don't mention how many tests there are, anywhere. nobody cares.
 - users should refer to documentation over CLAUDE.md as documentation is for humans, and CLAUDE is for a tool.
 - TODO.md is not for documentation, remove completed tasks entirely from it when done
+- NEVER use inline CSS or javascript.

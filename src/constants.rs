@@ -99,6 +99,12 @@ pub enum S3Action {
     GetBucketLocation,
     #[serde(alias = "s3:ListAllMyBuckets")]
     ListAllMyBuckets,
+    #[serde(alias = "s3:GetBucketWebsite")]
+    GetBucketWebsite,
+    #[serde(alias = "s3:PutBucketWebsite")]
+    PutBucketWebsite,
+    #[serde(alias = "s3:DeleteBucketWebsite")]
+    DeleteBucketWebsite,
 }
 impl AsRef<str> for S3Action {
     fn as_ref(&self) -> &'static str {
@@ -119,6 +125,9 @@ impl AsRef<str> for S3Action {
             S3Action::GetObjectAttributes => "s3:GetObjectAttributes",
             S3Action::GetBucketLocation => "s3:GetBucketLocation",
             S3Action::ListAllMyBuckets => "s3:ListAllMyBuckets",
+            S3Action::GetBucketWebsite => "s3:GetBucketWebsite",
+            S3Action::PutBucketWebsite => "s3:PutBucketWebsite",
+            S3Action::DeleteBucketWebsite => "s3:DeleteBucketWebsite",
         }
     }
 }

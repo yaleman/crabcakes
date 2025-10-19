@@ -317,6 +317,13 @@ pub fn http_method_to_s3_action(
             Some(S3Action::GetObjectAttributes)
         }
 
+        // Bucket website configuration operations
+        (&Method::GET, _, q, true) if q.contains("website") => Some(S3Action::GetBucketWebsite),
+        (&Method::PUT, _, q, true) if q.contains("website") => Some(S3Action::PutBucketWebsite),
+        (&Method::DELETE, _, q, true) if q.contains("website") => {
+            Some(S3Action::DeleteBucketWebsite)
+        }
+
         // Special cases
         (&Method::GET, _, q, _) if q.contains("list-type=2") => Some(S3Action::ListBucket),
         (&Method::GET, _, q, _) if q.contains("location") => Some(S3Action::GetBucketLocation),

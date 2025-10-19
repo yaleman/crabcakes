@@ -19,7 +19,7 @@ test:
 
 # format the rust code
 fmt:
-    cargo fmt --all -- --check
+    cargo fmt --all
 
 
 # run shellcheck on scripts
