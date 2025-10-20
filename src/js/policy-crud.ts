@@ -64,7 +64,6 @@ async function savePolicy(policyName: string, policyAction: string, policyData: 
             while (errorNotification.classList.contains('error-notification-hide')) {
                 errorNotification.classList.remove('error-notification-hide');
             }
-            errorNotification.classList.remove('error-notification-empty');
         } else {
             console.error("Error notification element not found");
         }

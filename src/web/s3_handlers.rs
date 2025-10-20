@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use http::HeaderValue;
 use http::header::{
-    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST, LAST_MODIFIED,
-    LOCATION, RANGE, WWW_AUTHENTICATE,
+    ACCEPT_RANGES, AUTHORIZATION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST,
+    LAST_MODIFIED, LOCATION, RANGE, WWW_AUTHENTICATE,
 };
 use http::request::Parts;
 use http_body_util::Full;
@@ -121,6 +121,33 @@ impl S3Handler {
     ) -> Result<(Parts, BufferedBody, SigV4AuthenticatorResponse), Response<Full<Bytes>>> {
         // Extract the parts we need before consuming the request
         let (parts, body) = request.into_parts();
+
+        // Check if Authorization header exists - allow anonymous GET requests for website hosting
+        let has_authorization = parts.headers.get(AUTHORIZATION).is_some();
+        let is_get_or_head = parts.method == Method::GET || parts.method == Method::HEAD;
+
+        // If no authorization and it's a GET/HEAD request, allow anonymous access for website hosting
+        if !has_authorization && is_get_or_head {
+            debug!("Anonymous GET/HEAD request detected, allowing for potential website hosting");
+
+            // Buffer the body
+            let buffered_body = match BufferedBody::from_incoming(body, false).await {
+                Ok(body) => body,
+                Err(e) => {
+                    error!(error = %e, "Failed to buffer request body");
+                    return Err(self.internal_error_response());
+                }
+            };
+
+            // Return empty authentication response (will be treated as anonymous/wildcard)
+            let anonymous_response =
+                SigV4AuthenticatorResponse::builder().build().map_err(|e| {
+                    error!(error = %e, "Failed to build anonymous response");
+                    self.internal_error_response()
+                })?;
+
+            return Ok((parts, buffered_body, anonymous_response));
+        }
 
         // Check if this is a streaming/chunked request that needs decoding
         let needs_aws_chunk_decode =
@@ -297,6 +324,37 @@ impl S3Handler {
         extracted_key: Option<&str>,
         auth_context: &AuthContext,
     ) -> Option<Response<Full<Bytes>>> {
+        // Check if this is an anonymous request to a website-enabled bucket
+        let is_anonymous = matches!(auth_context.principal, iam_rs::Principal::Wildcard);
+        if is_anonymous {
+            // Only allow GET/HEAD operations for website hosting
+            if !matches!(s3_action, S3Action::GetObject | S3Action::ListBucket) {
+                debug!("Anonymous request for non-GET operation, denying");
+                return Some(self.access_denied_response());
+            }
+
+            // Check if bucket has website mode enabled
+            if let Some(bucket_name) = bucket {
+                match self.db_service.get_website_config(bucket_name).await {
+                    Ok(Some(_config)) => {
+                        debug!(bucket = %bucket_name, "Anonymous request to website-enabled bucket, allowing");
+                        return None; // Allow the request
+                    }
+                    Ok(None) => {
+                        debug!(bucket = %bucket_name, "Anonymous request to bucket without website mode, denying");
+                        return Some(self.access_denied_response());
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to check website config");
+                        return Some(self.internal_error_response());
+                    }
+                }
+            } else {
+                debug!("Anonymous request without bucket, denying");
+                return Some(self.access_denied_response());
+            }
+        }
+
         // Check if this is a temporary credential (OAuth-based) - they get full access
         let is_temp_credential = if let Some(ref username) = auth_context.username {
             self.db_service

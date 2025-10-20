@@ -411,5 +411,10 @@ fi
     exit 1
 }
 
+./test_website.sh || {
+    echo "❌ Website tests failed ❌"
+    exit 1
+}
+
 echo ""
 echo "✅ ALL TESTS PASSED! ✅"

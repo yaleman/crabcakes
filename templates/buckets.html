@@ -19,16 +19,19 @@
         {% for bucket in buckets %}
         <tr>
             <td>
-                <a href="/admin/buckets/{{ bucket }}" class="bucket-link">
-                    📦 {{ bucket }}
+                <a href="/admin/buckets/{{ bucket.name }}" class="bucket-link">
+                    📦 {{ bucket.name }}
                 </a>
+                {% if bucket.website_enabled %}
+                <span class="badge badge-purple">🌐 Website</span>
+                {% endif %}
             </td>
             <td>
-                <a href="/admin/buckets/{{ bucket }}"
+                <a href="/admin/buckets/{{ bucket.name }}"
                     class="btn btn-primary btn-small">
                     Browse Objects
                 </a>
-                <a href="/admin/buckets/{{ bucket }}/delete"
+                <a href="/admin/buckets/{{ bucket.name }}/delete"
                     class="btn btn-danger btn-small">
                     Delete
                 </a>

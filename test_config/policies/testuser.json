@@ -76,6 +76,26 @@
                 "s3:DeleteBucket"
             ],
             "Resource": "arn:aws:s3:::bucket21"
+        },
+        {
+            "Sid": "AllowWebsiteTestBuckets",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::bucket_with_index_and_error",
+                "arn:aws:s3:::bucket_with_index_and_error/*",
+                "arn:aws:s3:::bucket_with_index_only",
+                "arn:aws:s3:::bucket_with_index_only/*",
+                "arn:aws:s3:::bucket_no_index_but_error",
+                "arn:aws:s3:::bucket_no_index_but_error/*",
+                "arn:aws:s3:::bucket_no_index_or_error",
+                "arn:aws:s3:::bucket_no_index_or_error/*"
+            ]
         }
     ]
 }

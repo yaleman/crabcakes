@@ -8,7 +8,7 @@ Policy - Crabcakes Admin{% endblock %}
     <h1><a href="/admin/policies">Policies</a> / {% if !policy_name.is_empty()
         %}Edit {{ policy_name }}{% else %}Create New{% endif %}</h1>
 </div>
-<div class="error-notification error-notification-empty" id="error-notification"></div>
+<div class="error-notification error-notification-hide" id="error-notification"></div>
 
 <form id="policy-form">
     <input type="hidden" id="policy-action" name="policy-action" value="{{ action.as_ref() }}" />
