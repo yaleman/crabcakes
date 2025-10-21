@@ -1,0 +1,6 @@
+# third-party JS
+static/prism.js
+# auto-compiled things
+static/js/
+# because it's got "no csrf"
+templates/logout_button.html

@@ -58,7 +58,10 @@ function checkPolicy(): void {
 
                 // Create and append decision heading
                 const decisionHeading = document.createElement("h3");
-                decisionHeading.innerHTML = `Decision: <span class="badge badge-${result.decision.decision.toLowerCase()}">${result.decision.decision}</span>`;
+                const decisionHeadingSpan = document.createElement("span");
+                decisionHeadingSpan.className = `badge badge-${result.decision.decision.toLowerCase()}`;
+                decisionHeadingSpan.textContent = result.decision.decision;
+                decisionHeading.appendChild(decisionHeadingSpan);
                 resultsDiv.appendChild(decisionHeading);
 
                 // Create and append context heading
@@ -150,12 +153,20 @@ function checkPolicy(): void {
                     subList.appendChild(statementHeading);
 
                     const conditionsItem = document.createElement("li");
-                    conditionsItem.innerHTML = `Conditions Satisfied: <span class="badge badge-${statement.conditions_satisfied.toString().toLowerCase()}" > ${statement.conditions_satisfied} </span>`;
+                    const conditionsItemSpan = document.createElement("span");
+                    conditionsItemSpan.className = `badge badge-${statement.conditions_satisfied.toString().toLowerCase()}`;
+                    conditionsItemSpan.textContent = statement.conditions_satisfied.toString();
+                    conditionsItem.appendChild(document.createTextNode("Conditions Satisfied: "));
+                    conditionsItem.appendChild(conditionsItemSpan);
                     subList.appendChild(conditionsItem);
 
                     if (statement.conditions_satisfied) {
                         const effectItem = document.createElement("li");
-                        effectItem.innerHTML = `Policy Effect: <span class="badge badge-${statement.effect.toLowerCase()}">${statement.effect}</span>`;
+                        const effectItemSpan = document.createElement("span");
+                        effectItemSpan.className = `badge badge-${statement.effect.toLowerCase()}`;
+                        effectItemSpan.textContent = statement.effect;
+                        effectItem.appendChild(document.createTextNode("Policy Effect: "));
+                        effectItem.appendChild(effectItemSpan);
                         subList.appendChild(effectItem);
                     }
 
