@@ -16,7 +16,13 @@ use-default-preprocessors = true
 [preprocessor.links]
 
 
+# mermaid graph rendering, you need mdbook-mermaid
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+
 [output.html]
 edit-url-template = "https://github.com/yaleman/crabcakes/edit/main/docs/{path}"
 git-repository-url = "https://github.com/yaleman/crabcakes"
 git-repository-icon = "fa-github"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]

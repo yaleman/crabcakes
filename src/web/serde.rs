@@ -48,6 +48,13 @@ pub(crate) struct ObjectInfo {
     pub(crate) last_modified: String,
 }
 
+/// Bucket info for listing
+#[derive(Debug)]
+pub(crate) struct BucketInfo {
+    pub(crate) name: String,
+    pub(crate) website_enabled: bool,
+}
+
 #[derive(Deserialize, Debug)]
 pub(crate) struct TroubleShooterForm {
     pub(crate) bucket: String,

@@ -268,6 +268,15 @@ impl WebHandler {
                 (Method::GET, "/admin/buckets") => self.get_admin_buckets(session).await,
                 (Method::GET, "/admin/buckets/new") => self.get_admin_buckets_new(session).await,
                 (Method::GET, path)
+                    if path.starts_with("/admin/buckets/") && path.ends_with("/settings") =>
+                {
+                    let bucket_name = path
+                        .strip_prefix("/admin/buckets/")
+                        .and_then(|s| s.strip_suffix("/settings"))
+                        .unwrap_or("");
+                    self.get_bucket_settings(session, bucket_name).await
+                }
+                (Method::GET, path)
                     if path.starts_with("/admin/buckets/") && path.ends_with("/delete") =>
                 {
                     let bucket_name = path
@@ -981,11 +990,27 @@ impl WebHandler {
             return login_redirect();
         };
 
-        let buckets = self
+        let bucket_names = self
             .filesystem
             .list_buckets()
             .await
             .map_err(CrabCakesError::from)?;
+
+        // Check website config for each bucket
+        let mut buckets = Vec::new();
+        for name in bucket_names {
+            let website_enabled = self
+                .db
+                .get_website_config(&name)
+                .await
+                .map(|config| config.is_some())
+                .unwrap_or(false);
+
+            buckets.push(BucketInfo {
+                name,
+                website_enabled,
+            });
+        }
 
         let template = BucketsTemplate {
             buckets,
@@ -1035,10 +1060,19 @@ impl WebHandler {
             })
             .collect();
 
+        // Check if website mode is enabled
+        let website_enabled = self
+            .db
+            .get_website_config(bucket_name)
+            .await
+            .map(|config| config.is_some())
+            .unwrap_or(false);
+
         let template = BucketDetailTemplate {
             page: WebPage::Buckets.as_ref(),
             bucket_name: bucket_name.to_string(),
             objects,
+            website_enabled,
         };
 
         self.build_html_response(template)
@@ -1099,6 +1133,24 @@ impl WebHandler {
             "success": true,
             "bucket_name": request.bucket_name
         }))
+    }
+
+    /// GET /admin/buckets/{name}/settings - Show bucket settings page
+    async fn get_bucket_settings(
+        &self,
+        session: Session,
+        bucket_name: &str,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        if self.check_auth(&session).await.is_err() {
+            return login_redirect();
+        };
+
+        let template = BucketSettingsTemplate {
+            page: WebPage::Buckets.as_ref(),
+            bucket_name: bucket_name.to_string(),
+        };
+
+        self.build_html_response(template)
     }
 
     /// GET /admin/buckets/{name}/delete - Show bucket deletion confirmation page

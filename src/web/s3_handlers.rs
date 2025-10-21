@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use http::HeaderValue;
 use http::header::{
-    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST, LAST_MODIFIED,
-    LOCATION, RANGE, WWW_AUTHENTICATE,
+    ACCEPT_RANGES, AUTHORIZATION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST,
+    LAST_MODIFIED, LOCATION, RANGE, WWW_AUTHENTICATE,
 };
 use http::request::Parts;
 use http_body_util::Full;
@@ -51,7 +51,7 @@ use crate::web::xml_responses::{
     GetBucketLocationResponse, GetObjectAttributesResponse, GetObjectTaggingResponse,
     InitiateMultipartUploadResponse, ListAllMyBucketsResult, ListBucketResponse,
     ListBucketV1Response, ListMultipartUploadsResponse, ListPartsResponse, MultipartUploadItem,
-    PartItem, Tag, TagSet, TaggingRequest, to_xml,
+    PartItem, Tag, TagSet, TaggingRequest, WebsiteConfiguration, to_xml,
 };
 
 static CT_APPLICATION_XML: &str = "application/xml";
@@ -121,6 +121,33 @@ impl S3Handler {
     ) -> Result<(Parts, BufferedBody, SigV4AuthenticatorResponse), Response<Full<Bytes>>> {
         // Extract the parts we need before consuming the request
         let (parts, body) = request.into_parts();
+
+        // Check if Authorization header exists - allow anonymous GET requests for website hosting
+        let has_authorization = parts.headers.get(AUTHORIZATION).is_some();
+        let is_get_or_head = parts.method == Method::GET || parts.method == Method::HEAD;
+
+        // If no authorization and it's a GET/HEAD request, allow anonymous access for website hosting
+        if !has_authorization && is_get_or_head {
+            debug!("Anonymous GET/HEAD request detected, allowing for potential website hosting");
+
+            // Buffer the body
+            let buffered_body = match BufferedBody::from_incoming(body, false).await {
+                Ok(body) => body,
+                Err(e) => {
+                    error!(error = %e, "Failed to buffer request body");
+                    return Err(self.internal_error_response());
+                }
+            };
+
+            // Return empty authentication response (will be treated as anonymous/wildcard)
+            let anonymous_response =
+                SigV4AuthenticatorResponse::builder().build().map_err(|e| {
+                    error!(error = %e, "Failed to build anonymous response");
+                    self.internal_error_response()
+                })?;
+
+            return Ok((parts, buffered_body, anonymous_response));
+        }
 
         // Check if this is a streaming/chunked request that needs decoding
         let needs_aws_chunk_decode =
@@ -297,6 +324,37 @@ impl S3Handler {
         extracted_key: Option<&str>,
         auth_context: &AuthContext,
     ) -> Option<Response<Full<Bytes>>> {
+        // Check if this is an anonymous request to a website-enabled bucket
+        let is_anonymous = matches!(auth_context.principal, iam_rs::Principal::Wildcard);
+        if is_anonymous {
+            // Only allow GET/HEAD operations for website hosting
+            if !matches!(s3_action, S3Action::GetObject | S3Action::ListBucket) {
+                debug!("Anonymous request for non-GET operation, denying");
+                return Some(self.access_denied_response());
+            }
+
+            // Check if bucket has website mode enabled
+            if let Some(bucket_name) = bucket {
+                match self.db_service.get_website_config(bucket_name).await {
+                    Ok(Some(_config)) => {
+                        debug!(bucket = %bucket_name, "Anonymous request to website-enabled bucket, allowing");
+                        return None; // Allow the request
+                    }
+                    Ok(None) => {
+                        debug!(bucket = %bucket_name, "Anonymous request to bucket without website mode, denying");
+                        return Some(self.access_denied_response());
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to check website config");
+                        return Some(self.internal_error_response());
+                    }
+                }
+            } else {
+                debug!("Anonymous request without bucket, denying");
+                return Some(self.access_denied_response());
+            }
+        }
+
         // Check if this is a temporary credential (OAuth-based) - they get full access
         let is_temp_credential = if let Some(ref username) = auth_context.username {
             self.db_service
@@ -630,6 +688,31 @@ impl S3Handler {
                     debug!(bucket = %bucket_for_operation, "Handling GetBucketLocation request");
                     self.handle_get_bucket_location(bucket_for_operation).await
                 }
+                // GET /bucket?website - GetBucketWebsite
+                (&Method::GET, false, true, _, query) if query.contains("website") => {
+                    debug!(bucket = %bucket_for_operation, "Handling GetBucketWebsite request");
+                    self.handle_get_bucket_website(bucket_for_operation).await
+                }
+                // PUT /bucket?website - PutBucketWebsite
+                (&Method::PUT, false, true, _, query) if query.contains("website") => {
+                    debug!(bucket = %bucket_for_operation, "Handling PutBucketWebsite request");
+                    match buffered_body.to_vec().await {
+                        Ok(body_bytes) => {
+                            self.handle_put_bucket_website(bucket_for_operation, &body_bytes)
+                                .await
+                        }
+                        Err(e) => {
+                            error!(error = %e, "Failed to read request body");
+                            self.internal_error_response()
+                        }
+                    }
+                }
+                // DELETE /bucket?website - DeleteBucketWebsite
+                (&Method::DELETE, false, true, _, query) if query.contains("website") => {
+                    debug!(bucket = %bucket_for_operation, "Handling DeleteBucketWebsite request");
+                    self.handle_delete_bucket_website(bucket_for_operation)
+                        .await
+                }
                 // GET /bucket with V1 list parameters - ListBucketV1
                 (&Method::GET, false, true, _, query)
                     if has_list_v1_params && !query.is_empty() =>
@@ -640,10 +723,44 @@ impl S3Handler {
                 }
                 // Path-style bucket root without query: GET /bucket/ or GET /bucket - default to V2
                 (&Method::GET, false, true, _, _) => {
-                    debug!("Handling ListBucket request (path-style, no query - default to V2)");
-                    // Treat as ListBucket V2 with default parameters
-                    self.handle_list_bucket("list-type=2", bucket_for_operation, &path)
+                    // Check if website mode is enabled
+                    match self
+                        .db_service
+                        .get_website_config(bucket_for_operation)
                         .await
+                    {
+                        Ok(Some(config)) => {
+                            // Website mode enabled - serve index document
+                            debug!(
+                                bucket = %bucket_for_operation,
+                                suffix = %config.index_document_suffix,
+                                "Website mode enabled - serving index document for bucket root"
+                            );
+                            let index_key = format!(
+                                "{}/{}",
+                                bucket_for_operation, config.index_document_suffix
+                            );
+                            self.handle_get_object_with_range(
+                                &index_key,
+                                bucket_for_operation,
+                                None,
+                            )
+                            .await
+                        }
+                        Ok(None) => {
+                            // No website config - default to listing
+                            debug!(
+                                "Handling ListBucket request (path-style, no query - default to V2)"
+                            );
+                            self.handle_list_bucket("list-type=2", bucket_for_operation, &path)
+                                .await
+                        }
+                        Err(e) => {
+                            error!(error = %e, "Failed to check website config - falling back to list");
+                            self.handle_list_bucket("list-type=2", bucket_for_operation, &path)
+                                .await
+                        }
+                    }
                 }
                 // HEAD /bucket - HeadBucket
                 (&Method::HEAD, false, true, "", _) => {
@@ -698,7 +815,8 @@ impl S3Handler {
                 // GET /key or GET /bucket/key - GetObject
                 (&Method::GET, false, false, key, _) if !key.is_empty() => {
                     debug!(key = %key, "Handling GetObject request");
-                    self.handle_get_object(key, &parts).await
+                    self.handle_get_object(key, bucket_for_operation, &parts)
+                        .await
                 }
                 // PUT /bucket - CreateBucket
                 (&Method::PUT, false, true, "", _) if copy_source.is_none() => {
@@ -1122,18 +1240,56 @@ impl S3Handler {
     async fn handle_get_object(
         &self,
         key: &str,
+        bucket: &str,
         parts: &http::request::Parts,
     ) -> Response<Full<Bytes>> {
         let range_header = parts.headers.get(RANGE).and_then(|h| h.to_str().ok());
-        self.handle_get_object_with_range(key, range_header).await
+        self.handle_get_object_with_range(key, bucket, range_header)
+            .await
     }
 
     async fn handle_get_object_with_range(
         &self,
         key: &str,
+        bucket: &str,
         range_header: Option<&str>,
     ) -> Response<Full<Bytes>> {
-        match self.filesystem.get_file_metadata(key).await {
+        // Check if this is a directory request (ends with /) and website mode is enabled
+        let actual_key = if key.ends_with('/') {
+            // Extract bucket from key if present
+            let bucket_to_check = if bucket.is_empty() {
+                // Extract bucket from key (format: bucket/path/)
+                key.split('/').next().unwrap_or("")
+            } else {
+                bucket
+            };
+
+            // Check if website mode is enabled for this bucket
+            match self.db_service.get_website_config(bucket_to_check).await {
+                Ok(Some(config)) => {
+                    // Append index document suffix
+                    debug!(
+                        key = %key,
+                        bucket = %bucket_to_check,
+                        suffix = %config.index_document_suffix,
+                        "Website mode enabled - appending index document to directory request"
+                    );
+                    format!("{}{}", key, config.index_document_suffix)
+                }
+                Ok(None) => {
+                    // No website config - use original key
+                    key.to_string()
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to check website config");
+                    key.to_string()
+                }
+            }
+        } else {
+            key.to_string()
+        };
+
+        match self.filesystem.get_file_metadata(&actual_key).await {
             Ok(metadata) => {
                 // Parse range header if present
                 let (start, end, is_range_request) = if let Some(range_str) = range_header {
@@ -1273,8 +1429,90 @@ impl S3Handler {
                 }
             }
             Err(e) => {
-                warn!(key = %key, error = %e, "GetObject failed: file not found");
-                self.not_found_response()
+                warn!(key = %actual_key, error = %e, "GetObject failed: file not found");
+
+                // Check if website mode is enabled and error document is configured
+                let bucket_to_check = if bucket.is_empty() {
+                    // Extract bucket from key (format: bucket/path)
+                    actual_key.split('/').next().unwrap_or("")
+                } else {
+                    bucket
+                };
+
+                match self.db_service.get_website_config(bucket_to_check).await {
+                    Ok(Some(config)) => {
+                        // Check if error document is configured
+                        let Some(error_key) = config.error_document_key else {
+                            // No error document configured
+                            return self.not_found_response();
+                        };
+
+                        // Website mode with error document configured
+                        debug!(
+                            bucket = %bucket_to_check,
+                            error_key = %error_key,
+                            "Website mode enabled - serving error document for 404"
+                        );
+
+                        // Serve the error document with 404 status
+                        let error_doc_key = if error_key.starts_with('/') {
+                            format!("{}{}", bucket_to_check, error_key)
+                        } else {
+                            format!("{}/{}", bucket_to_check, error_key)
+                        };
+
+                        match self.filesystem.get_file_metadata(&error_doc_key).await {
+                            Ok(error_metadata) => {
+                                // Read error document file
+                                match File::open(&error_metadata.path).await {
+                                    Ok(mut file) => {
+                                        let mut contents = Vec::new();
+                                        match file.read_to_end(&mut contents).await {
+                                            Ok(_) => {
+                                                let mut response =
+                                                    Response::new(Full::new(Bytes::from(contents)));
+                                                *response.status_mut() = StatusCode::NOT_FOUND;
+
+                                                let headers = response.headers_mut();
+                                                if let Ok(ct) = HeaderValue::from_str(
+                                                    &error_metadata.content_type,
+                                                ) {
+                                                    headers.insert(CONTENT_TYPE, ct);
+                                                }
+                                                if let Ok(cl) = HeaderValue::from_str(
+                                                    &error_metadata.size.to_string(),
+                                                ) {
+                                                    headers.insert(CONTENT_LENGTH, cl);
+                                                }
+                                                response
+                                            }
+                                            Err(read_err) => {
+                                                error!(error_key = %error_doc_key, error = %read_err, "Failed to read error document");
+                                                self.not_found_response()
+                                            }
+                                        }
+                                    }
+                                    Err(open_err) => {
+                                        error!(error_key = %error_doc_key, error = %open_err, "Failed to open error document");
+                                        self.not_found_response()
+                                    }
+                                }
+                            }
+                            Err(meta_err) => {
+                                warn!(error_key = %error_doc_key, error = %meta_err, "Error document not found");
+                                self.not_found_response()
+                            }
+                        }
+                    }
+                    Ok(_) => {
+                        // No website config or no error document configured
+                        self.not_found_response()
+                    }
+                    Err(db_err) => {
+                        error!(error = %db_err, "Failed to check website config for error document");
+                        self.not_found_response()
+                    }
+                }
             }
         }
     }
@@ -2201,6 +2439,134 @@ impl S3Handler {
             }
             Err(e) => {
                 error!(bucket = %bucket, key = %key, error = %e, "Failed to delete tags");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    // ===== Bucket Website Configuration Handlers =====
+
+    async fn handle_put_bucket_website(&self, bucket: &str, body: &[u8]) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling PutBucketWebsite request");
+
+        // Check if bucket exists
+        if !self.filesystem.bucket_exists(bucket) {
+            warn!(bucket = %bucket, "Bucket does not exist");
+            return self.no_such_bucket_response(bucket);
+        }
+
+        // Parse XML request
+        let website_config: WebsiteConfiguration = match quick_xml::de::from_reader(body) {
+            Ok(config) => config,
+            Err(e) => {
+                error!(error = %e, "Failed to parse website configuration");
+                return response_body_status(
+                    Bytes::from("Invalid XML request"),
+                    StatusCode::BAD_REQUEST,
+                );
+            }
+        };
+
+        // Validate that index document is provided
+        let index_suffix = match &website_config.index_document {
+            Some(idx) => &idx.suffix,
+            None => {
+                error!("IndexDocument is required for website configuration");
+                return response_body_status(
+                    Bytes::from("IndexDocument is required"),
+                    StatusCode::BAD_REQUEST,
+                );
+            }
+        };
+
+        // Extract error document key if present
+        let error_key = website_config
+            .error_document
+            .as_ref()
+            .map(|err| err.key.as_str());
+
+        // Store configuration
+        match self
+            .db_service
+            .put_website_config(bucket, index_suffix, error_key)
+            .await
+        {
+            Ok(()) => {
+                debug!(bucket = %bucket, "Website configuration stored successfully");
+                response_body_status(Bytes::new(), StatusCode::OK)
+            }
+            Err(e) => {
+                error!(bucket = %bucket, error = %e, "Failed to store website configuration");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_get_bucket_website(&self, bucket: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling GetBucketWebsite request");
+
+        // Check if bucket exists
+        if !self.filesystem.bucket_exists(bucket) {
+            warn!(bucket = %bucket, "Bucket does not exist");
+            return self.no_such_bucket_response(bucket);
+        }
+
+        // Get website configuration
+        match self.db_service.get_website_config(bucket).await {
+            Ok(Some(config)) => {
+                // Build response
+                let response = WebsiteConfiguration {
+                    index_document: Some(crate::web::xml_responses::IndexDocument {
+                        suffix: config.index_document_suffix,
+                    }),
+                    error_document: config
+                        .error_document_key
+                        .map(|key| crate::web::xml_responses::ErrorDocument { key }),
+                };
+
+                match to_xml(response) {
+                    Ok(xml) => Self::to_xml_response(xml),
+                    Err(e) => {
+                        error!(error = %e, "Failed to serialize website configuration response");
+                        self.internal_error_response()
+                    }
+                }
+            }
+            Ok(None) => {
+                warn!(bucket = %bucket, "No website configuration found");
+                // Return NoSuchWebsiteConfiguration error
+                let mut res = Response::new(Full::new(Bytes::from(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchWebsiteConfiguration</Code><Message>The specified bucket does not have a website configuration</Message></Error>",
+                )));
+                *res.status_mut() = StatusCode::NOT_FOUND;
+                res.headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
+                res
+            }
+            Err(e) => {
+                error!(bucket = %bucket, error = %e, "Failed to get website configuration");
+                self.internal_error_response()
+            }
+        }
+    }
+
+    async fn handle_delete_bucket_website(&self, bucket: &str) -> Response<Full<Bytes>> {
+        debug!(bucket = %bucket, "Handling DeleteBucketWebsite request");
+
+        // Check if bucket exists
+        if !self.filesystem.bucket_exists(bucket) {
+            warn!(bucket = %bucket, "Bucket does not exist");
+            return self.no_such_bucket_response(bucket);
+        }
+
+        // Delete website configuration
+        match self.db_service.delete_website_config(bucket).await {
+            Ok(()) => {
+                debug!(bucket = %bucket, "Website configuration deleted successfully");
+                response_body_status(Bytes::new(), StatusCode::NO_CONTENT)
+            }
+            Err(e) => {
+                error!(bucket = %bucket, error = %e, "Failed to delete website configuration");
                 self.internal_error_response()
             }
         }

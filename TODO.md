@@ -1,5 +1,7 @@
 # Crabcakes S3 API Implementation TODO
 
+---
+
 ## Future Enhancements
 
 ### Server Infrastructure
@@ -21,5 +23,6 @@
 - ❌ Intelligent tiering
 - ❌ Object Lock
 - ❌ Legal Hold
+- ❌ Website hosting redirect rules (RedirectAllRequestsTo, RoutingRules) - not implementing yet
 
 ---

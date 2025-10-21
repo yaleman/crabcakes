@@ -1365,11 +1365,12 @@ async fn test_admin_ui_bucket_delete_confirmation_page() {
         .await
         .expect("Failed to send delete confirmation page request");
 
-    // In test mode, admin API is disabled, so expect 404 or auth error
+    // In test mode, admin API is disabled, so expect 404, auth error, or 400 (reserved bucket name)
     assert!(
         response.status() == reqwest::StatusCode::NOT_FOUND
             || response.status() == reqwest::StatusCode::UNAUTHORIZED
             || response.status() == reqwest::StatusCode::FORBIDDEN
+            || response.status() == reqwest::StatusCode::BAD_REQUEST
     );
 
     handle.abort();
@@ -1454,11 +1455,101 @@ async fn test_admin_ui_create_bucket_form_accessible() {
         .await
         .expect("Failed to send create bucket form request");
 
-    // In test mode, admin API is disabled, so expect 404 or auth error
+    // In test mode, admin API is disabled, so expect 404, auth error, or 400 (reserved bucket name)
     assert!(
         response.status() == reqwest::StatusCode::NOT_FOUND
             || response.status() == reqwest::StatusCode::UNAUTHORIZED
             || response.status() == reqwest::StatusCode::FORBIDDEN
+            || response.status() == reqwest::StatusCode::BAD_REQUEST
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_anonymous_website_access() {
+    setup_test_logging();
+    let temp_dir = setup_test_files().await;
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+
+    // Create test bucket with index.html using existing bucket2
+    let bucket_path = temp_dir.path().join(TEST_ALLOWED_BUCKET2);
+
+    fs::write(
+        bucket_path.join("index.html"),
+        b"<html><body>Welcome to test website</body></html>",
+    )
+    .await
+    .expect("Failed to write index.html");
+
+    // Use AWS SDK client to enable website mode (requires auth)
+    let client = create_s3_client(port).await;
+    client
+        .put_bucket_website()
+        .bucket(TEST_ALLOWED_BUCKET2)
+        .website_configuration(
+            aws_sdk_s3::types::WebsiteConfiguration::builder()
+                .index_document(
+                    aws_sdk_s3::types::IndexDocument::builder()
+                        .suffix("index.html")
+                        .build()
+                        .expect("Failed to build index document"),
+                )
+                .build(),
+        )
+        .send()
+        .await
+        .expect("Failed to enable website mode");
+
+    // Make anonymous GET request (no auth headers) using reqwest
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .get(format!(
+            "http://localhost:{}/{}/",
+            port, TEST_ALLOWED_BUCKET2
+        ))
+        .send()
+        .await
+        .expect("Failed to send anonymous request");
+
+    // Should succeed for website-enabled bucket
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::OK,
+        "Expected 200 OK for anonymous request to website bucket"
+    );
+
+    let body = response.text().await.expect("Failed to read response body");
+    assert!(
+        body.contains("Welcome to test website"),
+        "Expected index.html content in response"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_anonymous_access_denied_without_website_mode() {
+    setup_test_logging();
+    let temp_dir = setup_test_files().await;
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+
+    // Use existing bucket1 which does NOT have website mode enabled
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .get(format!(
+            "http://localhost:{}/{}/testuser/test.txt",
+            port, TEST_ALLOWED_BUCKET
+        ))
+        .send()
+        .await
+        .expect("Failed to send anonymous request");
+
+    // Should be denied for non-website bucket
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::FORBIDDEN,
+        "Expected 403 Forbidden for anonymous request to non-website bucket"
     );
 
     handle.abort();

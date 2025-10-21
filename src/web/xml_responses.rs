@@ -388,3 +388,26 @@ pub struct GetObjectAttributesResponse {
     #[serde(rename = "ObjectSize", skip_serializing_if = "Option::is_none")]
     pub object_size: Option<u64>,
 }
+
+// ===== Bucket Website Configuration Structures =====
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename = "WebsiteConfiguration")]
+pub struct WebsiteConfiguration {
+    #[serde(rename = "IndexDocument", skip_serializing_if = "Option::is_none")]
+    pub index_document: Option<IndexDocument>,
+    #[serde(rename = "ErrorDocument", skip_serializing_if = "Option::is_none")]
+    pub error_document: Option<ErrorDocument>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct IndexDocument {
+    #[serde(rename = "Suffix")]
+    pub suffix: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ErrorDocument {
+    #[serde(rename = "Key")]
+    pub key: String,
+}

@@ -82,7 +82,7 @@ impl Default for CredentialFormTemplate {
 #[template(path = "buckets.html")]
 pub(crate) struct BucketsTemplate {
     pub(crate) page: &'static str,
-    pub(crate) buckets: Vec<String>,
+    pub(crate) buckets: Vec<BucketInfo>,
 }
 
 impl Default for BucketsTemplate {
@@ -117,6 +117,15 @@ pub(crate) struct BucketDetailTemplate {
     pub(crate) page: &'static str,
     pub(crate) bucket_name: String,
     pub(crate) objects: Vec<ObjectInfo>,
+    pub(crate) website_enabled: bool,
+}
+
+/// Bucket settings template
+#[derive(Template)]
+#[template(path = "bucket_settings.html")]
+pub(crate) struct BucketSettingsTemplate {
+    pub(crate) page: &'static str,
+    pub(crate) bucket_name: String,
 }
 
 /// Identities list template

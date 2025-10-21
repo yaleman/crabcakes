@@ -312,7 +312,7 @@ impl Server {
                             )
                             .await
                         {
-                            error!(error = %err, remote_addr = %remote_addr, "Error serving connection");
+                            debug!(error = %err, remote_addr = %remote_addr, "Error serving connection");
                         }
                     });
                 }
@@ -339,7 +339,7 @@ impl Server {
                         )
                         .await
                     {
-                        error!(error = %err, remote_addr = %remote_addr, "Error serving connection");
+                        debug!(error = %err, remote_addr = %remote_addr, "Error serving connection");
                     }
                 });
             },
