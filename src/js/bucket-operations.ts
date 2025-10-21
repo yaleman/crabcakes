@@ -190,7 +190,8 @@ async function deleteBatchObjects(): Promise<void> {
             if (response.Errors) {
                 totalErrors += response.Errors.length;
                 response.Errors.forEach(error => {
-                    console.error(`Error deleting ${bucket}/${error.Key}:`, error.Message);
+                    const ERROR_DELETE_FORMAT = 'Error deleting %s/%s: %s';
+                    console.error(ERROR_DELETE_FORMAT, bucket, error.Key, error.Message);
                 });
             }
         }

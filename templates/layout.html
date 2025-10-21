@@ -51,11 +51,7 @@
                         </a>
                     </li>
                     <li class="nav-item logout-item">
-                        <form method="POST" action="/logout" class="logout-form">
-                            <button type="submit" class="nav-btn btn btn-danger">
-                                Sign Out
-                            </button>
-                        </form>
+                        {% include "logout_button.html" %}
                     </li>
                 </ul>
             </nav>

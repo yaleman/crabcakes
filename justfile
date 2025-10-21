@@ -80,3 +80,7 @@ run_debug: build-js
 # run mdbook in "serve" mode
 serve_docs:
     cd docs && mdbook serve
+
+semgrep:
+    semgrep ci --config auto \
+    --exclude-rule "yaml.github-actions.security.third-party-action-not-pinned-to-commit-sha.third-party-action-not-pinned-to-commit-sha"
