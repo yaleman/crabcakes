@@ -110,10 +110,7 @@ impl BufferedBody {
 
         // If we need to decode AWS chunks, read back from spooled file, decode, and rewrite
         if should_decode_aws_chunks {
-            debug!(
-                "Decoding AWS chunked encoding from {} bytes",
-                written_bytes
-            );
+            debug!("Decoding AWS chunked encoding from {} bytes", written_bytes);
 
             // Read the raw chunked data back from the spooled file
             temp_file
