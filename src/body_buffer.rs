@@ -6,12 +6,12 @@
 use std::io::SeekFrom;
 
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
+use hyper::body::{Body, Incoming};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::error::CrabCakesError;
 use crabcakes_async_spooled_tempfile::SpooledTempFile;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
 const MEMORY_THRESHOLD: u64 = 50 * 1024 * 1024; // 50MB
 
@@ -84,50 +84,47 @@ impl BufferedBody {
         body: Incoming,
         should_decode_aws_chunks: bool,
     ) -> Result<Self, CrabCakesError> {
-        let mut body = body;
+        debug!("Bodysize: {:?}", body.size_hint());
+        debug!(
+            "Starting to buffer body, should_decode_aws_chunks={}",
+            should_decode_aws_chunks
+        );
 
-        let mut written_bytes = 0;
         let mut temp_file = SpooledTempFile::new(MEMORY_THRESHOLD);
-        let mut raw_data = Vec::new();
+        let written_bytes;
 
-        // Collect the body
-        while let Some(frame) = body.frame().await {
-            let frame = frame.inspect_err(|e| error!("Body read error: {}", e))?;
+        // For non-chunked requests, use the simpler collect() API which is more reliable
+        // For chunked requests, we need the raw data to decode, so collect that way too
+        let collected = body
+            .collect()
+            .await
+            .inspect_err(|e| error!("Body read error: {}, error debug: {:?}", e, e))?;
 
-            if let Some(data) = frame.data_ref() {
-                trace!(
-                    "Body frame received: {} bytes, first 100 bytes: {:?}",
-                    data.len(),
-                    &data[..data.len().min(100)]
-                );
-                if should_decode_aws_chunks {
-                    // Accumulate data for decoding
-                    raw_data.extend_from_slice(data);
-                } else {
-                    // Write directly
-                    temp_file
-                        .write_all(data)
-                        .await
-                        .inspect_err(|e| error!("Failed to write to spooled temp file: {}", e))?;
-                    written_bytes += data.len();
-                }
-            }
-        }
+        let body_bytes = collected.to_bytes();
+        debug!("Collected {} bytes from body", body_bytes.len());
 
         // If we need to decode AWS chunks, do it now
         if should_decode_aws_chunks {
             debug!(
                 "Decoding AWS chunked encoding from {} bytes",
-                raw_data.len()
+                body_bytes.len()
             );
-            let decoded = decode_aws_chunks(&raw_data)?;
+            let decoded = decode_aws_chunks(&body_bytes)?;
             debug!("Decoded {} bytes from AWS chunks", decoded.len());
             temp_file.write_all(&decoded).await.inspect_err(|e| {
                 error!("Failed to write decoded data to spooled temp file: {}", e)
             })?;
             written_bytes = decoded.len();
+        } else {
+            // Write directly to temp file
+            temp_file
+                .write_all(&body_bytes)
+                .await
+                .inspect_err(|e| error!("Failed to write to spooled temp file: {}", e))?;
+            written_bytes = body_bytes.len();
         }
 
+        debug!("Successfully buffered body, final size: {}", written_bytes);
         Ok(BufferedBody {
             file: temp_file,
             size: written_bytes,

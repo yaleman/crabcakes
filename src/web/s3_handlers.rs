@@ -25,6 +25,7 @@ use scratchstack_aws_signature::{
     SignatureOptions, X_AMZ_CONTENT_SHA256, service_for_signing_key_fn,
     sigv4_validate_streaming_request,
 };
+use serde::Serialize;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::RwLock;
@@ -64,6 +65,75 @@ pub struct S3Handler {
     multipart_manager: Arc<RwLock<MultipartManager>>,
     db_service: Arc<DBService>,
     region: String,
+}
+
+#[derive(Serialize)]
+enum S3Error {
+    NoSuchBucketWebsiteConfiguration,
+    InvalidArgument(String),
+    NoSuchKey,
+    NoSuchBucket(String),
+    AccessDenied,
+    InvalidAccessKeyId(String),
+    InternalError,
+    /// Inner value is the bucket name
+    BucketAlreadyExists(String),
+    /// Inner value is the bucket name
+    BucketNotEmpty(String),
+    /// Inner value is the reason
+    InvalidBucketName(String),
+}
+
+impl AsRef<str> for S3Error {
+    fn as_ref(&self) -> &str {
+        match self {
+            S3Error::NoSuchBucketWebsiteConfiguration => "NoSuchWebsiteConfiguration",
+            S3Error::InvalidArgument(_) => "InvalidArgument",
+            S3Error::NoSuchKey => "NoSuchKey",
+            S3Error::AccessDenied => "AccessDenied",
+            S3Error::InvalidAccessKeyId(_) => "InvalidAccessKeyId",
+            S3Error::InternalError => "InternalError",
+            S3Error::BucketAlreadyExists(_) => "BucketAlreadyExists",
+            S3Error::BucketNotEmpty(_) => "BucketNotEmpty",
+            S3Error::NoSuchBucket(_) => "NoSuchBucket",
+            S3Error::InvalidBucketName(_) => "InvalidBucketName",
+        }
+    }
+}
+
+impl S3Error {
+    fn error_message(&self) -> String {
+        match self {
+            S3Error::NoSuchBucketWebsiteConfiguration => {
+                "The specified bucket does not have a website configuration".to_string()
+            }
+            S3Error::InvalidArgument(msg) => msg.to_owned(),
+            S3Error::NoSuchKey => "The specified key does not exist".to_string(),
+            S3Error::AccessDenied => "Access Denied".to_string(),
+            S3Error::InvalidAccessKeyId(msg) => msg.to_owned(),
+            S3Error::InternalError => {
+                "We encountered an internal error. Please try again.".to_string()
+            }
+            S3Error::BucketAlreadyExists(bucket) => {
+                format!("The requested bucket name '{}' is not available.", bucket)
+            }
+            S3Error::BucketNotEmpty(bucket) => {
+                format!("The bucket '{}' you tried to delete is not empty.", bucket)
+            }
+            S3Error::NoSuchBucket(bucket) => {
+                format!("The specified bucket '{}' does not exist.", bucket)
+            }
+            S3Error::InvalidBucketName(reason) => reason.to_owned(),
+        }
+    }
+
+    fn to_xml(&self) -> String {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>{}</Code><Message>{}</Message></Error>",
+            self.as_ref(),
+            self.error_message()
+        )
+    }
 }
 
 /// Checks the request headers to determine if this is a streaming request
@@ -163,11 +233,18 @@ impl S3Handler {
 
         // Buffer the body (memory or disk depending on size)
         // Decode AWS chunks if this is a streaming upload
+        debug!(
+            method = %parts.method,
+            uri = %parts.uri,
+            headers = ?parts.headers,
+            needs_aws_chunk_decode = needs_aws_chunk_decode,
+            "About to buffer request body"
+        );
         let mut buffered_body =
             match BufferedBody::from_incoming(body, needs_aws_chunk_decode).await {
                 Ok(body) => body,
                 Err(e) => {
-                    error!(error = %e, "Failed to buffer request body");
+                    error!(error = %e, headers = ?parts.headers, "Failed to buffer request body");
                     return Err(self.internal_error_response());
                 }
             };
@@ -222,7 +299,7 @@ impl S3Handler {
             let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key_fn);
 
             match sigv4_validate_streaming_request(
-                parts,
+                parts.clone(),
                 &self.region,
                 S3,
                 &mut get_signing_key_svc,
@@ -234,7 +311,7 @@ impl S3Handler {
             {
                 Ok((parts, _body, response)) => (parts, response),
                 Err(e) => {
-                    warn!(error = %e, "Streaming signature verification failed");
+                    warn!(method=parts.method.as_str(), uri=parts.uri.path(), error = %e, "Streaming signature verification failed");
                     return Err(self
                         .unauthorized_response(&format!("Signature verification failed: {}", e)));
                 }
@@ -829,12 +906,17 @@ impl S3Handler {
                 {
                     debug!(key = %key, copy_source = ?copy_source, "Handling CopyObject request");
                     match copy_source {
-                        None => {
-                            Response::builder().status(StatusCode::BAD_REQUEST).body( Full::new(Bytes::from_static(
-                                b"<Error><Code>InvalidArgument</Code><Message>Missing x-amz-copy-source header</Message></Error>",
-                            ))).unwrap_or(self.internal_error_response())
+                        None => Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(Full::new(Bytes::from(
+                                S3Error::InvalidArgument("Missing x-amz-copy-source header".into())
+                                    .to_xml(),
+                            )))
+                            .unwrap_or(self.internal_error_response()),
+                        Some(copy_source) => {
+                            self.handle_copy_object(copy_source, key, &auth_context)
+                                .await
                         }
-                        Some(copy_source) => self.handle_copy_object(copy_source, key, &auth_context).await,
                     }
                 }
                 // PUT /key or PUT /bucket/key - PutObject
@@ -2533,10 +2615,10 @@ impl S3Handler {
                 }
             }
             Ok(None) => {
-                warn!(bucket = %bucket, "No website configuration found");
+                debug!(bucket = %bucket, "No website configuration found");
                 // Return NoSuchWebsiteConfiguration error
                 let mut res = Response::new(Full::new(Bytes::from(
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchWebsiteConfiguration</Code><Message>The specified bucket does not have a website configuration</Message></Error>",
+                    S3Error::NoSuchBucketWebsiteConfiguration.to_xml(),
                 )));
                 *res.status_mut() = StatusCode::NOT_FOUND;
                 res.headers_mut()
@@ -2628,9 +2710,7 @@ impl S3Handler {
     }
 
     fn not_found_response(&self) -> Response<Full<Bytes>> {
-        let mut res = Response::new(Full::new(Bytes::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>",
-        )));
+        let mut res = Response::new(Full::new(Bytes::from(S3Error::NoSuchKey.to_xml())));
         *res.status_mut() = StatusCode::NOT_FOUND;
         res.headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
@@ -2639,9 +2719,7 @@ impl S3Handler {
 
     fn access_denied_response(&self) -> Response<Full<Bytes>> {
         tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(403));
-        let mut res = Response::new(Full::new(Bytes::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
-        )));
+        let mut res = Response::new(Full::new(Bytes::from(S3Error::AccessDenied.to_xml())));
         *res.status_mut() = StatusCode::FORBIDDEN;
         res.headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
@@ -2650,10 +2728,9 @@ impl S3Handler {
 
     fn unauthorized_response(&self, reason: &str) -> Response<Full<Bytes>> {
         tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(401));
-        let mut response = Response::new(Full::new(Bytes::from(format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidAccessKeyId</Code><Message>{}</Message></Error>",
-            reason
-        ))));
+        let mut response = Response::new(Full::new(Bytes::from(
+            S3Error::InvalidAccessKeyId(reason.to_string()).to_xml(),
+        )));
         *response.status_mut() = StatusCode::UNAUTHORIZED;
         let headers = response.headers_mut();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
@@ -2663,9 +2740,7 @@ impl S3Handler {
 
     fn internal_error_response(&self) -> Response<Full<Bytes>> {
         tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(500));
-        let mut res = Response::new(Full::new(Bytes::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InternalError</Code><Message>We encountered an internal error. Please try again.</Message></Error>",
-        )));
+        let mut res = Response::new(Full::new(Bytes::from(S3Error::InternalError.to_xml())));
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         res.headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
@@ -2674,10 +2749,9 @@ impl S3Handler {
 
     fn bucket_already_exists_response(&self, bucket: &str) -> Response<Full<Bytes>> {
         tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(409));
-        let mut res = Response::new(Full::new(Bytes::from(format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketAlreadyExists</Code><Message>The requested bucket name '{}' is not available.</Message></Error>",
-            bucket
-        ))));
+        let mut res = Response::new(Full::new(Bytes::from(
+            S3Error::BucketAlreadyExists(bucket.to_string()).to_xml(),
+        )));
         *res.status_mut() = StatusCode::CONFLICT;
         res.headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
@@ -2686,10 +2760,9 @@ impl S3Handler {
 
     fn bucket_not_empty_response(&self, bucket: &str) -> Response<Full<Bytes>> {
         tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(409));
-        let mut res = Response::new(Full::new(Bytes::from(format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>BucketNotEmpty</Code><Message>The bucket '{}' you tried to delete is not empty.</Message></Error>",
-            bucket
-        ))));
+        let mut res = Response::new(Full::new(Bytes::from(
+            S3Error::BucketNotEmpty(bucket.to_string()).to_xml(),
+        )));
         *res.status_mut() = StatusCode::CONFLICT;
         res.headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
@@ -2698,10 +2771,9 @@ impl S3Handler {
 
     fn no_such_bucket_response(&self, bucket: &str) -> Response<Full<Bytes>> {
         tracing::Span::current().record(TRACE_STATUS_CODE, tracing::field::display(404));
-        let mut res = Response::new(Full::new(Bytes::from(format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchBucket</Code><Message>The specified bucket '{}' does not exist.</Message></Error>",
-            bucket
-        ))));
+        let mut res = Response::new(Full::new(Bytes::from(
+            S3Error::NoSuchBucket(bucket.to_string()).to_xml(),
+        )));
         *res.status_mut() = StatusCode::NOT_FOUND;
         res.headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static(CT_APPLICATION_XML));
@@ -2709,10 +2781,9 @@ impl S3Handler {
     }
 
     fn invalid_bucket_name_response(&self, reason: &str) -> Response<Full<Bytes>> {
-        let mut response = Response::new(Full::new(Bytes::from(format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>InvalidBucketName</Code><Message>{}</Message></Error>",
-            reason
-        ))));
+        let mut response = Response::new(Full::new(Bytes::from(
+            S3Error::InvalidBucketName(reason.to_string()).to_xml(),
+        )));
         *response.status_mut() = StatusCode::BAD_REQUEST;
         tracing::Span::current().record(
             TRACE_STATUS_CODE,
