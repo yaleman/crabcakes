@@ -81,7 +81,7 @@ impl BufferedBody {
     /// Buffer a hyper Incoming body, spilling to disk if it exceeds the threshold
     /// If should_decode_aws_chunks is true, will decode AWS chunked encoding format
     pub async fn from_incoming(
-        body: Incoming,
+        mut body: Incoming,
         should_decode_aws_chunks: bool,
     ) -> Result<Self, CrabCakesError> {
         debug!("Bodysize: {:?}", body.size_hint());
@@ -91,37 +91,53 @@ impl BufferedBody {
         );
 
         let mut temp_file = SpooledTempFile::new(MEMORY_THRESHOLD);
-        let written_bytes;
+        let mut written_bytes = 0;
 
-        // For non-chunked requests, use the simpler collect() API which is more reliable
-        // For chunked requests, we need the raw data to decode, so collect that way too
-        let collected = body
-            .collect()
-            .await
-            .inspect_err(|e| error!("Body read error: {}, error debug: {:?}", e, e))?;
+        // Read body frame-by-frame to enable automatic memory->disk spillover
+        // Write all data to spooled file regardless of whether we need to decode
+        while let Some(frame_result) = body.frame().await {
+            let frame = frame_result
+                .inspect_err(|e| error!("Body read error: {}, error debug: {:?}", e, e))?;
 
-        let body_bytes = collected.to_bytes();
-        debug!("Collected {} bytes from body", body_bytes.len());
+            if let Some(data) = frame.data_ref() {
+                temp_file
+                    .write_all(data)
+                    .await
+                    .inspect_err(|e| error!("Failed to write to spooled temp file: {}", e))?;
+                written_bytes += data.len();
+            }
+        }
 
-        // If we need to decode AWS chunks, do it now
+        // If we need to decode AWS chunks, read back from spooled file, decode, and rewrite
         if should_decode_aws_chunks {
             debug!(
                 "Decoding AWS chunked encoding from {} bytes",
-                body_bytes.len()
+                written_bytes
             );
-            let decoded = decode_aws_chunks(&body_bytes)?;
+
+            // Read the raw chunked data back from the spooled file
+            temp_file
+                .seek(SeekFrom::Start(0))
+                .await
+                .inspect_err(|e| error!("Failed to rewind spooled file for decoding: {}", e))?;
+
+            let mut raw_data = Vec::new();
+            temp_file
+                .read_to_end(&mut raw_data)
+                .await
+                .inspect_err(|e| error!("Failed to read from spooled file for decoding: {}", e))?;
+
+            let decoded = decode_aws_chunks(&raw_data)?;
             debug!("Decoded {} bytes from AWS chunks", decoded.len());
-            temp_file.write_all(&decoded).await.inspect_err(|e| {
+
+            // Create a new spooled file for the decoded data
+            let mut decoded_file = SpooledTempFile::new(MEMORY_THRESHOLD);
+            decoded_file.write_all(&decoded).await.inspect_err(|e| {
                 error!("Failed to write decoded data to spooled temp file: {}", e)
             })?;
+
+            temp_file = decoded_file;
             written_bytes = decoded.len();
-        } else {
-            // Write directly to temp file
-            temp_file
-                .write_all(&body_bytes)
-                .await
-                .inspect_err(|e| error!("Failed to write to spooled temp file: {}", e))?;
-            written_bytes = body_bytes.len();
         }
 
         debug!("Successfully buffered body, final size: {}", written_bytes);

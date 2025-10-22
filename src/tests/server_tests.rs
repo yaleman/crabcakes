@@ -1563,7 +1563,7 @@ async fn test_concurrent_put_object_same_basename() {
     let client = create_s3_client(port).await;
 
     // Create test data for different file types with same base name
-    let test_files = vec![
+    let test_files = [
         ("testuser/concurrent.csv", b"col1,col2,col3\n1,2,3\n4,5,6" as &[u8]),
         ("testuser/concurrent.html", b"<html><body>Test HTML content</body></html>"),
         ("testuser/concurrent.json", b"{\"test\": \"data\", \"value\": 123}"),
@@ -1599,7 +1599,7 @@ async fn test_concurrent_put_object_same_basename() {
             result.as_ref().err()
         );
         assert!(
-            result.as_ref().unwrap().e_tag().is_some(),
+            result.as_ref().expect("Upload should have succeeded").e_tag().is_some(),
             "Expected ETag in response for {}",
             key
         );
