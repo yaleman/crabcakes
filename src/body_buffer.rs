@@ -6,12 +6,12 @@
 use std::io::SeekFrom;
 
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
+use hyper::body::{Body, Incoming};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::error::CrabCakesError;
 use crabcakes_async_spooled_tempfile::SpooledTempFile;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
 const MEMORY_THRESHOLD: u64 = 50 * 1024 * 1024; // 50MB
 
@@ -81,53 +81,63 @@ impl BufferedBody {
     /// Buffer a hyper Incoming body, spilling to disk if it exceeds the threshold
     /// If should_decode_aws_chunks is true, will decode AWS chunked encoding format
     pub async fn from_incoming(
-        body: Incoming,
+        mut body: Incoming,
         should_decode_aws_chunks: bool,
     ) -> Result<Self, CrabCakesError> {
-        let mut body = body;
+        debug!("Bodysize: {:?}", body.size_hint());
+        debug!(
+            "Starting to buffer body, should_decode_aws_chunks={}",
+            should_decode_aws_chunks
+        );
 
-        let mut written_bytes = 0;
         let mut temp_file = SpooledTempFile::new(MEMORY_THRESHOLD);
-        let mut raw_data = Vec::new();
+        let mut written_bytes = 0;
 
-        // Collect the body
-        while let Some(frame) = body.frame().await {
-            let frame = frame.inspect_err(|e| error!("Body read error: {}", e))?;
+        // Read body frame-by-frame to enable automatic memory->disk spillover
+        // Write all data to spooled file regardless of whether we need to decode
+        while let Some(frame_result) = body.frame().await {
+            let frame = frame_result
+                .inspect_err(|e| error!("Body read error: {}, error debug: {:?}", e, e))?;
 
             if let Some(data) = frame.data_ref() {
-                trace!(
-                    "Body frame received: {} bytes, first 100 bytes: {:?}",
-                    data.len(),
-                    &data[..data.len().min(100)]
-                );
-                if should_decode_aws_chunks {
-                    // Accumulate data for decoding
-                    raw_data.extend_from_slice(data);
-                } else {
-                    // Write directly
-                    temp_file
-                        .write_all(data)
-                        .await
-                        .inspect_err(|e| error!("Failed to write to spooled temp file: {}", e))?;
-                    written_bytes += data.len();
-                }
+                temp_file
+                    .write_all(data)
+                    .await
+                    .inspect_err(|e| error!("Failed to write to spooled temp file: {}", e))?;
+                written_bytes += data.len();
             }
         }
 
-        // If we need to decode AWS chunks, do it now
+        // If we need to decode AWS chunks, read back from spooled file, decode, and rewrite
         if should_decode_aws_chunks {
-            debug!(
-                "Decoding AWS chunked encoding from {} bytes",
-                raw_data.len()
-            );
+            debug!("Decoding AWS chunked encoding from {} bytes", written_bytes);
+
+            // Read the raw chunked data back from the spooled file
+            temp_file
+                .seek(SeekFrom::Start(0))
+                .await
+                .inspect_err(|e| error!("Failed to rewind spooled file for decoding: {}", e))?;
+
+            let mut raw_data = Vec::new();
+            temp_file
+                .read_to_end(&mut raw_data)
+                .await
+                .inspect_err(|e| error!("Failed to read from spooled file for decoding: {}", e))?;
+
             let decoded = decode_aws_chunks(&raw_data)?;
             debug!("Decoded {} bytes from AWS chunks", decoded.len());
-            temp_file.write_all(&decoded).await.inspect_err(|e| {
+
+            // Create a new spooled file for the decoded data
+            let mut decoded_file = SpooledTempFile::new(MEMORY_THRESHOLD);
+            decoded_file.write_all(&decoded).await.inspect_err(|e| {
                 error!("Failed to write decoded data to spooled temp file: {}", e)
             })?;
+
+            temp_file = decoded_file;
             written_bytes = decoded.len();
         }
 
+        debug!("Successfully buffered body, final size: {}", written_bytes);
         Ok(BufferedBody {
             file: temp_file,
             size: written_bytes,

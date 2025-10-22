@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder;
+use hyper_util::rt::TokioIo;
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::io::BufReader;
@@ -298,7 +297,7 @@ impl Server {
                                 return;
                             }
                         };
-                        if let Err(err) = Builder::new(TokioExecutor::new())
+                        if let Err(err) = http1::Builder::new()
                             .serve_connection(
                                 TokioIo::new(tls_stream),
                                 service_fn(move |req| {
