@@ -229,7 +229,15 @@ impl FilesystemService {
         }
 
         // Write file atomically by writing to temp file and renaming
-        let temp_path = file_path.with_extension("tmp");
+        // Use process ID and nanosecond timestamp to ensure unique temp filename
+        let temp_filename = format!(
+            "{}.{}.{}.tmp",
+            file_path.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+            std::process::id(),
+            Utc::now().timestamp_millis()
+        );
+        let temp_path = file_path.with_file_name(temp_filename);
+
         let mut file = fs::File::create(&temp_path).await?;
         file.write_all(body).await?;
         file.sync_all().await?;

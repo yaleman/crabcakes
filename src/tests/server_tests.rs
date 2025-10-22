@@ -1554,3 +1554,107 @@ async fn test_anonymous_access_denied_without_website_mode() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_concurrent_put_object_same_basename() {
+    setup_test_logging();
+    let temp_dir = setup_test_files().await;
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Create test data for different file types with same base name
+    let test_files = vec![
+        ("testuser/concurrent.csv", b"col1,col2,col3\n1,2,3\n4,5,6" as &[u8]),
+        ("testuser/concurrent.html", b"<html><body>Test HTML content</body></html>"),
+        ("testuser/concurrent.json", b"{\"test\": \"data\", \"value\": 123}"),
+        ("testuser/concurrent.txt", b"Plain text file content for testing"),
+        ("testuser/concurrent.xml", b"<?xml version=\"1.0\"?><root><item>test</item></root>"),
+    ];
+
+    // Upload all files concurrently using join_all
+    let upload_futures = test_files.iter().map(|(key, content)| {
+        let client = client.clone();
+        let key = key.to_string();
+        let content = content.to_vec();
+        async move {
+            let result = client
+                .put_object()
+                .bucket(TEST_ALLOWED_BUCKET)
+                .key(&key)
+                .body(content.clone().into())
+                .send()
+                .await;
+            (key, content, result)
+        }
+    });
+
+    let results = futures::future::join_all(upload_futures).await;
+
+    // Verify all uploads succeeded
+    for (key, _content, result) in &results {
+        assert!(
+            result.is_ok(),
+            "PutObject failed for {}: {:?}",
+            key,
+            result.as_ref().err()
+        );
+        assert!(
+            result.as_ref().unwrap().e_tag().is_some(),
+            "Expected ETag in response for {}",
+            key
+        );
+    }
+
+    // Verify each file has the correct content by retrieving them concurrently
+    let verify_futures = results.iter().map(|(key, expected_content, _)| {
+        let client = client.clone();
+        let key = key.clone();
+        let expected_content = expected_content.clone();
+        async move {
+            let get_result = client
+                .get_object()
+                .bucket(TEST_ALLOWED_BUCKET)
+                .key(&key)
+                .send()
+                .await;
+
+            assert!(
+                get_result.is_ok(),
+                "GetObject failed for {}: {:?}",
+                key,
+                get_result.err()
+            );
+
+            let get_output = get_result.expect("Failed to get object");
+            let actual_content = get_output
+                .body
+                .collect()
+                .await
+                .expect("Failed to collect body")
+                .into_bytes();
+
+            assert_eq!(
+                actual_content.as_ref(),
+                expected_content.as_slice(),
+                "Content mismatch for {}. Expected {:?}, got {:?}",
+                key,
+                String::from_utf8_lossy(&expected_content),
+                String::from_utf8_lossy(&actual_content)
+            );
+
+            (key, expected_content.len())
+        }
+    });
+
+    let verify_results = futures::future::join_all(verify_futures).await;
+
+    // Log success
+    for (key, size) in verify_results {
+        debug!(
+            "Successfully verified concurrent upload: {} ({} bytes)",
+            key, size
+        );
+    }
+
+    handle.abort();
+}
