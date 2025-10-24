@@ -18,9 +18,9 @@ use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
     SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
+use tracing::{debug, trace, warn};
 use secret_string::SecretString;
 use tower::BoxError;
-use tracing::{debug, trace};
 
 use crate::constants::{MOCK_ACCOUNT_ID, S3, S3Action};
 use crate::credentials::CredentialStore;
@@ -59,12 +59,34 @@ pub async fn verify_sigv4(
     let get_signing_key = {
         let cred_store = credentials_store.clone();
         let db_service = db.clone();
+        let configured_region = region.to_string();
         move |request: GetSigningKeyRequest| {
             let cred_store = cred_store.clone();
             let db_service = db_service.clone();
+            let configured_region = configured_region.clone();
             async move {
                 let access_key = request.access_key().to_string();
                 debug!(access_key = %access_key, "Looking up signing key");
+
+                // Check if the region from the credential scope is empty or doesn't match
+                let credential_region = request.region();
+                if credential_region.is_empty() {
+                    warn!(
+                        access_key = %access_key,
+                        configured_region = %configured_region,
+                        "Client sent empty region in credential scope (Credential=...//)! This will cause signature mismatch. Client should use region: {}",
+                        configured_region
+                    );
+                } else if credential_region != configured_region {
+                    warn!(
+                        access_key = %access_key,
+                        credential_region = %credential_region,
+                        configured_region = %configured_region,
+                        "Region mismatch: client sent '{}' but server expects '{}'. This will cause signature verification to fail.",
+                        credential_region,
+                        configured_region
+                    );
+                }
 
                 // Try to get the credential from the permanent store first
                 let secret_access_key = match cred_store.get_credential(&access_key).await {

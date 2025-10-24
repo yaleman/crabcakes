@@ -1822,3 +1822,94 @@ async fn test_virtual_hosted_style_with_host_header() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_unsigned_payload_put_object() {
+    setup_test_logging();
+    let temp_dir = setup_test_files().await;
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Test PutObject with unsigned payload
+    // This is the primary use case where disable_payload_signing() is available
+    let test_content = b"Test content with unsigned payload";
+    let result = client
+        .put_object()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/unsigned-test.txt")
+        .body(test_content.to_vec().into())
+        .customize()
+        .disable_payload_signing()
+        .send()
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "PutObject with unsigned payload failed: {:?}",
+        result.err()
+    );
+
+    // Verify the object was actually created by getting it back
+    let get_result = client
+        .get_object()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/unsigned-test.txt")
+        .send()
+        .await;
+
+    assert!(get_result.is_ok(), "Failed to retrieve uploaded object");
+    let output = get_result.expect("Failed to get object");
+    let body = output.body.collect().await.expect("Failed to read body");
+    assert_eq!(
+        body.into_bytes().as_ref(),
+        test_content,
+        "Content mismatch"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_unsigned_payload_large_object() {
+    setup_test_logging();
+    let temp_dir = setup_test_files().await;
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+
+    // Test with a larger object to ensure unsigned payload works with significant data
+    let test_content = vec![b'X'; 1024 * 100]; // 100KB
+    let result = client
+        .put_object()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/unsigned-large.bin")
+        .body(test_content.clone().into())
+        .customize()
+        .disable_payload_signing()
+        .send()
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "PutObject with unsigned payload (large) failed: {:?}",
+        result.err()
+    );
+
+    // Verify the object was actually created with correct content
+    let get_result = client
+        .get_object()
+        .bucket(TEST_ALLOWED_BUCKET)
+        .key("testuser/unsigned-large.bin")
+        .send()
+        .await;
+
+    assert!(get_result.is_ok(), "Failed to retrieve uploaded object");
+    let output = get_result.expect("Failed to get object");
+    let body = output.body.collect().await.expect("Failed to read body");
+    assert_eq!(
+        body.into_bytes().as_ref(),
+        test_content.as_slice(),
+        "Content mismatch on large unsigned payload"
+    );
+
+    handle.abort();
+}

@@ -152,6 +152,11 @@ fn is_streaming_request(parts: &Parts) -> bool {
                 debug!("Detected streaming signature in request");
                 return true;
             } else if sha_str == "UNSIGNED-PAYLOAD" {
+                // UNSIGNED-PAYLOAD uses the streaming verification path because that's the only
+                // path in scratchstack-aws-signature that respects the x-amz-content-sha256 header
+                // value. The standard verification path always computes SHA256(body), but when
+                // UNSIGNED-PAYLOAD is set, we need to use the literal string "UNSIGNED-PAYLOAD"
+                // in the canonical request instead.
                 debug!("Detected unsigned payload in request");
                 return true;
             }
@@ -266,9 +271,31 @@ impl S3Handler {
 
             let creds = self.credentials_store.credentials.clone();
 
+            let configured_region = self.region.clone();
             let get_signing_key_fn = move |req: GetSigningKeyRequest| {
                 let creds = creds.clone();
+                let configured_region = configured_region.clone();
                 async move {
+                    // Check if the region from the credential scope is empty or doesn't match
+                    let credential_region = req.region();
+                    if credential_region.is_empty() {
+                        warn!(
+                            access_key = %req.access_key(),
+                            configured_region = %configured_region,
+                            "Client sent empty region in credential scope (Credential=...//)! This will cause signature mismatch. Client should use region: {}",
+                            configured_region
+                        );
+                    } else if credential_region != configured_region {
+                        warn!(
+                            access_key = %req.access_key(),
+                            credential_region = %credential_region,
+                            configured_region = %configured_region,
+                            "Region mismatch: client sent '{}' but server expects '{}'. This will cause signature verification to fail.",
+                            credential_region,
+                            configured_region
+                        );
+                    }
+
                     let creds_reader = creds.read().await;
                     if let Some(sec) = (*creds_reader).get(req.access_key()) {
                         let secret_key = KSecretKey::from_str(sec.value()).map_err(|err| {

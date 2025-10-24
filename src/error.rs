@@ -233,7 +233,7 @@ impl CrabCakesError {
 }
 
 impl From<CrabCakesError> for Response<Full<Bytes>> {
-    fn from(err: CrabCakesError) -> Response<Full<Bytes>> {
+    fn from(err: CrabCakesError) -> Self {
         let template = ErrorTemplate {
             error_message: err.to_string(),
         };
