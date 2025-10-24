@@ -60,6 +60,7 @@ docker_build:
     docker buildx build \
         --load \
         --build-arg "GITHUB_SHA=$(git rev-parse HEAD)" \
+        --platform linux/$(uname -m) \
         --build-arg "DESCRIPTION=$(./scripts/get_description.sh)" \
         --tag ghcr.io/yaleman/crabcakes:latest \
         .
@@ -69,6 +70,7 @@ docker_run: docker_build
     docker run --rm -it \
         -p 9000:9000 \
         --mount type=bind,src=$(pwd)/config,target=/config \
+        --platform linux/$(uname -m) \
         ghcr.io/yaleman/crabcakes:latest
 
 run: build-js

@@ -14,6 +14,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 
 use crate::constants::RESERVED_BUCKET_NAMES;
+use crate::error::CrabCakesError;
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -58,8 +59,14 @@ fn is_bucket_name_excluded(name: &str) -> bool {
 }
 
 impl FilesystemService {
-    pub fn new(root_dir: PathBuf) -> Self {
-        Self { root_dir }
+    pub fn new(root_dir: PathBuf) -> Result<Self, CrabCakesError> {
+        if !root_dir.exists() {
+            return Err(CrabCakesError::Configuration(format!(
+                "Root directory '{}' does not exist",
+                root_dir.display()
+            )));
+        }
+        Ok(Self { root_dir })
     }
 
     /// Resolve a key to an absolute filesystem path

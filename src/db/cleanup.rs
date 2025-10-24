@@ -95,7 +95,10 @@ mod tests {
         setup_test_logging();
         let db = initialize_in_memory_database().await;
         let temp_dir = setup_test_files().await;
-        let fs = Arc::new(FilesystemService::new(temp_dir.path().to_path_buf())); // Use a temp directory for testing
+        let fs = Arc::new(
+            FilesystemService::new(temp_dir.path().to_path_buf())
+                .expect("Failed to create filesystem service"),
+        ); // Use a temp directory for testing
 
         let cleanup = TagCleaner::new(Arc::new(db), fs, None);
         let deleted = cleanup.run().await.expect("Failed to run cleanup");
@@ -125,7 +128,10 @@ mod tests {
         }
 
         let temp_dir = setup_test_files().await;
-        let fs = Arc::new(FilesystemService::new(temp_dir.path().to_path_buf())); // Use a temp directory for testing
+        let fs = Arc::new(
+            FilesystemService::new(temp_dir.path().to_path_buf())
+                .expect("Failed to create filesystem service"),
+        ); // Use a temp directory for testing
 
         let cleanup = TagCleaner::new(db.clone(), fs, None);
         let deleted = cleanup.run().await.expect("Failed to run cleanup");

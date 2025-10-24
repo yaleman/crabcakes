@@ -200,18 +200,21 @@ Removes website configuration from a bucket. Returns 204 No Content on success.
 When website mode is enabled for a bucket:
 
 **Index Document Serving:**
+
 - `GET /bucket/` → serves `/bucket/index.html` (or configured suffix)
 - `GET /bucket/subdir/` → serves `/bucket/subdir/index.html`
 - Applies to any path ending with `/`
 - Falls back to 404 if index document doesn't exist
 
 **Error Document Serving:**
+
 - 404 errors automatically serve configured error document
 - Error document served with 404 status code
 - Includes proper Content-Type and Content-Length headers
 - Falls back to standard XML error if error document not found or not configured
 
 **Website Mode Detection:**
+
 - Server checks `bucket_website_configs` table for each request
 - Configuration cached during request processing
 - No performance impact when website mode disabled
@@ -475,7 +478,7 @@ Dev dependencies:
 The server accepts configuration via:
 
 - CLI flags: `--host`, `--port`, `--root-dir`, `--config-dir`, `--require-signature`, `--region`, `--disable-api`, `--oidc-client-id`, `--oidc-discovery-url`, `--frontend-url`
-- Environment variables: `CRABCAKES_LISTENER_ADDRESS`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REGION`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`, `CRABCAKES_FRONTEND_URL`
+- Environment variables: `CRABCAKES_LISTENER_ADDRESS`, `CRABCAKES_PORT`, `CRABCAKES_ROOT_DIR`, `CRABCAKES_CONFIG_DIR`, `CRABCAKES_REGION`, `CRABCAKES_OIDC_CLIENT_ID`, `CRABCAKES_OIDC_DISCOVERY_URL`, `CRABCAKES_FRONTEND_URL`, `CRABCAKES_TLS_CERT`,`CRABCAKES_TLS_KEY`
 - Port must be a valid non-zero u16 value
 - Root directory defaults to `./data` and must exist
 - Config directory defaults to `./config` (if it doesn't exist, server starts with no policies/credentials)
@@ -509,6 +512,7 @@ The admin UI follows a **separation of concerns pattern** with distinct layers:
 ### Layer Structure
 
 **WebHandler** (`src/web/handlers.rs`):
+
 - HTTP layer responsibilities only
 - Authentication checking (session validation)
 - CSRF token validation
@@ -517,6 +521,7 @@ The admin UI follows a **separation of concerns pattern** with distinct layers:
 - Calls RequestHandler for business logic
 
 **RequestHandler** (`src/request_handler.rs`):
+
 - Pure business logic functions
 - No HTTP dependencies (no Request/Response types)
 - No authentication/CSRF concerns (already validated)
@@ -524,6 +529,7 @@ The admin UI follows a **separation of concerns pattern** with distinct layers:
 - Returns Result types for error handling
 
 **Data Structures** (`src/web/serde.rs`):
+
 - Request/response types for API endpoints
 - Separate from HTTP layer
 - Used by both WebHandler and RequestHandler
@@ -600,11 +606,13 @@ pub(crate) async fn api_create_bucket(&self, bucket_name: &str) -> Result<(), Cr
 ### Constructor Pattern
 
 **Production use:**
+
 ```rust
 let request_handler = RequestHandler::new(db, credentials_store, policy_store, filesystem);
 ```
 
 **Test use:**
+
 ```rust
 let request_handler = RequestHandler::new_test().await;
 // Automatically sets up in-memory DB, temp directories, test policies
