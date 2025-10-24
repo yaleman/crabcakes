@@ -71,7 +71,8 @@ pub(crate) async fn setup_test_files() -> TempDir {
 #[tokio::test]
 async fn test_filesystem_service_file_exists() {
     let temp_dir = setup_test_files().await;
-    let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
+    let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf())
+        .expect("Failed to create filesystem service");
 
     assert!(fs_service.file_exists("bucket1/test.txt"));
     assert!(!fs_service.file_exists("nonexistent.txt"));
@@ -80,7 +81,8 @@ async fn test_filesystem_service_file_exists() {
 #[tokio::test]
 async fn test_filesystem_service_get_metadata() {
     let temp_dir = setup_test_files().await;
-    let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
+    let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf())
+        .expect("Failed to create filesystem service");
 
     let metadata = fs_service
         .get_file_metadata("bucket1/test.txt")
@@ -94,7 +96,8 @@ async fn test_filesystem_service_get_metadata() {
 #[tokio::test]
 async fn test_list_directory() {
     let temp_dir = setup_test_files().await;
-    let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf());
+    let fs_service = filesystem::FilesystemService::new(temp_dir.path().to_path_buf())
+        .expect("Failed to create filesystem service");
 
     let (entries, _) = fs_service
         .list_directory(None, 1000, None)

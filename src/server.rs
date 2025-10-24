@@ -11,6 +11,7 @@ use std::sync::Arc;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
+use hyper_util::server::conn::auto;
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::io::BufReader;
@@ -119,9 +120,11 @@ impl Server {
 
     pub async fn run(self, use_in_memory_db: bool) -> Result<(), CrabCakesError> {
         let addr = format!("{}:{}", self.bind_address, self.port);
-        let addr: SocketAddr = addr.parse()?;
+        let addr: SocketAddr = addr.parse().map_err(|err| {
+            CrabCakesError::Configuration(format!("Failed to parse address '{addr}': {err}"))
+        })?;
         // Create filesystem service
-        let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone()));
+        let filesystem = Arc::new(FilesystemService::new(self.root_dir.clone())?);
 
         // Derive policy and credential paths from config_dir
         let policy_dir = self.config_dir.join("policies");
@@ -255,13 +258,12 @@ impl Server {
             region = %self.region,
             address = %addr,
             frontend_url = %listening_url,
+            tls_cert = ?self.tls_cert,
+            tls_key = ?self.tls_key,
             "Starting crabcakes..."
         );
 
         let listener = TcpListener::bind(addr).await?;
-
-        info!("Server listening on {}", listening_url);
-
         if self.tls_cert.is_some() && self.tls_key.is_none()
             || self.tls_cert.is_none() && self.tls_key.is_some()
         {
@@ -270,14 +272,21 @@ impl Server {
             );
         }
 
+        info!("Starting server on {}...", listening_url);
+
         match self.tls_cert.is_some() && self.tls_key.is_some() {
             true => {
-                let certs = self.load_cert().await?;
-                let key = self.load_private_key().await?;
+                let certs = self.load_cert().await.inspect_err(|e| {
+                    error!(tls_cert = ?self.tls_cert, error = %e, "Failed to load TLS certificate");
+                })?;
+                let key = self.load_private_key().await.inspect_err(|e| {
+                    error!(tls_key = ?self.tls_key, error = %e, "Failed to load TLS private key");
+                })?;
 
                 let mut tls_server_config = ServerConfig::builder()
                     .with_no_client_auth()
-                    .with_single_cert(certs, key)?;
+                    .with_single_cert(certs, key)
+                    .inspect_err(|err| error!(error=?err, "Failed to configure TLS server"))?;
                 tls_server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
                 let tls_acceptor = TlsAcceptor::from(Arc::new(tls_server_config));
 
@@ -297,7 +306,8 @@ impl Server {
                                 return;
                             }
                         };
-                        if let Err(err) = http1::Builder::new()
+                        // Use auto builder to support both HTTP/1.1 and HTTP/2
+                        if let Err(err) = auto::Builder::new(hyper_util::rt::TokioExecutor::new())
                             .serve_connection(
                                 TokioIo::new(tls_stream),
                                 service_fn(move |req| {

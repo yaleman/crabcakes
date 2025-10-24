@@ -83,15 +83,15 @@ impl PolicyStore {
                     "Failed to create policy directory"
                 )
             })?;
-        } else {
-            info!(policy_dir = ?policy_dir, "Loading IAM policies");
-        }
-
-        if !policy_dir.is_dir() {
+        } else if !policy_dir.is_dir() {
             error!(policy_dir = ?policy_dir, "Policy path is not a directory");
-            return Err(CrabCakesError::other(&"Policy path is not a directory"));
+            return Err(CrabCakesError::Configuration(format!(
+                "Policy path '{}' is not a directory",
+                policy_dir.display()
+            )));
         }
 
+        info!(policy_dir = ?policy_dir, "Loading IAM policies");
         // Read all JSON files from the policy directory
 
         let res = Self {
@@ -127,8 +127,14 @@ impl PolicyStore {
         let mut policy_writer = policies.write().await;
 
         let mut loaded_policies = HashSet::new();
-        let mut reader = read_dir(&self.policy_dir).await?;
-        while let Some(entry) = reader.next_entry().await? {
+        let mut reader = read_dir(&self.policy_dir).await.inspect_err(
+            |err| error!(policy_dir = %self.policy_dir.display(), error=%err, "Failed to read policy dir"),
+        )?;
+        while let Some(entry) = reader
+            .next_entry()
+            .await
+            .inspect_err(|err| error!(error=%err, "Failed to read an entry from policy dir"))?
+        {
             let path = entry.path();
 
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
@@ -147,6 +153,8 @@ impl PolicyStore {
                         error!(path = ?path, error = %e, "Failed to load policy");
                     }
                 }
+            } else {
+                debug!(path = ?path, "Skipping non-JSON file in policy directory");
             }
             let known_policies: Vec<String> = policy_writer.keys().cloned().collect();
             for existing_policy in known_policies {

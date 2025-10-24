@@ -85,7 +85,9 @@ impl RequestHandler {
         fs::create_dir_all(&data_dir)
             .await
             .expect("Failed to create data dir");
-        let filesystem = Arc::new(FilesystemService::new(data_dir));
+        let filesystem = Arc::new(
+            FilesystemService::new(data_dir).expect("Failed to create filesystem service"),
+        );
 
         Self {
             db,
