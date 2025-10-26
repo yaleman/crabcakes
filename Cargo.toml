@@ -94,9 +94,7 @@ reqwest = { version = "0.12.23", default-features = false, features = [
 form_urlencoded = "1.2.2"
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls"] }
 askama = "0.14.0"
-tower-http = { version = "0.6.6", features = [
-    "compression-gzip",
-], default-features = false }
+tower-http = { version = "0.6.6", features = ["compression-gzip", "trace"], default-features = false }
 scratchstack-arn = "0.4.9"
 futures = "0.3.31"
 serde_with = { workspace = true, features = ["json"] }

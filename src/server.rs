@@ -16,6 +16,7 @@ use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::io::BufReader;
 use tokio::fs::File;
+use tower_http::trace::TraceLayer;
 
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
@@ -36,9 +37,10 @@ use crate::db::initialize_in_memory_database;
 use crate::db::{DBService, initialize_database};
 use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
+use crate::logging::LoggingSpanner;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
-use crate::router::{WebServiceWithSession, route_request};
+use crate::router::route_request;
 use crate::web::handlers::WebHandler;
 use crate::web::s3_handlers::S3Handler;
 use crate::web::service::WebService;
@@ -179,7 +181,7 @@ impl Server {
         }
 
         // Create web service with session layer if OIDC is configured and API not disabled
-        let web_service: Option<WebServiceWithSession> = {
+        let web_service = {
             if let (Some(client_id), Some(discovery_url)) =
                 (&self.oidc_client_id, &self.oidc_discovery_url)
             {
@@ -220,8 +222,15 @@ impl Server {
 
                 // Create the web service and wrap it with the session layer
                 let web_svc = WebService::new(web_handler);
-                let service_with_sessions =
-                    ServiceBuilder::new().layer(session_layer).service(web_svc);
+
+                let trace_layer = TraceLayer::new_for_http()
+                    .make_span_with(LoggingSpanner::default())
+                    .on_response(LoggingSpanner::default());
+
+                let service_with_sessions = ServiceBuilder::new()
+                    .layer(trace_layer)
+                    .layer(session_layer)
+                    .service(web_svc);
 
                 // Box and clone the service for use in connection handlers
                 Some(ServiceExt::boxed_clone(service_with_sessions))
@@ -311,7 +320,7 @@ impl Server {
                             .serve_connection(
                                 TokioIo::new(tls_stream),
                                 service_fn(move |req| {
-                                    let s3_handler = Arc::clone(&s3_handler);
+                                    let s3_handler = s3_handler.clone();
                                     let web_service = web_service.clone();
                                     async move {
                                         route_request(req, remote_addr, s3_handler, web_service)

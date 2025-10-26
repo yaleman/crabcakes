@@ -119,6 +119,9 @@ mod tests {
     fn test_secret_string_display() {
         let secret = SecretString::new("my_secret_password");
         assert_eq!(format!("{}", secret), "******************");
+
+        assert!(!secret.is_empty());
+        assert_eq!(secret.as_stars_with_with_len(5), "*****");
     }
 
     #[test]
