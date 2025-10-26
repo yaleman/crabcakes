@@ -1860,11 +1860,7 @@ async fn test_unsigned_payload_put_object() {
     assert!(get_result.is_ok(), "Failed to retrieve uploaded object");
     let output = get_result.expect("Failed to get object");
     let body = output.body.collect().await.expect("Failed to read body");
-    assert_eq!(
-        body.into_bytes().as_ref(),
-        test_content,
-        "Content mismatch"
-    );
+    assert_eq!(body.into_bytes().as_ref(), test_content, "Content mismatch");
 
     handle.abort();
 }

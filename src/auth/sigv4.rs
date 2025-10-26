@@ -18,9 +18,9 @@ use scratchstack_aws_signature::{
     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, NO_ADDITIONAL_SIGNED_HEADERS,
     SignatureOptions, service_for_signing_key_fn, sigv4_validate_request,
 };
-use tracing::{debug, trace, warn};
 use secret_string::SecretString;
 use tower::BoxError;
+use tracing::{debug, trace, warn};
 
 use crate::constants::{MOCK_ACCOUNT_ID, S3, S3Action};
 use crate::credentials::CredentialStore;
