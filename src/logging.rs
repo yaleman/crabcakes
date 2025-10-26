@@ -11,11 +11,12 @@ pub fn setup_logging() {
     // Initialize tracing subscriber
     let log_level = std::env::var("RUST_LOG").unwrap_or("info".to_string());
     let log_level_sqlx = std::env::var("RUST_LOG_SQLX").unwrap_or("warn".to_string());
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(format!(
             "crabcakes={log_level},scratchstack_aws_signature=debug,tower_http=info,h2=warn,sqlx={log_level_sqlx}",
         )))
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_target(false))
         .init();
 }
 
@@ -54,7 +55,9 @@ impl<B> MakeSpan<B> for LoggingSpanner {
 
 impl<B> tower_http::trace::OnResponse<B> for LoggingSpanner {
     fn on_response(self, response: &Response<B>, latency: std::time::Duration, span: &Span) {
+        let _guard = span.enter();
         span.record("latency", latency.as_millis());
         span.record("status", response.status().as_u16());
+        tracing::info!("Web request completed");
     }
 }

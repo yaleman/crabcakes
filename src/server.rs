@@ -320,7 +320,7 @@ impl Server {
                             .serve_connection(
                                 TokioIo::new(tls_stream),
                                 service_fn(move |req| {
-                                    let s3_handler = Arc::clone(&s3_handler);
+                                    let s3_handler = s3_handler.clone();
                                     let web_service = web_service.clone();
                                     async move {
                                         route_request(req, remote_addr, s3_handler, web_service)

@@ -44,6 +44,8 @@ pub(crate) static TRACE_KEY: &str = "key";
 pub(crate) static TRACE_COPY_SOURCE: &str = "copy_source";
 pub(crate) static TRACE_HAS_RANGE_HEADER: &str = "has_range_header";
 pub(crate) static TRACE_USER: &str = "user";
+// matches the field name from tracinglayer
+pub(crate) static TRACE_LATENCY: &str = "latency";
 
 pub(crate) static MULTIPART_PATH_PREFIX: &str = ".multipart";
 

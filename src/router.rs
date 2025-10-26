@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use chrono::Utc;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Request, Response};
@@ -49,6 +50,7 @@ pub async fn route_request(
     s3_handler: Arc<S3Handler>,
     web_service: Option<WebServiceWithSession>,
 ) -> Result<WebServiceResponse, Infallible> {
+    let start_time = Utc::now();
     let path = req.uri().path();
 
     if path == "/up" {
@@ -69,7 +71,9 @@ pub async fn route_request(
         if web_service.is_none() {
             // In test mode, if web service is not configured, treat all paths as S3 paths
             // This allows testing S3 functionality without web handler
-            let response = s3_handler.handle_request(req, remote_addr).await?;
+            let response = s3_handler
+                .handle_request(req, remote_addr, start_time)
+                .await?;
             let (parts, body) = response.into_parts();
             return Ok(Response::from_parts(
                 parts,
@@ -101,7 +105,9 @@ pub async fn route_request(
         }
     } else {
         // S3 request (or web handler not configured) - handle with S3 handler
-        let response = s3_handler.handle_request(req, remote_addr).await?;
+        let response = s3_handler
+            .handle_request(req, remote_addr, start_time)
+            .await?;
         let (parts, body) = response.into_parts();
         Ok(Response::from_parts(
             parts,

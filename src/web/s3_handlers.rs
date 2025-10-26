@@ -7,6 +7,7 @@ use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use http::HeaderValue;
 use http::header::{
     ACCEPT_RANGES, AUTHORIZATION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HOST,
@@ -35,9 +36,9 @@ use crate::auth::{AuthContext, extract_bucket_and_key, http_method_to_s3_action,
 use crate::body_buffer::BufferedBody;
 use crate::constants::{
     AWS4_HMAC_SHA256, MOCK_ACCOUNT_ID, RESERVED_BUCKET_NAMES, S3, S3Action, TRACE_BUCKET,
-    TRACE_COPY_SOURCE, TRACE_HAS_RANGE_HEADER, TRACE_KEY, TRACE_METHOD, TRACE_REMOTE_ADDR,
-    TRACE_S3_ACTION, TRACE_STATUS_CODE, TRACE_URI, TRACE_USER, X_AMZ_DECODED_CONTENT_LENGTH,
-    X_AMZ_TRAILER,
+    TRACE_COPY_SOURCE, TRACE_HAS_RANGE_HEADER, TRACE_KEY, TRACE_LATENCY, TRACE_METHOD,
+    TRACE_REMOTE_ADDR, TRACE_S3_ACTION, TRACE_STATUS_CODE, TRACE_URI, TRACE_USER,
+    X_AMZ_DECODED_CONTENT_LENGTH, X_AMZ_TRAILER,
 };
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
@@ -517,6 +518,7 @@ impl S3Handler {
 
     #[instrument(
         level = "info",
+        name = "request_s3",
         skip_all,
         fields(method, uri, remote_addr, status_code, user, bucket, key)
     )]
@@ -524,12 +526,24 @@ impl S3Handler {
         &self,
         req: Request<hyper::body::Incoming>,
         remote_addr: std::net::SocketAddr,
+        start_time: DateTime<Utc>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
         // Verify signature and buffer body (or return error response)
         let (parts, mut buffered_body, authenticator_response) =
             match self.verify_and_buffer_request(req).await {
                 Ok(result) => result,
-                Err(response) => return Ok(response),
+                Err(response) => {
+                    let span = tracing::Span::current();
+                    span.record(
+                        TRACE_LATENCY,
+                        tracing::field::display(
+                            Utc::now()
+                                .signed_duration_since(start_time)
+                                .num_milliseconds(),
+                        ),
+                    );
+                    return Ok(response);
+                }
             };
 
         // Extract request metadata from parts
@@ -541,7 +555,18 @@ impl S3Handler {
         if let Some(host_header) = parts.headers.get(HOST) {
             let host_header = match host_header.to_str() {
                 Ok(header) => header.to_string(),
-                Err(_) => return Ok(self.internal_error_response()),
+                Err(_) => {
+                    let span = tracing::Span::current();
+                    span.record(
+                        TRACE_LATENCY,
+                        tracing::field::display(
+                            Utc::now()
+                                .signed_duration_since(start_time)
+                                .num_milliseconds(),
+                        ),
+                    );
+                    return Ok(self.internal_error_response());
+                }
             };
             if host_header.ends_with(&format!(".{}", self.server_addr)) {
                 bucket_name = host_header
@@ -635,6 +660,17 @@ impl S3Handler {
             }
             if decoded_bucket.as_ref() == "lost+found" {
                 warn!(bucket = %decoded_bucket, "Request to system directory bucket name");
+
+                let span = tracing::Span::current();
+                span.record(
+                    TRACE_LATENCY,
+                    tracing::field::display(
+                        Utc::now()
+                            .signed_duration_since(start_time)
+                            .num_milliseconds(),
+                    ),
+                );
+                span.record(TRACE_BUCKET, decoded_bucket.as_ref());
                 return Ok(self.invalid_bucket_name_response(&format!(
                     "Bucket name '{}' is a system directory and cannot be used",
                     decoded_bucket
@@ -997,9 +1033,16 @@ impl S3Handler {
             );
         }
 
+        if let Some(user) = auth_context.username.as_deref() {
+            span.record(TRACE_USER, user);
+        }
         span.record(
-            TRACE_USER,
-            tracing::field::display(auth_context.username.as_deref().unwrap_or("-")),
+            TRACE_LATENCY,
+            tracing::field::display(
+                Utc::now()
+                    .signed_duration_since(start_time)
+                    .num_milliseconds(),
+            ),
         );
         info!("S3 Request completed");
 
