@@ -106,6 +106,15 @@ pub enum S3Action {
     #[serde(alias = "s3:DeleteBucketWebsite")]
     DeleteBucketWebsite,
 }
+
+impl S3Action {
+    pub(crate) fn all_as_str() -> Vec<String> {
+        enum_iterator::all::<S3Action>()
+            .map(|action| action.to_string())
+            .collect()
+    }
+}
+
 impl AsRef<str> for S3Action {
     fn as_ref(&self) -> &'static str {
         match self {

@@ -164,15 +164,13 @@ impl Default for PolicyTroubleshooterTemplate {
     fn default() -> Self {
         Self {
             page: WebPage::PolicyTroubleshooter.as_ref(),
-            bucket: String::new(),
-            key: String::new(),
-            user: String::new(),
-            action: String::new(),
-            policy_names: Vec::new(),
-            policy_name: String::new(),
-            s3_actions: enum_iterator::all::<S3Action>()
-                .map(|a| a.to_string())
-                .collect::<Vec<_>>(),
+            s3_actions: S3Action::all_as_str(),
+            bucket: Default::default(),
+            key: Default::default(),
+            user: Default::default(),
+            action: Default::default(),
+            policy_name: Default::default(),
+            policy_names: Default::default(),
         }
     }
 }
