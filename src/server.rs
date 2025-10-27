@@ -281,7 +281,7 @@ impl Server {
             );
         }
 
-        info!("Starting server on {}...", listening_url);
+        info!("Starting server on {} ...", listening_url);
 
         match self.tls_cert.is_some() && self.tls_key.is_some() {
             true => {

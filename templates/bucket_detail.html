@@ -3,75 +3,87 @@
 {% block title %}{{ bucket_name }} - Buckets - Crabcakes Admin{% endblock %}
 
 {% block content %}
-<div class="breadcrumb">
-    <h1><a href="/admin/buckets">Buckets</a> / {{ bucket_name }}
-        {% if website_enabled %}
-        <span class="badge badge-purple">🌐 Website</span>
-        {% endif %}
-    </h1>
+<!-- Drop Overlay for entire page -->
+<div id="drop-overlay" class="drop-overlay" data-bucket="{{ bucket_name }}">
+    <div class="drop-overlay-content">
+        <div class="drop-overlay-icon">📁</div>
+        <div class="drop-overlay-text">Drop files to upload to <strong>{{ bucket_name }}</strong></div>
+    </div>
 </div>
-
-{% if !objects.is_empty() %}
-<div class="bulk-actions-toolbar">
-    <button id="bulk-delete-btn" class="btn btn-danger" disabled>
-        Delete Selected
-    </button>
-    <span id="selection-counter" class="selection-counter">0 items
-        selected</span>
-</div>
-{% endif %}
-
-<table>
-    <thead>
-        <tr>
-            {% if !objects.is_empty() %}
-            <th class="select-column">
-                <input type="checkbox" id="select-all">
-            </th>
+<div class="drop-target">
+    <div class="breadcrumb">
+        <h1><a href="/admin/buckets">Buckets</a> / {{ bucket_name }}
+            {% if website_enabled %}
+            <span class="badge badge-purple">🌐 Website</span>
             {% endif %}
-            <th>Key</th>
-            <th class="collapsible">Size</th>
-            <th class="collapsible">Last Modified</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for object in objects %}
-        <tr>
-            <td class="select-column">
-                <input type="checkbox" class="object-checkbox"
-                    data-bucket="{{ bucket_name }}"
-                    data-key="{{ object.key }}">
-            </td>
-            <td class="wrap">{{ object.key }}</td>
-            <td class="collapsible">{{ object.size_formatted }}</td>
-            <td class="collapsible">{{ object.last_modified }}</td>
-            <td class="buttons-no-padding">
-                <button class="btn btn-small btn-primary download-object-btn"
-                    data-bucket="{{ bucket_name }}" data-key="{{ object.key }}" title="Download">
-                    ↡ <span class="collapsible">Download</span>
-                </button>
-                <button class="btn btn-small btn-danger delete-object-btn"
-                    data-bucket="{{ bucket_name }}" data-key="{{ object.key }}" title="Delete">
-                    ␡ <span class="collapsible">Delete</span>
-                </button>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+        </h1>
+    </div>
 
-{% if objects.is_empty() %}
-<div class="info-section empty-state">
-    <p>No objects in this bucket</p>
-</div>
-{% endif %}
+    <div id="upload-status" class="upload-status"></div>
 
-<div class="back-link-container">
-    <a href="/admin/buckets" class="btn btn-primary">← Back to Buckets</a>
-    <a href="/admin/buckets/{{ bucket_name }}/settings" class="btn btn-secondary">⚙ Settings</a>
-    <a href="/admin/buckets/{{ bucket_name }}/delete" class="btn btn-danger">Delete Bucket</a>
+    {% if !objects.is_empty() %}
+    <div class="bulk-actions-toolbar">
+        <button id="bulk-delete-btn" class="btn btn-danger" disabled>
+            Delete Selected
+        </button>
+        <span id="selection-counter" class="selection-counter">0 items
+            selected</span>
+    </div>
+    {% endif %}
+
+    <table>
+        <thead>
+            <tr>
+                {% if !objects.is_empty() %}
+                <th class="select-column">
+                    <input type="checkbox" id="select-all">
+                </th>
+                {% endif %}
+                <th>Key</th>
+                <th class="collapsible">Size</th>
+                <th class="collapsible">Last Modified</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for object in objects %}
+            <tr>
+                <td class="select-column">
+                    <input type="checkbox" class="object-checkbox"
+                        data-bucket="{{ bucket_name }}"
+                        data-key="{{ object.key }}">
+                </td>
+                <td class="wrap">{{ object.key }}</td>
+                <td class="collapsible">{{ object.size_formatted }}</td>
+                <td class="collapsible">{{ object.last_modified }}</td>
+                <td class="buttons-no-padding">
+                    <button class="btn btn-small btn-primary download-object-btn"
+                        data-bucket="{{ bucket_name }}" data-key="{{ object.key }}" title="Download">
+                        ↡ <span class="collapsible">Download</span>
+                    </button>
+                    <button class="btn btn-small btn-danger delete-object-btn"
+                        data-bucket="{{ bucket_name }}" data-key="{{ object.key }}" title="Delete">
+                        ␡ <span class="collapsible">Delete</span>
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if objects.is_empty() %}
+    <div class="info-section empty-state">
+        <p>No objects in this bucket</p>
+    </div>
+    {% endif %}
+
+    <div class="back-link-container">
+        <a href="/admin/buckets" class="btn btn-primary">← Back to Buckets</a>
+        <a href="/admin/buckets/{{ bucket_name }}/settings" class="btn btn-secondary">⚙ Settings</a>
+        <a href="/admin/buckets/{{ bucket_name }}/delete" class="btn btn-danger">Delete Bucket</a>
+    </div>
 </div>
+
 {% endblock %}
 
 {% block extra_scripts %}

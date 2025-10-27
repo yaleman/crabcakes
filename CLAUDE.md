@@ -639,3 +639,4 @@ The admin web UI uses a purple gradient theme (`#667eea` to `#764ba2`):
 - users should refer to documentation over CLAUDE.md as documentation is for humans, and CLAUDE is for a tool.
 - TODO.md is not for documentation, remove completed tasks entirely from it when done
 - NEVER use inline CSS or javascript.
+- never look at the javascript files in `static/js/` unless troubleshooting their build phase - they are built from the typescript in `src/js/`
