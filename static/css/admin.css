@@ -658,3 +658,78 @@ table td button {
 .error-notification-hide {
     display: none;
 }
+
+/* Drop target for drag and drop */
+.drop-target {
+    position: relative;
+    min-height: 50vh;
+}
+
+/* Drag and Drop Overlay */
+.drop-overlay {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.drop-overlay-visible {
+    display: flex;
+}
+
+.drop-overlay-content {
+    text-align: center;
+    color: var(--color-white);
+}
+
+.drop-overlay-icon {
+    font-size: 5.0rem;
+    margin-bottom: 1.0rem;
+    animation: bounce 1s infinite;
+}
+
+@keyframes bounce {
+    0%, 100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-1.0rem);
+    }
+}
+
+.drop-overlay-text {
+    font-size: 1.5rem;
+    font-weight: var(--font-weight-bold);
+    text-shadow: 0 0.2rem 0.4rem rgba(0, 0, 0, 0.3);
+}
+
+.drop-overlay-text strong {
+    color: var(--color-white);
+    font-weight: var(--font-weight-bold);
+}
+
+/* Upload Status Messages */
+.upload-status {
+    padding: 1.0rem 1.5rem;
+    border-radius: var(--border-radius);
+    margin: 1.0rem 0;
+    font-weight: var(--font-weight-medium);
+    text-align: center;
+}
+
+.upload-status.success {
+    background: linear-gradient(135deg, var(--color-purple-30pct), var(--color-purple-50pct));
+    border: 0.15rem solid var(--color-purple-light);
+    color: var(--color-purple-dark);
+}
+
+.upload-status.error {
+    background-color: var(--bgcolor-lightred);
+    border: 0.15rem solid var(--bgcolor-red);
+    color: var(--bgcolor-red);
+}
