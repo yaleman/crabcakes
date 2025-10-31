@@ -195,10 +195,10 @@
 <pre><code class="language-bash">cargo build --release
 </code></pre>
 <p>Or install it with <code>cargo install crabcakes</code> (or use the docker container <code>ghcr.io/yaleman/crabcakes:latest</code>)</p>
-<pre><code class="language-bash"># Start server (default: http://localhost:9000, serving ./data)
+<pre><code class="language-bash"># Start server (default: https://localhost:9000, serving ./data)
 crabcakes
 
-# Custom configuration
+# Custom base dir for data
 crabcakes --host 0.0.0.0 --port 8080 --root-dir /path/to/files
 
 # With debug logging
@@ -206,22 +206,22 @@ RUST_LOG=debug crabcakes
 </code></pre>
 <h2 id="usage-with-aws-cli"><a class="header" href="#usage-with-aws-cli">Usage with AWS CLI</a></h2>
 <pre><code class="language-bash"># List buckets
-aws s3 ls --endpoint-url http://localhost:9000
+aws s3 ls --endpoint-url https://localhost:9000
 
 # Create bucket
-aws s3 mb s3://mybucket --endpoint-url http://localhost:9000
+aws s3 mb s3://mybucket --endpoint-url https://localhost:9000
 
 # Upload object
-aws s3 cp file.txt s3://mybucket/ --endpoint-url http://localhost:9000
+aws s3 cp file.txt s3://mybucket/ --endpoint-url https://localhost:9000
 
 # Download object
-aws s3 cp s3://mybucket/file.txt . --endpoint-url http://localhost:9000
+aws s3 cp s3://mybucket/file.txt . --endpoint-url https://localhost:9000
 
 # Delete multiple objects
-aws s3api delete-objects --bucket mybucket --delete '{"Objects":[{"Key":"file1.txt"},{"Key":"file2.txt"}]}' --endpoint-url http://localhost:9000
+aws s3api delete-objects --bucket mybucket --delete '{"Objects":[{"Key":"file1.txt"},{"Key":"file2.txt"}]}' --endpoint-url https://localhost:9000
 
 # Copy object (server-side)
-aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/source.txt --endpoint-url http://localhost:9000
+aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/source.txt --endpoint-url https://localhost:9000
 </code></pre>
 <h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
 <pre><code class="language-bash">cargo test       # Run all tests
@@ -231,6 +231,478 @@ aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/so
 <ul>
 <li>Syntax highlighting powered by <a href="https://prismjs.com">Prism.js</a></li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
+<p>Crabcakes uses a filesystem-based configuration system that stores credentials, policies, and metadata in a configurable directory. This page covers the structure, requirements, and management of configuration files.</p>
+<h2 id="configuration-directory"><a class="header" href="#configuration-directory">Configuration Directory</a></h2>
+<h3 id="default-location"><a class="header" href="#default-location">Default Location</a></h3>
+<p>By default, Crabcakes looks for configuration in the <code>./config</code> directory relative to where the server is started. This can be customized using:</p>
+<ul>
+<li>CLI flag: <code>--config-dir &lt;PATH&gt;</code></li>
+<li>Environment variable: <code>CRABCAKES_CONFIG_DIR</code></li>
+</ul>
+<h3 id="directory-structure"><a class="header" href="#directory-structure">Directory Structure</a></h3>
+<pre><code class="language-text">config/
+├── credentials/          # Credential JSON files (one per credential)
+│   ├── alice.json
+│   └── bob.json
+├── policies/            # Policy JSON files (one per policy)
+│   ├── admin.json
+│   └── read-only.json
+└── crabcakes.sqlite3    # SQLite database for metadata
+</code></pre>
+<p><strong>Automatic Creation</strong>: If the configuration directory or its subdirectories don't exist, they will be created automatically when the server starts.</p>
+<h2 id="credentials"><a class="header" href="#credentials">Credentials</a></h2>
+<p>Credentials are stored as individual JSON files in the <code>credentials/</code> subdirectory. Each file represents one set of AWS-compatible access credentials.</p>
+<h3 id="credential-file-format"><a class="header" href="#credential-file-format">Credential File Format</a></h3>
+<p>Each credential file must be a valid JSON file with exactly two fields, and <code>secret_access_key</code> must be 40 characters in length.</p>
+<pre><code class="language-json">{
+  "access_key_id": "alice",
+  "secret_access_key": "alicesecret12345678901234567890123456712x"
+}
+</code></pre>
+<h3 id="field-requirements"><a class="header" href="#field-requirements">Field Requirements</a></h3>
+<h4 id="access_key_id"><a class="header" href="#access_key_id"><code>access_key_id</code></a></h4>
+<ul>
+<li><strong>Type</strong>: String</li>
+<li><strong>Usage</strong>: Used as the username for authentication and authorization</li>
+</ul>
+<h4 id="secret_access_key"><a class="header" href="#secret_access_key"><code>secret_access_key</code></a></h4>
+<ul>
+<li><strong>Type</strong>: String</li>
+<li><strong>Length</strong>: <strong>MUST be exactly 40 characters</strong> (AWS standard length)</li>
+<li><strong>Validation</strong>: Enforced at load time and creation time</li>
+<li><strong>Critical</strong>: Credentials with invalid secret length will be rejected with an error</li>
+</ul>
+<h3 id="credential-loading-behavior"><a class="header" href="#credential-loading-behavior">Credential Loading Behavior</a></h3>
+<ul>
+<li>All <code>.json</code> files in the <code>credentials/</code> directory are loaded at server startup</li>
+<li>Files are processed asynchronously</li>
+<li>Invalid credentials are logged but don't prevent server startup</li>
+<li>If no valid credentials are loaded, the server will start but no authentication will succeed</li>
+<li>Credentials are cached in memory for fast signature verification</li>
+</ul>
+<h3 id="duplicate-access-key-prevention"><a class="header" href="#duplicate-access-key-prevention">Duplicate Access Key Prevention</a></h3>
+<p><strong>During Startup (File Loading)</strong>:</p>
+<ul>
+<li>If multiple credential files contain the same <code>access_key_id</code>, the <strong>first file processed wins</strong></li>
+<li>A warning is logged when duplicate <code>access_key_id</code> values are encountered: <em>"Duplicate access_key_id found, ignoring this credential file (first credential loaded takes precedence)"</em></li>
+<li>Subsequent credential files with the same <code>access_key_id</code> are ignored</li>
+<li>Only the first credential loaded will be active</li>
+</ul>
+<p><strong>When Creating Credentials via Web UI</strong>:</p>
+<ul>
+<li>The server explicitly checks if a credential with the same <code>access_key_id</code> already exists</li>
+<li>If found, returns HTTP error with message: "Credential with the same identifier already exists"</li>
+<li>Creation is blocked - you must delete the existing credential first</li>
+</ul>
+<p><strong>Best Practice</strong>: Use unique <code>access_key_id</code> values and avoid creating multiple credential files with the same identifier.</p>
+<h3 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h3>
+<ul>
+<li><strong>Never commit production credentials to git</strong> - Add <code>config/</code> to your <code>.gitignore</code></li>
+<li>Secret access keys are stored as <code>SecretString</code> in memory to prevent accidental logging</li>
+<li>Credentials cannot use path traversal sequences in access_key_id (<code>..</code>, <code>/</code>, <code>\</code> are blocked)</li>
+</ul>
+<h2 id="policies"><a class="header" href="#policies">Policies</a></h2>
+<p>Policies define authorization rules using AWS IAM-compatible policy syntax. Policy files are stored in the <code>policies/</code> subdirectory.</p>
+<p>See <a href="policies.html">Policies</a> for more details.</p>
+<h2 id="configuration-options"><a class="header" href="#configuration-options">Configuration Options</a></h2>
+<h3 id="cli-flags"><a class="header" href="#cli-flags">CLI Flags</a></h3>
+<pre><code class="language-bash">crabcakes [OPTIONS]
+</code></pre>
+<p><strong>Server Options</strong>:</p>
+<ul>
+<li><code>--host &lt;HOST&gt;</code> - Listener address (default: <code>127.0.0.1</code>)</li>
+<li><code>-p, --port &lt;PORT&gt;</code> - Port number (default: <code>9000</code>)</li>
+<li><code>-r, --root-dir &lt;PATH&gt;</code> - Root directory for file storage (default: <code>./data</code>)</li>
+</ul>
+<p><strong>Configuration</strong>:</p>
+<ul>
+<li><code>-c, --config-dir &lt;PATH&gt;</code> - Configuration directory (default: <code>./config</code>)</li>
+<li><code>--region &lt;REGION&gt;</code> - AWS region name (default: <code>crabcakes</code>)</li>
+</ul>
+<p><strong>TLS</strong>:</p>
+<ul>
+<li><code>--tls-cert &lt;PATH&gt;</code> - Path to TLS certificate file</li>
+<li><code>--tls-key &lt;PATH&gt;</code> - Path to TLS private key file</li>
+</ul>
+<p><strong>Authentication</strong>:</p>
+<ul>
+<li><code>--oidc-client-id &lt;ID&gt;</code> - OIDC client ID for OAuth2 authentication (required for admin UI)</li>
+<li><code>--oidc-discovery-url &lt;URL&gt;</code> - OIDC issuer URL (required for admin UI)</li>
+<li><code>--frontend-url &lt;URL&gt;</code> - Frontend URL for OIDC redirect URIs when behind reverse proxy</li>
+</ul>
+<h3 id="environment-variables"><a class="header" href="#environment-variables">Environment Variables</a></h3>
+<p>All CLI flags can be set via environment variables:</p>
+<ul>
+<li><code>CRABCAKES_LISTENER_ADDRESS</code> - Listener address</li>
+<li><code>CRABCAKES_PORT</code> - Port number</li>
+<li><code>CRABCAKES_ROOT_DIR</code> - Root directory for files</li>
+<li><code>CRABCAKES_CONFIG_DIR</code> - Configuration directory</li>
+<li><code>CRABCAKES_REGION</code> - AWS region name</li>
+<li><code>CRABCAKES_TLS_CERT</code> - TLS certificate path</li>
+<li><code>CRABCAKES_TLS_KEY</code> - TLS key path</li>
+<li><code>CRABCAKES_OIDC_CLIENT_ID</code> - OIDC client ID</li>
+<li><code>CRABCAKES_OIDC_DISCOVERY_URL</code> - OIDC discovery URL</li>
+<li><code>CRABCAKES_FRONTEND_URL</code> - Frontend URL for reverse proxy</li>
+</ul>
+<h3 id="examples"><a class="header" href="#examples">Examples</a></h3>
+<p><strong>Basic setup</strong>:</p>
+<pre><code class="language-bash">crabcakes --config-dir /etc/crabcakes
+</code></pre>
+<p><strong>Custom host and port</strong>:</p>
+<pre><code class="language-bash">crabcakes --host 0.0.0.0 --port 8080
+</code></pre>
+<p><strong>Using environment variables</strong>:</p>
+<pre><code class="language-bash">export CRABCAKES_CONFIG_DIR=/etc/crabcakes
+export CRABCAKES_PORT=8080
+export CRABCAKES_OIDC_CLIENT_ID=your-client-id
+export CRABCAKES_OIDC_DISCOVERY_URL=https://accounts.google.com
+crabcakes
+</code></pre>
+<p><strong>With TLS</strong>:</p>
+<pre><code class="language-bash">crabcakes \
+  --tls-cert /path/to/cert.pem \
+  --tls-key /path/to/key.pem \
+  --frontend-url https://s3.example.com
+</code></pre>
+<h2 id="database"><a class="header" href="#database">Database</a></h2>
+<p>Crabcakes uses SQLite to store metadata including object tags, OAuth PKCE state, temporary credentials, and bucket website configurations.</p>
+<p><strong>Database Location</strong>: <code>{config_dir}/crabcakes.sqlite3</code></p>
+<p><strong>Features</strong>:</p>
+<ul>
+<li>Automatically created on first startup</li>
+<li>Migrations run automatically on startup</li>
+<li>WAL mode enabled for better concurrency</li>
+<li>Auto-vacuum enabled for disk space management</li>
+</ul>
+<p><strong>For complete database schema and details</strong>, see the <a href="database.html">Database Documentation</a>.</p>
+<h2 id="reserved-names"><a class="header" href="#reserved-names">Reserved Names</a></h2>
+<p>The following bucket names are reserved for the admin UI and cannot be created as S3 buckets:</p>
+<ul>
+<li><code>admin</code></li>
+<li><code>api</code></li>
+<li><code>login</code></li>
+<li><code>logout</code></li>
+<li><code>oauth2</code></li>
+<li><code>.well-known</code></li>
+<li><code>config</code></li>
+<li><code>oidc</code></li>
+<li><code>crabcakes</code></li>
+<li><code>docs</code></li>
+<li><code>help</code></li>
+<li><code>.multipart</code></li>
+</ul>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<h3 id="security"><a class="header" href="#security">Security</a></h3>
+<ol>
+<li><strong>Never commit credentials to git</strong>: Add <code>config/</code> to <code>.gitignore</code></li>
+<li><strong>Use strong secrets</strong>: Generate random 40-character secret access keys</li>
+<li><strong>Principle of least privilege</strong>: Grant minimum permissions needed</li>
+<li><strong>Test policies</strong>: Use the Policy Troubleshooter before deploying</li>
+</ol>
+<h3 id="organization"><a class="header" href="#organization">Organization</a></h3>
+<ol>
+<li><strong>Naming conventions</strong>: Use descriptive names for credentials and policies</li>
+<li><strong>One policy per use case</strong>: Create separate policy files for different roles</li>
+<li><strong>Document policies</strong>: Use meaningful <code>Sid</code> values in policy statements</li>
+<li><strong>Regular audits</strong>: Review credentials and policies periodically</li>
+</ol>
+<h3 id="production-deployment"><a class="header" href="#production-deployment">Production Deployment</a></h3>
+<ol>
+<li><strong>Use TLS</strong>: Always enable TLS in production with <code>--tls-cert</code> and <code>--tls-key</code></li>
+<li><strong>Restrict host</strong>: Use <code>--host 127.0.0.1</code> or specific IP, not <code>0.0.0.0</code></li>
+<li><strong>Configure OIDC</strong>: Set up proper OIDC provider for admin UI authentication</li>
+<li><strong>Set frontend URL</strong>: Use <code>--frontend-url</code> when behind reverse proxy</li>
+<li><strong>Monitor logs</strong>: Use <code>RUST_LOG</code> environment variable for logging control</li>
+</ol>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<h3 id="credentials-not-loading"><a class="header" href="#credentials-not-loading">Credentials not loading</a></h3>
+<p><strong>Symptoms</strong>: Authentication fails, logs show "No credentials loaded"</p>
+<p><strong>Solutions</strong>:</p>
+<ul>
+<li>Verify credential files are in <code>{config_dir}/credentials/</code></li>
+<li>Check files have <code>.json</code> extension</li>
+<li>Verify JSON is valid (use <code>jq</code> or JSON validator)</li>
+<li>Ensure <code>secret_access_key</code> is exactly 40 characters</li>
+<li>Check file permissions (must be readable by server process)</li>
+</ul>
+<h3 id="policies-not-taking-effect"><a class="header" href="#policies-not-taking-effect">Policies not taking effect</a></h3>
+<p><strong>Symptoms</strong>: Authorization denied unexpectedly</p>
+<p><strong>Solutions</strong>:</p>
+<ul>
+<li>Verify policy files are in <code>{config_dir}/policies/</code></li>
+<li>Check JSON syntax is valid</li>
+<li>Use Policy Troubleshooter to test evaluation</li>
+<li>Check principal ARN matches credential's <code>access_key_id</code></li>
+<li>Verify resource ARN matches bucket/key being accessed</li>
+<li>Remember: explicit Deny wins over Allow</li>
+</ul>
+<h3 id="database-errors"><a class="header" href="#database-errors">Database errors</a></h3>
+<p><strong>Symptoms</strong>: Errors related to SQLite or migrations</p>
+<p><strong>Solutions</strong>:</p>
+<ul>
+<li>Check <code>{config_dir}</code> directory is writable</li>
+<li>Verify disk space is available</li>
+<li>Delete <code>crabcakes.sqlite3*</code> files and restart (data will be lost)</li>
+<li>Check for file permission issues</li>
+</ul>
+<h3 id="admin-ui-not-accessible"><a class="header" href="#admin-ui-not-accessible">Admin UI not accessible</a></h3>
+<p><strong>Symptoms</strong>: Cannot access <code>/admin</code> URL</p>
+<p><strong>Solutions</strong>:</p>
+<ul>
+<li>Verify OIDC is configured (<code>--oidc-client-id</code> and <code>--oidc-discovery-url</code>)</li>
+<li>Check OIDC discovery URL is correct and accessible</li>
+<li>Verify redirect URI is registered with OIDC provider</li>
+<li>Use <code>--frontend-url</code> if behind reverse proxy</li>
+<li>Check browser console for errors</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="policies-1"><a class="header" href="#policies-1">Policies</a></h1>
+<h2 id="policy-file-format"><a class="header" href="#policy-file-format">Policy File Format</a></h2>
+<p>Policies follow standard AWS IAM policy format:</p>
+<pre><code class="language-json">{
+    "Version": "2012-10-17",
+    "Id": "S3BucketPolicy",
+    "Statement": [
+        {
+            "Sid": "AllowS3All",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/testuser"
+            },
+            "Action": [
+                "s3:*"
+            ],
+            "Resource": "arn:aws:s3:::bucket1/testuser/*"
+        }
+    ]
+}
+</code></pre>
+<h2 id="policy-components"><a class="header" href="#policy-components">Policy Components</a></h2>
+<h3 id="version"><a class="header" href="#version">Version</a></h3>
+<p>Standard AWS IAM policy version: <code>"2012-10-17"</code></p>
+<h3 id="statement-array"><a class="header" href="#statement-array">Statement Array</a></h3>
+<p>Each policy contains one or more statements with the following fields:</p>
+<p><strong>Sid</strong> (optional)</p>
+<ul>
+<li>Statement identifier for documentation purposes</li>
+</ul>
+<p><strong>Effect</strong> (required)</p>
+<ul>
+<li><code>"Allow"</code> - Grants permission</li>
+<li><code>"Deny"</code> - Explicitly denies permission (takes precedence over <code>Allow</code>)</li>
+</ul>
+<p><strong>Principal</strong> (required)</p>
+<ul>
+<li>Specifies who the policy applies to</li>
+<li>AWS user: <code>{"AWS": "arn:aws:iam:::user/username"}</code></li>
+<li>Wildcard (anonymous): <code>"*"</code></li>
+</ul>
+<p><strong>Action</strong> (required)</p>
+<ul>
+<li>S3 action or actions to allow/deny</li>
+<li>Single action: <code>"s3:GetObject"</code></li>
+<li>Multiple actions: <code>["s3:GetObject", "s3:PutObject"]</code></li>
+<li>Wildcard: <code>"s3:*"</code></li>
+</ul>
+<p><strong>Resource</strong> (required)</p>
+<ul>
+<li>S3 resource ARN or ARNs</li>
+<li>Specific object: <code>"arn:aws:s3:::bucket/key"</code></li>
+<li>Bucket objects: <code>"arn:aws:s3:::bucket/*"</code></li>
+<li>Multiple resources: <code>["arn:aws:s3:::bucket1", "arn:aws:s3:::bucket1/*"]</code></li>
+<li>Wildcard: <code>"*"</code></li>
+</ul>
+<h3 id="supported-s3-actions"><a class="header" href="#supported-s3-actions">Supported S3 Actions</a></h3>
+<p>Crabcakes supports the following S3 actions in policies:</p>
+<p><strong>Object Operations</strong>:</p>
+<ul>
+<li><code>s3:GetObject</code> - Read objects</li>
+<li><code>s3:PutObject</code> - Write objects</li>
+<li><code>s3:DeleteObject</code> - Delete objects</li>
+<li><code>s3:GetObjectTagging</code> - Read object tags</li>
+<li><code>s3:PutObjectTagging</code> - Write object tags</li>
+<li><code>s3:DeleteObjectTagging</code> - Delete object tags</li>
+<li><code>s3:GetObjectAttributes</code> - Read object metadata</li>
+</ul>
+<p><strong>Bucket Operations</strong>:</p>
+<ul>
+<li><code>s3:ListBucket</code> - List bucket contents</li>
+<li><code>s3:CreateBucket</code> - Create new buckets</li>
+<li><code>s3:DeleteBucket</code> - Delete buckets</li>
+<li><code>s3:HeadBucket</code> - Check bucket existence</li>
+<li><code>s3:GetBucketLocation</code> - Get bucket region</li>
+<li><code>s3:ListAllMyBuckets</code> - List all buckets</li>
+<li><code>s3:GetBucketWebsite</code> - Get website configuration</li>
+<li><code>s3:PutBucketWebsite</code> - Set website configuration</li>
+<li><code>s3:DeleteBucketWebsite</code> - Delete website configuration</li>
+</ul>
+<p><strong>Multipart Upload Operations</strong>:</p>
+<ul>
+<li><code>s3:AbortMultipartUpload</code> - Cancel multipart upload</li>
+<li><code>s3:ListBucketMultipartUploads</code> - List in-progress uploads</li>
+<li><code>s3:ListMultipartUploadParts</code> - List parts of an upload</li>
+</ul>
+<p><strong>Wildcards</strong>:</p>
+<ul>
+<li><code>s3:*</code> - All S3 actions</li>
+</ul>
+<h2 id="policy-name-validation"><a class="header" href="#policy-name-validation">Policy Name Validation</a></h2>
+<p>Policy filenames must meet the following requirements:</p>
+<ul>
+<li><strong>Pattern</strong>: <code>^[a-zA-Z0-9]{1}[a-zA-Z0-9-_]*[a-zA-Z0-9]{1}$</code></li>
+<li>Must start and end with alphanumeric characters</li>
+<li>Can contain letters, numbers, hyphens (<code>-</code>), and underscores (<code>_</code>)</li>
+<li>Minimum 2 characters</li>
+<li>Cannot contain <code>..</code>, <code>/</code>, or <code>\</code> (path traversal protection)</li>
+</ul>
+<p><strong>Valid examples</strong>: <code>admin-policy</code>, <code>read_only</code>, <code>testUser123</code></p>
+<p><strong>Invalid examples</strong>: <code>-admin</code>, <code>policy-</code>, <code>a</code>, <code>../etc/passwd</code></p>
+<h2 id="policy-evaluation"><a class="header" href="#policy-evaluation">Policy Evaluation</a></h2>
+<p>Crabcakes uses the <code>iam-rs</code> library for AWS-compatible policy evaluation:</p>
+<ul>
+<li><strong>Default deny</strong>: All requests denied unless explicitly allowed</li>
+<li><strong>Explicit deny wins</strong>: Deny statements override Allow statements</li>
+<li><strong>Evaluation caching</strong>: Results cached for 5 minutes using SHA256 hash of request</li>
+<li><strong>Cache invalidation</strong>: Cleared when policies are added, updated, or deleted</li>
+<li><strong>Wildcard principals</strong>: Supports anonymous access with <code>"Principal": "*"</code></li>
+</ul>
+<h2 id="policy-loading-behavior"><a class="header" href="#policy-loading-behavior">Policy Loading Behavior</a></h2>
+<ul>
+<li>All <code>.json</code> files in the <code>policies/</code> directory are loaded at server startup</li>
+<li>Invalid policies are logged and skipped</li>
+<li>Policies can be hot-reloaded via the admin UI</li>
+<li>If a policy file is removed from disk, it's removed from memory on next reload</li>
+</ul>
+<h2 id="example-policies"><a class="header" href="#example-policies">Example Policies</a></h2>
+<p><strong>Allow all operations for a specific user</strong>:</p>
+<pre><code class="language-json">{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/alice"
+            },
+            "Action": "s3:*",
+            "Resource": "*"
+        }
+    ]
+}
+</code></pre>
+<p><strong>Read-only access to a specific bucket</strong>:</p>
+<pre><code class="language-json">{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/bob"
+            },
+            "Action": [
+                "s3:GetObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::public",
+                "arn:aws:s3:::public/*"
+            ]
+        }
+    ]
+}
+</code></pre>
+<p><strong>User-specific prefix access</strong>:</p>
+<pre><code class="language-json">{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam:::user/charlie"
+            },
+            "Action": "s3:*",
+            "Resource": "arn:aws:s3:::shared/charlie/*"
+        }
+    ]
+}
+</code></pre>
+<h2 id="web-based-policy-management"><a class="header" href="#web-based-policy-management">Web-Based Policy Management</a></h2>
+<p>Crabcakes provides web-based tools for managing and troubleshooting policies. These tools are available in the admin UI at <code>/admin</code> (requires OIDC authentication).</p>
+<h3 id="policy-editor"><a class="header" href="#policy-editor">Policy Editor</a></h3>
+<p><strong>Access</strong>: Navigate to <code>/admin/policies</code> in your browser after authenticating.</p>
+<p>The Policy Editor provides a full-featured interface for managing IAM policies:</p>
+<p><strong>Operations</strong>:</p>
+<ul>
+<li><strong>List Policies</strong>: View all loaded policies with their details</li>
+<li><strong>Create Policy</strong>: Form-based policy creation with JSON editor and syntax highlighting</li>
+<li><strong>Edit Policy</strong>: Modify existing policy JSON with validation</li>
+<li><strong>View Policy</strong>: See policy details and permissions breakdown</li>
+<li><strong>Delete Policy</strong>: Remove policies from the system</li>
+</ul>
+<p><strong>How to Use</strong>:</p>
+<ol>
+<li>Log in to the admin UI at <code>/admin</code> using OIDC authentication</li>
+<li>Click "Policies" in the navigation menu</li>
+<li>Use the interface to:
+<ul>
+<li>View the list of all policies</li>
+<li>Click "New Policy" to create a policy</li>
+<li>Click "Edit" next to a policy to modify it</li>
+<li>Click "View" to see detailed permissions</li>
+<li>Click "Delete" to remove a policy</li>
+</ul>
+</li>
+</ol>
+<p><strong>Editor Features</strong>:</p>
+<ul>
+<li>JSON syntax highlighting using Prism.js</li>
+<li>Real-time validation before saving</li>
+<li>Principal permissions breakdown view</li>
+<li>Automatic policy cache refresh after changes</li>
+<li>Direct filesystem integration (changes persist to <code>policies/</code> directory)</li>
+</ul>
+<h2 id="policy-troubleshooter"><a class="header" href="#policy-troubleshooter">Policy Troubleshooter</a></h2>
+<p><strong>Access</strong>: Navigate to <code>/admin/policy_troubleshooter</code> in your browser after authenticating.</p>
+<p>The Policy Troubleshooter helps debug authorization issues by simulating policy evaluation without making actual S3 requests.</p>
+<p><strong>How to Use</strong>:</p>
+<ol>
+<li>Log in to the admin UI at <code>/admin</code></li>
+<li>Click "Policy Troubleshooter" in the navigation menu</li>
+<li>Fill in the evaluation form:
+<ul>
+<li><strong>User</strong>: Principal username (e.g., "alice")</li>
+<li><strong>Action</strong>: S3 action from dropdown (e.g., "s3:GetObject")</li>
+<li><strong>Bucket</strong>: Bucket name</li>
+<li><strong>Key</strong>: Object key (optional, for object-level actions)</li>
+<li><strong>Policy Name</strong>: Specific policy to test (optional, tests all policies if empty)</li>
+</ul>
+</li>
+<li>Click "Test Policy" to see the result</li>
+</ol>
+<p><strong>Output</strong>:</p>
+<ul>
+<li><strong>Decision</strong>: Allow, Deny, or NotApplicable</li>
+<li><strong>Matched Statements</strong>: Which policy statements applied</li>
+<li><strong>Evaluation Context</strong>: Detailed information about the evaluation</li>
+</ul>
+<p><strong>Use Cases</strong>:</p>
+<ul>
+<li>Debug why a user can't access a resource</li>
+<li>Verify policy changes before deploying to production</li>
+<li>Understand which policies are granting/denying access</li>
+<li>Test new policies before creating credentials</li>
+</ul>
+<p><strong>Example</strong>:</p>
+<p>To test if user "alice" can read <code>bucket1/test.txt</code>:</p>
+<ul>
+<li>User: <code>alice</code></li>
+<li>Action: <code>s3:GetObject</code></li>
+<li>Bucket: <code>bucket1</code></li>
+<li>Key: <code>test.txt</code></li>
+</ul>
+<p>The troubleshooter will show whether the request would be allowed based on loaded policies and which policy statements matched.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="development"><a class="header" href="#development">Development</a></h1>
+<p>Everything needs to pass <code>cargo clippy</code> which is set fairly aggressively, also <code>fmt</code> and <code>test</code>.</p>
+<p>There are manual/integration tests which use the AWS CLI to test "real world" usage (<code>./manual_test.sh</code> and <code>scripts/integration/*.sh</code>).</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="database-design"><a class="header" href="#database-design">Database Design</a></h1>
 <h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
 <p>Crabcakes uses SQLite for storing metadata, sessions, and temporary credentials. The database is located at <code>{config_dir}/crabcakes.sqlite3</code> (default: <code>./config/crabcakes.sqlite3</code>) and is automatically created on first startup.</p>
