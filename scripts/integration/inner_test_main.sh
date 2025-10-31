@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# set -e
+MYDIR=$(dirname "$0")
 
 # shellcheck disable=SC1091
-source ./inner_setup_test.sh
+source "$MYDIR/inner_setup_test.sh"
 
 echo "########################################"
 echo "Testing ListObjectsV2 - list files in ${TEST_BUCKET2}"
@@ -401,17 +401,17 @@ else
     echo "CreateBucket correctly rejected duplicate bucket"
 fi
 
-./test_tagging.sh || {
+"$MYDIR/test_tagging.sh" || {
     echo "❌ Tagging tests failed ❌"
     exit 1
 }
 
-./test_multipart.sh || {
+"$MYDIR/test_multipart.sh" || {
     echo "❌ Multipart tests failed ❌"
     exit 1
 }
 
-./test_website.sh || {
+"$MYDIR/test_website.sh" || {
     echo "❌ Website tests failed ❌"
     exit 1
 }

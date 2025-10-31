@@ -1,10 +1,12 @@
 #!/bin/bash
 
+MYDIR=$(dirname "$0")
+
 set -o pipefail
 
 if [ -z "$FRONTEND_WITHOUT_PORT" ]; then
     # shellcheck disable=SC1091
-    source ./inner_setup_test.sh
+    source "$MYDIR/inner_setup_test.sh"
 fi
 
 # Test object tagging

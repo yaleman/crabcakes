@@ -1,10 +1,10 @@
 #!/bin/bash
-
+MYDIR=$(dirname "$0")
 set -o pipefail
 
 if [ -z "$FRONTEND_WITHOUT_PORT" ]; then
     # shellcheck disable=SC1091
-    source ./inner_setup_test.sh
+    source "$MYDIR/inner_setup_test.sh"
 fi
 
 echo "========================================"
@@ -346,7 +346,7 @@ echo "========================================"
 
 echo "Killing crabcakes (PID $CRABCAKES_PID) and cleaning up $TEMPDIR"
 
-./inner_test_pkill_instance.sh
+"$MYDIR/inner_test_pkill_instance.sh"
 
 rm -rf "$TEMPDIR" "$TEMPDIR2"
 

@@ -22,10 +22,10 @@ cargo build --release
 Or install it with `cargo install crabcakes` (or use the docker container `ghcr.io/yaleman/crabcakes:latest`)
 
 ```bash
-# Start server (default: http://localhost:9000, serving ./data)
+# Start server (default: https://localhost:9000, serving ./data)
 crabcakes
 
-# Custom configuration
+# Custom base dir for data
 crabcakes --host 0.0.0.0 --port 8080 --root-dir /path/to/files
 
 # With debug logging
@@ -36,22 +36,22 @@ RUST_LOG=debug crabcakes
 
 ```bash
 # List buckets
-aws s3 ls --endpoint-url http://localhost:9000
+aws s3 ls --endpoint-url https://localhost:9000
 
 # Create bucket
-aws s3 mb s3://mybucket --endpoint-url http://localhost:9000
+aws s3 mb s3://mybucket --endpoint-url https://localhost:9000
 
 # Upload object
-aws s3 cp file.txt s3://mybucket/ --endpoint-url http://localhost:9000
+aws s3 cp file.txt s3://mybucket/ --endpoint-url https://localhost:9000
 
 # Download object
-aws s3 cp s3://mybucket/file.txt . --endpoint-url http://localhost:9000
+aws s3 cp s3://mybucket/file.txt . --endpoint-url https://localhost:9000
 
 # Delete multiple objects
-aws s3api delete-objects --bucket mybucket --delete '{"Objects":[{"Key":"file1.txt"},{"Key":"file2.txt"}]}' --endpoint-url http://localhost:9000
+aws s3api delete-objects --bucket mybucket --delete '{"Objects":[{"Key":"file1.txt"},{"Key":"file2.txt"}]}' --endpoint-url https://localhost:9000
 
 # Copy object (server-side)
-aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/source.txt --endpoint-url http://localhost:9000
+aws s3api copy-object --bucket mybucket --key dest.txt --copy-source mybucket/source.txt --endpoint-url https://localhost:9000
 ```
 
 ## Testing

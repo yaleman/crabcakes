@@ -40,6 +40,7 @@ pub(crate) fn fix_mock_id(input: &impl ToString) -> String {
     )
 }
 
+#[derive(Clone)]
 struct CachedResult {
     evaluation_result: EvaluationResult,
     timestamp: DateTime<Utc>,
@@ -58,9 +59,41 @@ impl CachedResult {
     }
 }
 
+struct ResultCache(Arc<RwLock<HashMap<String, CachedResult>>>);
+
+impl ResultCache {
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(HashMap::new())))
+    }
+    pub async fn get(&self, key: &str, expiry_secs: u32) -> Option<CachedResult> {
+        let cache = self.0.read().await;
+        match cache.get(key).as_ref() {
+            Some(value) => {
+                if value.expired(expiry_secs) {
+                    self.0.write().await.remove(key);
+                    None
+                } else {
+                    Some((*value).clone())
+                }
+            }
+            None => None,
+        }
+    }
+    pub async fn insert(&self, key: String, value: CachedResult) {
+        let mut cache = self.0.write().await;
+        cache.insert(key, value);
+    }
+    pub async fn clear(&self) {
+        debug!("Clearing result cache");
+        let mut cache = self.0.write().await;
+        cache.clear();
+        debug!("Result cache cleared");
+    }
+}
+
 pub struct PolicyStore {
     pub policies: Arc<RwLock<HashMap<String, IAMPolicy>>>,
-    result_cache: Arc<RwLock<HashMap<String, CachedResult>>>,
+    result_cache: ResultCache,
     policy_dir: PathBuf,
     expiry_secs: Arc<RwLock<u32>>,
 }
@@ -96,7 +129,7 @@ impl PolicyStore {
 
         let res = Self {
             policies: Arc::new(RwLock::new(HashMap::new())),
-            result_cache: Arc::new(RwLock::new(Default::default())),
+            result_cache: ResultCache::new(),
             policy_dir: policy_dir.clone(),
             expiry_secs: Arc::new(RwLock::new(300)), // cache expiry in seconds
         };
@@ -182,17 +215,10 @@ impl PolicyStore {
     #[instrument(level = "debug", skip(self))]
     pub async fn get_cached_result(&self, request: &IAMRequest) -> Option<EvaluationResult> {
         let hashed_request: String = hash_request(request);
-        let mut cache = self.result_cache.write().await;
-        if let Some(cached_result) = cache.get(&hashed_request) {
-            if !cached_result.expired(*self.expiry_secs.read().await) {
-                debug!("Found cached decision");
-                return Some(cached_result.evaluation_result.clone());
-            } else {
-                debug!("Cache entry expired for request");
-                cache.remove(&hashed_request);
-            }
-        }
-        None
+        self.result_cache
+            .get(&hashed_request, *self.expiry_secs.read().await)
+            .await
+            .map(|cached| cached.evaluation_result)
     }
     pub async fn evaluate_request(&self, request: &IAMRequest) -> Result<Decision, CrabCakesError> {
         self.debug_evaluate_request(request)
@@ -299,8 +325,9 @@ impl PolicyStore {
                         .inspect_err(|e| error!(error = %e, "Error evaluating policies"))?;
                     // store the result in the cache
                     {
-                        let mut cache = self.result_cache.write().await;
-                        cache.insert(hashed_request, CachedResult::new(res.clone(), Utc::now()));
+                        self.result_cache
+                            .insert(hashed_request, CachedResult::new(res.clone(), Utc::now()))
+                            .await;
                     }
                     res
                 }
@@ -391,8 +418,7 @@ impl PolicyStore {
 
         // Clear cache
         {
-            let mut cache = self.result_cache.write().await;
-            cache.clear();
+            self.result_cache.clear().await;
         }
 
         info!(policy_name = %name, "Added policy");
@@ -428,8 +454,7 @@ impl PolicyStore {
 
         // Clear cache
         {
-            let mut cache = self.result_cache.write().await;
-            cache.clear();
+            self.result_cache.clear().await;
         }
 
         info!(policy_name = %name, "Updated policy");
@@ -470,8 +495,7 @@ impl PolicyStore {
 
         // Clear cache
         {
-            let mut cache = self.result_cache.write().await;
-            cache.clear();
+            self.result_cache.clear().await;
         }
 
         info!(policy_name = %name, "Deleted policy");
