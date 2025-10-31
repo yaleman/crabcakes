@@ -1,13 +1,13 @@
 #!/bin/bash
 
 SERVER_PORT=19000
+MYDIR=$(dirname "$0")
 
 
 FRONTEND_WITHOUT_PORT="$(echo "${CRABCAKES_FRONTEND_URL:-http://localhost}" | awk -F':' '{print $1 ":" $2}')"
 SERVER_ADDRESS="${FRONTEND_WITHOUT_PORT}:$SERVER_PORT"
 
 echo "SERVER ADDRESS=$SERVER_ADDRESS"
-
 
 export TEST_BUCKET="bucket1"
 export TEST_BUCKET2="bucket2"
@@ -23,7 +23,11 @@ if [[ -z "$(which -a aws)" ]]; then
     exit 1
 fi
 
-pkill -f 'target/debug/crabcakes.*--port.*test_config'
+echo "Killing any existing crabcakes instances"
+if [ "$(pgrep -f 'target/debug/crabcakes.*--port.*test_config' | wc -l)" -gt 0 ]; then
+    echo "Crabcakes is still running. Stopping it."
+    pkill -f 'target/debug/crabcakes.*--port.*test_config'
+fi
 
 
 # Use test credentials from test_config/credentials/testuser.json
@@ -42,7 +46,7 @@ export TEMPDIR2
 
 RUST_LOG=debug cargo run --quiet --bin crabcakes -- \
     --port "$SERVER_PORT" \
-    --config-dir ./test_config \
+    --config-dir "$MYDIR/../../test_config" \
     --root-dir "$TEMPDIR" &
 CRABCAKES_PID=$!
 echo "Started crabcakes with PID $CRABCAKES_PID"

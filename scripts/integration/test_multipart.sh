@@ -1,10 +1,16 @@
 #!/bin/bash
 
+MYDIR=$(dirname "$0")
+
 set -o pipefail
 
 if [ -z "$FRONTEND_WITHOUT_PORT" ]; then
     # shellcheck disable=SC1091
-    source ./inner_setup_test.sh
+    source "$MYDIR/inner_setup_test.sh"
+fi
+if [ -z "$SERVER_ADDRESS" ]; then
+    # shellcheck disable=SC1091
+    source "$MYDIR/inner_setup_test.sh"
 fi
 # Test Multipart Upload
 echo "Testing multipart upload..."

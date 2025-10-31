@@ -121,6 +121,16 @@ impl CredentialStore {
                     continue;
                 }
 
+                // Check if credential already exists - first one wins
+                if credentials.contains_key(&credential.access_key_id) {
+                    warn!(
+                        access_key_id = %credential.access_key_id,
+                        path = ?path,
+                        "Duplicate access_key_id found, ignoring this credential file (first credential loaded takes precedence)"
+                    );
+                    continue;
+                }
+
                 debug!(access_key = %credential.access_key_id, path = ?path, "Loaded credential");
                 credentials.insert(credential.access_key_id, credential.secret_access_key);
             }
