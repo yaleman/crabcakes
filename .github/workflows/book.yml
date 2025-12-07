@@ -22,13 +22,6 @@ jobs:
 
             - name: Build book in docker
               run: docker run --rm --mount "type=bind,src=$(pwd)/docs,target=/book" --mount "type=bind,src=$(pwd)/README.md,target=/README.md" ghcr.io/peaceiris/mdbook:v${MDBOOK_CONTAINER_VERSION} build
-            # - name: Setup mdBook
-            #   uses: peaceiris/actions-mdbook@v2
-            #   with:
-            #       mdbook-version: "latest"
-            # - name: Run mdbook build
-            #   run: |
-            #       cd docs && mdbook build
             - name: Upload build artifacts
               uses: actions/upload-artifact@v5
               with:
