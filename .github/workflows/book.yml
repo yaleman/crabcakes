@@ -11,20 +11,24 @@ permissions:
     pages: write
     contents: write
 jobs:
-    deploy:
-        runs-on: macos-latest
+    deploy_book:
+        runs-on: ubuntu-latest
         concurrency:
             group: ${{ github.workflow }}-${{ github.ref }}
+        env:
+            MDBOOK_CONTAINER_VERSION: "0.5.0"
         steps:
             - uses: actions/checkout@v6
 
-            - name: Setup mdBook
-              uses: peaceiris/actions-mdbook@v2
-              with:
-                  mdbook-version: "latest"
-            - name: Run mdbook build
-              run: |
-                  cd docs && mdbook build
+            - name: Build book in docker
+              run: docker run --rm --mount "type=bind,src=$(pwd)/docs,target=/book" --mount "type=bind,src=$(pwd)/README.md,target=/README.md" ghcr.io/peaceiris/mdbook:v${MDBOOK_CONTAINER_VERSION} build
+            # - name: Setup mdBook
+            #   uses: peaceiris/actions-mdbook@v2
+            #   with:
+            #       mdbook-version: "latest"
+            # - name: Run mdbook build
+            #   run: |
+            #       cd docs && mdbook build
             - name: Upload build artifacts
               uses: actions/upload-artifact@v5
               with:
