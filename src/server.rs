@@ -14,8 +14,7 @@ use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto;
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use std::io::BufReader;
-use tokio::fs::File;
+use rustls_pki_types::pem::PemObject;
 use tower_http::trace::TraceLayer;
 
 use tokio::net::TcpListener;
@@ -368,10 +367,9 @@ impl Server {
     async fn load_cert(&self) -> Result<Vec<CertificateDer<'static>>, CrabCakesError> {
         // Open certificate file.
         if let Some(cert_file) = self.tls_cert.as_ref() {
-            let certfile = File::open(cert_file).await?;
-            let mut reader = BufReader::new(certfile.into_std().await);
+            let file_content = tokio::fs::read(cert_file).await?;
             // Load and return certificate.
-            rustls_pemfile::certs(&mut reader)
+            CertificateDer::pem_slice_iter(&file_content)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| CrabCakesError::Other(format!("Failed to load certificates: {}", e)))
         } else {
@@ -383,23 +381,13 @@ impl Server {
     async fn load_private_key(&self) -> Result<PrivateKeyDer<'static>, CrabCakesError> {
         // Open keyfile.
         if let Some(key_file) = self.tls_key.as_ref() {
-            let keyfile = File::open(key_file).await?;
-            let mut reader = BufReader::new(keyfile.into_std().await);
-
+            let file_contents = tokio::fs::read(key_file).await?;
             // Load and return a single private key.
-            match rustls_pemfile::private_key(&mut reader) {
-                Ok(Some(key)) => Ok(key),
-                Ok(_) => Err(CrabCakesError::Other(
-                    "No private keys found in the key file".to_string(),
-                )),
-                Err(e) => Err(CrabCakesError::Other(format!(
-                    "Failed to load private key: {}",
-                    e
-                ))),
-            }
+            PrivateKeyDer::from_pem_slice(&file_contents)
+                .map_err(|e| CrabCakesError::Other(format!("Failed to load private key: {}", e)))
         } else {
-            Err(CrabCakesError::Configuration(
-                "TLS key file not specified".to_string(),
+            Err(CrabCakesError::Other(
+                "TLS key file path not provided".to_string(),
             ))
         }
     }
