@@ -21,7 +21,7 @@ jobs:
             - uses: actions/checkout@v6
 
             - name: Build book in docker
-              run: docker run --rm -it --mount "type=bind,src=$(pwd)/docs,target=/book" --mount "type=bind,src=$(pwd)/README.md,target=/README.md" ghcr.io/peaceiris/mdbook:v${MDBOOK_CONTAINER_VERSION} build
+              run: docker run --rm --mount "type=bind,src=$(pwd)/docs,target=/book" --mount "type=bind,src=$(pwd)/README.md,target=/README.md" ghcr.io/peaceiris/mdbook:v${MDBOOK_CONTAINER_VERSION} build
             # - name: Setup mdBook
             #   uses: peaceiris/actions-mdbook@v2
             #   with:
