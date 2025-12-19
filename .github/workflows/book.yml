@@ -23,7 +23,7 @@ jobs:
             - name: Build book in docker
               run: docker run --rm --mount "type=bind,src=$(pwd)/docs,target=/book" --mount "type=bind,src=$(pwd)/README.md,target=/README.md" ghcr.io/peaceiris/mdbook:v${MDBOOK_CONTAINER_VERSION} build
             - name: Upload build artifacts
-              uses: actions/upload-artifact@v5
+              uses: actions/upload-artifact@v6
               with:
                   name: book
                   path: ./docs/book
