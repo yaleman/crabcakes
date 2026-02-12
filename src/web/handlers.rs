@@ -562,11 +562,7 @@ impl WebHandler {
         &self,
         json: impl Serialize,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
-        let body = serde_json::to_string(&json).inspect_err(|err| {
-            debug!("Failed to serialize JSON response: {err:?}");
-        })?;
-
-        let mut res = Response::new(Full::new(Bytes::from(body)));
+        let mut res = Response::new(Full::new(Bytes::from(json!(json).to_string())));
 
         *res.status_mut() = StatusCode::OK;
 
