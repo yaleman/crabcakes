@@ -308,7 +308,7 @@ impl MultipartManager {
         }
 
         // Sort by initiated time (newest first)
-        uploads.sort_by(|a, b| b.initiated.cmp(&a.initiated));
+        uploads.sort_by_key(|upload| std::cmp::Reverse(upload.initiated));
 
         Ok(uploads)
     }
