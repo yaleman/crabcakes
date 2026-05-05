@@ -14,6 +14,7 @@
 <div>
     <a href="/admin/policies/edit/{{ policy_name }}"
         class="btn btn-primary">Edit Policy</a>
+    <a href="{{ policy_copy_url }}" class="btn btn-secondary">Copy to New Policy</a>
     <button id="delete-policy-btn" data-policy-name="{{ policy_name }}"
         class="btn btn-danger">Delete Policy</button>
 </div>
@@ -58,7 +59,16 @@
 
 <h2>Raw policy JSON</h2>
 
-<pre><code class="language-json">{{ policy_json }}</code></pre>
+<div class="policy-json-copy-container">
+    <button type="button" id="copy-policy-json-btn"
+        class="policy-json-copy-btn" aria-label="Copy policy JSON">
+        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path d="M8 7a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2z"></path>
+            <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path>
+        </svg>
+    </button>
+    <pre><code id="policy-json-code" class="language-json">{{ policy_json }}</code></pre>
+</div>
 
 <div class="back-link-container">
     <a href="/admin/policies" class="btn btn-primary">← Back to Policies</a>

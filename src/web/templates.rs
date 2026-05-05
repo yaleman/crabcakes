@@ -44,6 +44,7 @@ pub(crate) struct PoliciesTemplate {
 pub(crate) struct PolicyDetailTemplate {
     pub(crate) page: &'static str,
     pub(crate) policy_name: String,
+    pub(crate) policy_copy_url: String,
     pub(crate) policy_json: String,
     pub(crate) policy_principal_permissions: Vec<PolicyPrincipalPermission>,
 }

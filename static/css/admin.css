@@ -439,6 +439,67 @@ textarea#policy-json {
     width: 90%;
 }
 
+.policy-json-copy-container {
+    position: relative;
+}
+
+.policy-json-copy-container pre {
+    padding-right: 3.5rem;
+}
+
+.policy-json-copy-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    color: var(--color-white);
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    border-radius: var(--border-radius-button);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.policy-json-copy-btn svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.policy-json-copy-btn:hover,
+.policy-json-copy-btn:focus {
+    background: rgba(255, 255, 255, 0.24);
+    border-color: rgba(255, 255, 255, 0.54);
+}
+
+.policy-json-copy-container:hover .policy-json-copy-btn,
+.policy-json-copy-container:focus-within .policy-json-copy-btn,
+.policy-json-copy-btn.copied,
+.policy-json-copy-btn.copy-failed {
+    opacity: 1;
+}
+
+.policy-json-copy-btn.copied {
+    background: rgba(34, 197, 94, 0.48);
+    border-color: rgba(34, 197, 94, 0.78);
+}
+
+.policy-json-copy-btn.copy-failed {
+    background: rgba(220, 38, 38, 0.52);
+    border-color: rgba(220, 38, 38, 0.82);
+}
+
 .warning-box {
     margin-top: 20px;
     padding: 15px;
