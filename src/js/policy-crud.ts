@@ -8,6 +8,56 @@ interface PolicyResponse {
     message?: string;
 }
 
+function formatErrorMessage(error: unknown): string {
+    if (error === undefined || error === null || error === '') {
+        return 'An unknown error occurred';
+    }
+
+    if (typeof error === 'object' && error !== null) {
+        return JSON.stringify(error) || 'An unknown error occurred';
+    }
+
+    return String(error);
+}
+
+function showErrorNotification(message: string): void {
+    const errorNotification = document.getElementById('error-notification') as HTMLDivElement | null;
+
+    if (errorNotification) {
+        errorNotification.textContent = message;
+        while (errorNotification.classList.contains('error-notification-hide')) {
+            errorNotification.classList.remove('error-notification-hide');
+        }
+        errorNotification.classList.remove('error-notification-empty');
+    } else {
+        console.error("Error notification element not found");
+    }
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+    if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-1000px';
+    textarea.style.left = '-1000px';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+        if (!document.execCommand('copy')) {
+            throw new Error('Clipboard copy failed');
+        }
+    } finally {
+        textarea.remove();
+    }
+}
+
 async function deletePolicy(policyName: string): Promise<void> {
     if (!confirm(`Are you sure you want to delete policy "${policyName}"?`)) {
         return;
@@ -34,41 +84,22 @@ async function deletePolicy(policyName: string): Promise<void> {
 
 
 async function savePolicy(policyName: string, policyAction: string, policyData: any): Promise<PolicyResponse> {
-    try {
-        const url = `/admin/api/policies`;
-        const method = policyAction === 'update' ? 'PUT' : 'POST';
-        const body = { name: policyName, policy: policyData };
+    const url = `/admin/api/policies`;
+    const method = policyAction === 'update' ? 'PUT' : 'POST';
+    const body = { name: policyName, policy: policyData };
 
-        const response = await authenticatedFetch(url, {
-            method: method,
-            body: body,
-        });
-        const jsonResponse = await response.json();
-        if (!response.ok || "error" in jsonResponse) {
-            const error = jsonResponse as ErrorMessage;
-            console.error(`Error saving policy: ${error.error}`);
-            throw new Error(JSON.stringify(error));
-        }
-        console.debug!(`Policy saved successfully method=${method} name=${policyName}`);
-        const result: PolicyResponse = await response.json();
-        return result;
-    } catch (error) {
-        console.error!('Error saving policy:', error);
-        const errorMessage = error instanceof Error ? JSON.parse(error.message) as ErrorMessage : { error: String(error) };
-        const message = typeof errorMessage.error === 'object' ? JSON.stringify(errorMessage.error) : `${errorMessage.error}` || 'An unknown error occurred';
-
-        const errorNotification = document.getElementById('error-notification') as HTMLDivElement | null;
-
-        if (errorNotification) {
-            errorNotification.textContent = message;
-            while (errorNotification.classList.contains('error-notification-hide')) {
-                errorNotification.classList.remove('error-notification-hide');
-            }
-        } else {
-            console.error("Error notification element not found");
-        }
-        throw error;
+    const response = await authenticatedFetch(url, {
+        method: method,
+        body: body,
+    });
+    const jsonResponse = await response.json() as PolicyResponse;
+    if (!response.ok || "error" in jsonResponse) {
+        const error = jsonResponse as ErrorMessage;
+        const message = formatErrorMessage(error.error);
+        throw new Error(message);
     }
+    console.debug!(`Policy saved successfully method=${method} name=${policyName}`);
+    return jsonResponse;
 }
 
 // Form handler for policy edit page
@@ -90,26 +121,13 @@ function initPolicyForm(): void {
 
         try {
             const policyData = JSON.parse(policyJson);
-            await savePolicy(policyName, policyAction, policyData).then((res) => {
-                console.debug(`Policy saved successfully: ${JSON.stringify(res)}`);
-                window.location.href = `/admin/policies/view/${policyName}`;
-            }).catch((err) => {
-                console.error(`Error saving policy: ${err}`);
-            });
+            const response = await savePolicy(policyName, policyAction, policyData);
+            console.debug(`Policy saved successfully: ${JSON.stringify(response)}`);
+            window.location.href = `/admin/policies/view/${policyName}`;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-
-            const errorNotification = document.getElementById('error-notification') as HTMLDivElement | null;
-
-            if (errorNotification) {
-                errorNotification.textContent = message;
-                while (errorNotification.classList.contains('error-notification-hide')) {
-                    errorNotification.classList.remove('error-notification-hide');
-                }
-                errorNotification.classList.remove('error-notification-empty');
-            } else {
-                console.error("Error notification element not found");
-            }
+            console.error('Error saving policy:', error);
+            showErrorNotification(message);
         }
     });
 }
@@ -117,15 +135,37 @@ function initPolicyForm(): void {
 // Handler for policy detail page delete button
 function initPolicyDetail(): void {
     const deleteBtn = document.getElementById('delete-policy-btn') as HTMLButtonElement | null;
-    if (!deleteBtn) return;
+    const copyPolicyJsonBtn = document.getElementById('copy-policy-json-btn') as HTMLButtonElement | null;
+    const policyJsonCode = document.getElementById('policy-json-code') as HTMLElement | null;
 
-    deleteBtn.addEventListener('click', (e: Event) => {
-        e.preventDefault();
-        const policyName = deleteBtn.dataset.policyName;
-        if (policyName) {
-            deletePolicy(policyName);
-        }
-    });
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e: Event) => {
+            e.preventDefault();
+            const policyName = deleteBtn.dataset.policyName;
+            if (policyName) {
+                deletePolicy(policyName);
+            }
+        });
+    }
+
+    if (copyPolicyJsonBtn && policyJsonCode) {
+        copyPolicyJsonBtn.addEventListener('click', async (e: Event) => {
+            e.preventDefault();
+            copyPolicyJsonBtn.classList.remove('copied', 'copy-failed');
+
+            try {
+                await copyTextToClipboard(policyJsonCode.textContent ?? '');
+                copyPolicyJsonBtn.classList.add('copied');
+            } catch (error) {
+                console.error('Error copying policy JSON:', error);
+                copyPolicyJsonBtn.classList.add('copy-failed');
+            } finally {
+                window.setTimeout(() => {
+                    copyPolicyJsonBtn.classList.remove('copied', 'copy-failed');
+                }, 1200);
+            }
+        });
+    }
 }
 
 // Initialize on page load

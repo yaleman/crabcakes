@@ -12,6 +12,8 @@ use iam_rs::{IAMPolicy, Principal, PrincipalId};
 use serde::Serialize;
 use tokio::sync::RwLock;
 
+use crate::constants::MOCK_ACCOUNT_ID;
+
 /// Type of identity principal
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum IdentityType {
@@ -131,6 +133,17 @@ fn principal_to_arns(principal: &Principal) -> Vec<String> {
     }
 }
 
+fn normalize_admin_principal(principal_arn: &str) -> String {
+    principal_arn.replace(
+        &format!("arn:aws:iam::{MOCK_ACCOUNT_ID}:"),
+        "arn:aws:iam:::",
+    )
+}
+
+fn admin_principals_match(candidate: &str, requested: &str) -> bool {
+    normalize_admin_principal(candidate) == normalize_admin_principal(requested)
+}
+
 /// Extract all unique principals from a set of policies
 pub async fn extract_principals(policies: Arc<RwLock<HashMap<String, IAMPolicy>>>) -> Vec<String> {
     let mut principals = HashSet::new();
@@ -169,7 +182,9 @@ pub async fn get_identity_permissions(
         for statement in &policy.statement {
             // Check if this statement applies to the given principal
             let applies = if let Some(ref principal) = statement.principal {
-                principal_to_arns(principal).contains(&principal_arn.to_string())
+                principal_to_arns(principal)
+                    .iter()
+                    .any(|arn| admin_principals_match(arn, principal_arn))
             } else {
                 false
             };
@@ -264,5 +279,49 @@ mod tests {
             determine_identity_type("s3.amazonaws.com"),
             IdentityType::Service
         );
+    }
+
+    #[test]
+    fn test_admin_principals_match_mock_account_id() {
+        assert!(admin_principals_match(
+            "arn:aws:iam::000000000000:user/images",
+            "arn:aws:iam:::user/images"
+        ));
+        assert!(admin_principals_match(
+            "arn:aws:iam:::user/images",
+            "arn:aws:iam:::user/images"
+        ));
+        assert!(!admin_principals_match(
+            "arn:aws:iam::000000000000:user/images",
+            "arn:aws:iam:::user/not-images"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_identity_permissions_matches_mock_account_id_policy() {
+        let policy: IAMPolicy = serde_json::from_value(serde_json::json!({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {
+                    "AWS": "arn:aws:iam::000000000000:user/images"
+                },
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::images/*"
+            }]
+        }))
+        .expect("test policy should parse");
+        let policies = Arc::new(RwLock::new(HashMap::from([(
+            "images-policy".to_string(),
+            policy,
+        )])));
+
+        let identity =
+            get_identity_permissions("arn:aws:iam:::user/images", policies.clone()).await;
+        assert_eq!(identity.policies.len(), 1);
+        assert_eq!(identity.policies[0].policy_name, "images-policy");
+
+        let unrelated = get_identity_permissions("arn:aws:iam:::user/not-images", policies).await;
+        assert!(unrelated.policies.is_empty());
     }
 }

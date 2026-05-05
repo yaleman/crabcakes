@@ -203,7 +203,9 @@ impl WebHandler {
                 (Method::GET, "/admin/profile") => self.get_profile(session).await,
                 (Method::GET, "/admin/system") => self.get_system(session).await,
                 (Method::GET, "/admin/policies") => self.get_policies(session).await,
-                (Method::GET, "/admin/policies/new") => self.get_policy_new_form(session).await,
+                (Method::GET, "/admin/policies/new") => {
+                    self.get_policy_new_form(req, session).await
+                }
                 (Method::GET, "/admin/policy_troubleshooter") => {
                     self.get_policy_troubleshooter(req, session).await
                 }
@@ -750,6 +752,10 @@ impl WebHandler {
         let template = PolicyDetailTemplate {
             page: WebPage::Policies.as_ref(),
             policy_name: policy_name.to_string(),
+            policy_copy_url: format!(
+                "/admin/policies/new?copy_from={}",
+                urlencoding::encode(policy_name)
+            ),
             policy_json,
             policy_principal_permissions,
         };
@@ -760,17 +766,37 @@ impl WebHandler {
     /// GET /admin/policies/new - Show form for creating a new policy
     async fn get_policy_new_form(
         &self,
+        req: Request<Incoming>,
         session: Session,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         if self.check_auth(&session).await.is_err() {
             return login_redirect();
         };
 
+        let copy_from = req.uri().query().and_then(|query| {
+            form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .find(|(key, _)| key == "copy_from")
+                .map(|(_, value)| value)
+        });
+
+        let policy_json = if let Some(copy_from) = copy_from {
+            let policy = self
+                .policy_store
+                .get_policy(&copy_from)
+                .await
+                .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
+            serde_json::to_string_pretty(&policy)
+                .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?
+        } else {
+            String::new()
+        };
+
         let template = PolicyFormTemplate {
             page: WebPage::Policies.as_ref(),
             action: PolicyAction::Create,
             policy_name: String::new(),
-            policy_json: String::new(),
+            policy_json,
         };
 
         self.build_html_response(template)
