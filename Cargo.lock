@@ -1118,7 +1118,7 @@ dependencies = [
  "enum-iterator",
  "form_urlencoded",
  "futures",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "http 1.4.0",
  "http-body-util",
  "hyper 1.10.1",
