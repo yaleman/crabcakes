@@ -5,6 +5,7 @@
 
 use secret_string::SecretString;
 
+use crate::error::CrabCakesError;
 use crate::logging::setup_test_logging;
 use crate::request_handler::RequestHandler;
 use crate::web::serde::{CredentialInfo, VacuumResult};
@@ -409,6 +410,31 @@ async fn test_api_create_credential_valid() {
 }
 
 #[tokio::test]
+async fn test_api_create_credential_rejects_invalid_secret_lengths() {
+    let handler = RequestHandler::new_test().await;
+
+    for secret in ["a".repeat(39), "a".repeat(41)] {
+        let result = handler
+            .api_create_credential("badsecret".to_string(), secret.into())
+            .await;
+
+        assert!(
+            matches!(result, Err(CrabCakesError::InvalidSecretLength)),
+            "should reject secret length before storing credential"
+        );
+    }
+
+    let creds = handler
+        .api_list_credentials()
+        .await
+        .expect("credentials should list");
+    assert!(
+        !creds.iter().any(|cred| cred.access_key_id == "badsecret"),
+        "invalid credential should not be stored"
+    );
+}
+
+#[tokio::test]
 async fn test_api_create_credential_duplicate() {
     let handler = RequestHandler::new_test().await;
 
@@ -450,6 +476,28 @@ async fn test_api_update_credential_existing() {
         .await;
 
     assert!(result.is_ok(), "Should update existing credential");
+}
+
+#[tokio::test]
+async fn test_api_update_credential_rejects_invalid_secret_lengths() {
+    let handler = RequestHandler::new_test().await;
+    let old_secret = "a".repeat(40);
+
+    handler
+        .api_create_credential("badupdateuser".to_string(), old_secret.into())
+        .await
+        .expect("Should create credential");
+
+    for secret in ["b".repeat(39), "b".repeat(41)] {
+        let result = handler
+            .api_update_credential("badupdateuser".to_string(), secret.into())
+            .await;
+
+        assert!(
+            matches!(result, Err(CrabCakesError::InvalidSecretLength)),
+            "should reject invalid secret length"
+        );
+    }
 }
 
 #[tokio::test]
