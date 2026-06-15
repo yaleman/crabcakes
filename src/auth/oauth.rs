@@ -134,6 +134,27 @@ impl OAuthClient {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) async fn new_for_tests(db: Arc<DBService>) -> Self {
+        let http_client = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("HTTP client should build");
+
+        Self {
+            provider_metadata: Arc::new(RwLock::new(None)),
+            client_id: ClientId::new("test-client".to_string()),
+            redirect_uri: RedirectUrl::new("https://app.example/oauth2/callback".to_string())
+                .expect("redirect URI should be valid"),
+            db,
+            http_client,
+            issuer_url: IssuerUrl::new("https://issuer.example".to_string())
+                .expect("issuer URL should be valid"),
+            provider_metadata_discoverer: default_provider_metadata_discoverer(),
+        }
+    }
+
     async fn get_provider_metadata(&self) -> Result<CoreProviderMetadata, CrabCakesError> {
         if let Some(cached_provider_metadata) = self.provider_metadata.read().await.clone() {
             if cached_provider_metadata.is_fresh_at(Utc::now()) {

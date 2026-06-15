@@ -1,5 +1,6 @@
 // Policy CRUD operations
 import { authenticatedFetch } from './csrf';
+import { methodForPolicyAction } from './policy-action';
 import { ErrorMessage } from './shared';
 
 interface PolicyResponse {
@@ -85,7 +86,7 @@ async function deletePolicy(policyName: string): Promise<void> {
 
 async function savePolicy(policyName: string, policyAction: string, policyData: any): Promise<PolicyResponse> {
     const url = `/admin/api/policies`;
-    const method = policyAction === 'update' ? 'PUT' : 'POST';
+    const method = methodForPolicyAction(policyAction);
     const body = { name: policyName, policy: policyData };
 
     const response = await authenticatedFetch(url, {
