@@ -1877,7 +1877,7 @@ mod tests {
         method: Method,
         uri: &str,
         csrf_token: &str,
-        body: serde_json::Value,
+        body: &serde_json::Value,
     ) -> Request<Full<Bytes>> {
         Request::builder()
             .method(method)
@@ -1952,7 +1952,7 @@ mod tests {
                     Method::POST,
                     "/admin/api/policies",
                     csrf_token,
-                    serde_json::json!({
+                    &serde_json::json!({
                         "name": policy_name,
                         "policy": create_policy,
                     }),
@@ -1970,7 +1970,7 @@ mod tests {
                     Method::POST,
                     "/admin/api/policies",
                     csrf_token,
-                    serde_json::json!({
+                    &serde_json::json!({
                         "name": policy_name,
                         "policy": test_policy("s3:GetObject"),
                     }),
@@ -1987,7 +1987,7 @@ mod tests {
                     Method::PUT,
                     "/admin/api/policies",
                     csrf_token,
-                    serde_json::json!({
+                    &serde_json::json!({
                         "name": policy_name,
                         "policy": update_policy,
                     }),
