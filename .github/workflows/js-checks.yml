@@ -30,8 +30,8 @@ jobs:
           run_install: true
       - name: Set up Node.js
         uses: actions/setup-node@v6
-      - name: Run compile
-        run: pnpm run build
+      - name: Run JavaScript tests
+        run: pnpm test
       - name: Check for outstanding changes
         run: |
           ./scripts/git-pre-commit.sh

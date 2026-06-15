@@ -57,7 +57,7 @@
 //!   - ❌ Failure: Invalid JSON
 //!   - ❌ Failure: Invalid policy structure
 //!   - ❌ Failure: Duplicate policy name
-//! - PUT /admin/api/policies/{name}
+//! - PUT /admin/api/policies
 //!   - ✅ Success: Update existing policy
 //!   - ❌ Failure: Unauthenticated
 //!   - ❌ Failure: Missing CSRF

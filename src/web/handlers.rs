@@ -1349,11 +1349,15 @@ impl WebHandler {
     }
 
     /// POST /admin/api/policies - Create a new policy
-    async fn handle_api_create_policy(
+    async fn handle_api_create_policy<B>(
         &self,
-        req: Request<Incoming>,
+        req: Request<B>,
         session: Session,
-    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError>
+    where
+        B: hyper::body::Body<Data = Bytes>,
+        B::Error: std::fmt::Display,
+    {
         // Check authentication
         self.check_auth(&session).await?;
 
@@ -1364,7 +1368,11 @@ impl WebHandler {
         self.validate_csrf_token(&session, &parts.headers).await?;
 
         // Read request body
-        let body_bytes = body.collect().await?.to_bytes();
+        let body_bytes = body
+            .collect()
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to read request body: {}", e)))?
+            .to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
             .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
 
@@ -1382,12 +1390,16 @@ impl WebHandler {
         }))
     }
 
-    /// PUT /admin/api/policies/{name} - Update an existing policy
-    async fn handle_api_update_policy(
+    /// PUT /admin/api/policies - Update an existing policy
+    async fn handle_api_update_policy<B>(
         &self,
-        req: Request<Incoming>,
+        req: Request<B>,
         session: Session,
-    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError>
+    where
+        B: hyper::body::Body<Data = Bytes>,
+        B::Error: std::fmt::Display,
+    {
         // Check authentication
         self.check_auth(&session).await?;
 
@@ -1398,7 +1410,11 @@ impl WebHandler {
         self.validate_csrf_token(&session, &parts.headers).await?;
 
         // Read request body
-        let body_bytes = body.collect().await?.to_bytes();
+        let body_bytes = body
+            .collect()
+            .await
+            .map_err(|e| CrabCakesError::other(&format!("Failed to read request body: {}", e)))?
+            .to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
             .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
 
@@ -1428,9 +1444,9 @@ impl WebHandler {
     }
 
     /// DELETE /admin/api/policies/{name} - Delete a policy
-    async fn handle_api_delete_policy(
+    async fn handle_api_delete_policy<B>(
         &self,
-        req: Request<Incoming>,
+        req: Request<B>,
         session: Session,
         policy_name: &str,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
@@ -1790,7 +1806,118 @@ impl WebHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::OAuthClient;
+    use crate::credentials::CredentialStore;
+    use crate::db::{DBService, initialize_in_memory_database};
+    use crate::filesystem::FilesystemService;
+    use crate::policy::PolicyStore;
     use iam_rs::Decision;
+    use std::sync::Arc;
+    use tower_sessions::{MemoryStore, Session};
+
+    struct TestWebHandler {
+        handler: WebHandler,
+        _root_dir: tempfile::TempDir,
+        _config_dir: tempfile::TempDir,
+    }
+
+    async fn test_web_handler() -> TestWebHandler {
+        let root_dir = tempfile::tempdir().expect("root tempdir should be created");
+        let config_dir = tempfile::tempdir().expect("config tempdir should be created");
+        let db = Arc::new(DBService::new(Arc::new(
+            initialize_in_memory_database().await,
+        )));
+        let oauth_client = Arc::new(OAuthClient::new_for_tests(db.clone()).await);
+        let credentials_store = Arc::new(
+            CredentialStore::new(&config_dir.path().join("credentials"))
+                .await
+                .expect("credential store should be created"),
+        );
+        let policy_store = Arc::new(
+            PolicyStore::new(&config_dir.path().join("policies"))
+                .await
+                .expect("policy store should be created"),
+        );
+        let filesystem = Arc::new(
+            FilesystemService::new(root_dir.path().to_path_buf())
+                .expect("filesystem should be created"),
+        );
+
+        TestWebHandler {
+            handler: WebHandler::new(
+                oauth_client,
+                db,
+                credentials_store,
+                policy_store,
+                filesystem,
+            ),
+            _root_dir: root_dir,
+            _config_dir: config_dir,
+        }
+    }
+
+    async fn authenticated_session(csrf_token: &str) -> Session {
+        let session = Session::new(None, Arc::new(MemoryStore::default()), None);
+        session
+            .insert(SessionKey::UserId.as_ref(), "test-user")
+            .await
+            .expect("user id should be stored");
+        session
+            .insert(SessionKey::UserEmail.as_ref(), "test-user@example.com")
+            .await
+            .expect("user email should be stored");
+        session
+            .insert(SessionKey::CsrfToken.as_ref(), csrf_token)
+            .await
+            .expect("csrf token should be stored");
+        session
+    }
+
+    fn policy_request(
+        method: Method,
+        uri: &str,
+        csrf_token: &str,
+        body: serde_json::Value,
+    ) -> Request<Full<Bytes>> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("X-CSRF-Token", csrf_token)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::new(Bytes::from(body.to_string())))
+            .expect("policy request should build")
+    }
+
+    fn empty_policy_request(method: Method, uri: &str, csrf_token: &str) -> Request<Full<Bytes>> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("X-CSRF-Token", csrf_token)
+            .body(Full::new(Bytes::new()))
+            .expect("policy request should build")
+    }
+
+    async fn response_json(response: Response<Full<Bytes>>) -> serde_json::Value {
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body should collect")
+            .to_bytes();
+        serde_json::from_slice(&body_bytes).expect("response should be valid JSON")
+    }
+
+    fn test_policy(action: &str) -> serde_json::Value {
+        serde_json::json!({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": action,
+                "Resource": "arn:aws:s3:::workflow-bucket/*"
+            }]
+        })
+    }
 
     /// Helper to build TroubleShooterForm
     fn build_troubleshooter_form(
@@ -1807,6 +1934,116 @@ mod tests {
             action: action.to_string(),
             policy: policy.to_string(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_admin_policy_create_update_delete_workflow() {
+        let test_handler = test_web_handler().await;
+        let csrf_token = "test-csrf-token";
+        let session = authenticated_session(csrf_token).await;
+        let policy_name = "workflow-policy";
+        let create_policy = test_policy("s3:GetObject");
+        let update_policy = test_policy("s3:PutObject");
+
+        let create_response = test_handler
+            .handler
+            .handle_api_create_policy(
+                policy_request(
+                    Method::POST,
+                    "/admin/api/policies",
+                    csrf_token,
+                    serde_json::json!({
+                        "name": policy_name,
+                        "policy": create_policy,
+                    }),
+                ),
+                session.clone(),
+            )
+            .await
+            .expect("policy create should succeed");
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let duplicate_result = test_handler
+            .handler
+            .handle_api_create_policy(
+                policy_request(
+                    Method::POST,
+                    "/admin/api/policies",
+                    csrf_token,
+                    serde_json::json!({
+                        "name": policy_name,
+                        "policy": test_policy("s3:GetObject"),
+                    }),
+                ),
+                session.clone(),
+            )
+            .await;
+        assert!(duplicate_result.is_err(), "duplicate create should fail");
+
+        let update_response = test_handler
+            .handler
+            .handle_api_update_policy(
+                policy_request(
+                    Method::PUT,
+                    "/admin/api/policies",
+                    csrf_token,
+                    serde_json::json!({
+                        "name": policy_name,
+                        "policy": update_policy,
+                    }),
+                ),
+                session.clone(),
+            )
+            .await
+            .expect("policy update should succeed");
+        assert_eq!(update_response.status(), StatusCode::OK);
+
+        let policies_response = test_handler
+            .handler
+            .handle_api_list_policies(session.clone())
+            .await
+            .expect("policy list should succeed");
+        let policies = response_json(policies_response).await;
+        let workflow_policy = policies
+            .as_array()
+            .expect("policies response should be an array")
+            .iter()
+            .find(|policy| policy["name"] == policy_name)
+            .expect("updated policy should be present");
+        assert_eq!(
+            workflow_policy["policy"]["Statement"]["Action"],
+            "s3:PutObject"
+        );
+
+        let delete_response = test_handler
+            .handler
+            .handle_api_delete_policy(
+                empty_policy_request(
+                    Method::DELETE,
+                    "/admin/api/policies/workflow-policy",
+                    csrf_token,
+                ),
+                session.clone(),
+                policy_name,
+            )
+            .await
+            .expect("policy delete should succeed");
+        assert_eq!(delete_response.status(), StatusCode::OK);
+
+        let policies_response = test_handler
+            .handler
+            .handle_api_list_policies(session)
+            .await
+            .expect("policy list should succeed after delete");
+        let policies = response_json(policies_response).await;
+        assert!(
+            !policies
+                .as_array()
+                .expect("policies response should be an array")
+                .iter()
+                .any(|policy| policy["name"] == policy_name),
+            "deleted policy should be absent"
+        );
     }
 
     #[tokio::test]

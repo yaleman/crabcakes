@@ -7,6 +7,7 @@
   "scripts": {
     "build-ts": "swc src/js --delete-dir-on-start --strip-leading-paths --out-dir target/js/ *.ts",
     "build": "pnpm build-ts && node build-js.js",
+    "test": "pnpm run build && node --test tests/js/*.test.mjs",
     "lint:css": "stylelint 'static/css/**/*.css'",
     "lint": "pnpm run lint:css"
   },
