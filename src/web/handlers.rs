@@ -2062,6 +2062,21 @@ mod tests {
         assert!(body_str.contains("Test error"));
     }
 
+    #[tokio::test]
+    async fn test_invalid_secret_length_error_response_is_validation_failure() {
+        let response: Response<Full<Bytes>> = CrabCakesError::InvalidSecretLength.into();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body should collect")
+            .to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes).expect("Body is not valid UTF-8");
+        assert!(body_str.contains("Invalid Secret Length"));
+    }
+
     // Allow Scenario Tests
 
     #[tokio::test]
