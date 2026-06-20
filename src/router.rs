@@ -7,6 +7,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
+use hyper::header::AUTHORIZATION;
 use hyper::{Request, Response};
 use tower::Service;
 use tower_http::classify::ServerErrorsFailureClass;
@@ -43,6 +44,20 @@ fn healthcheck_response() -> WebServiceResponse {
     response
 }
 
+fn is_web_request<B>(request: &Request<B>) -> bool {
+    let path = request.uri().path();
+    let is_signed_root = path == "/" && request.headers().contains_key(AUTHORIZATION);
+
+    !is_signed_root
+        && (path == "/"
+            || path.starts_with("/login")
+            || path.starts_with("/logout")
+            || path.starts_with("/oauth2/")
+            || path.starts_with("/api/")
+            || path.starts_with("/admin/")
+            || path == "/admin")
+}
+
 /// Routes requests to either S3 or web handlers based on path
 pub async fn route_request(
     req: Request<hyper::body::Incoming>,
@@ -57,14 +72,8 @@ pub async fn route_request(
         return Ok(healthcheck_response());
     }
 
-    // Check if this is a web UI path
-    let is_web_path = path == "/"
-        || path.starts_with("/login")
-        || path.starts_with("/logout")
-        || path.starts_with("/oauth2/")
-        || path.starts_with("/api/")
-        || path.starts_with("/admin/")
-        || path == "/admin";
+    // Signed requests to the root are S3 ListBuckets requests, not web UI requests.
+    let is_web_path = is_web_request(&req);
 
     #[cfg(test)]
     {
@@ -114,5 +123,37 @@ pub async fn route_request(
             body.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
                 .boxed(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hyper::Request;
+    use hyper::header::AUTHORIZATION;
+
+    use super::is_web_request;
+
+    #[test]
+    fn signed_root_request_is_routed_to_s3() {
+        let request = Request::builder()
+            .uri("/")
+            .header(
+                AUTHORIZATION,
+                "AWS4-HMAC-SHA256 Credential=test/20260620/crabcakes/s3/aws4_request",
+            )
+            .body(())
+            .expect("request should build");
+
+        assert!(!is_web_request(&request));
+    }
+
+    #[test]
+    fn unsigned_root_request_is_routed_to_web_ui() {
+        let request = Request::builder()
+            .uri("/")
+            .body(())
+            .expect("request should build");
+
+        assert!(is_web_request(&request));
     }
 }

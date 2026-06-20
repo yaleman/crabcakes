@@ -234,8 +234,18 @@ impl CrabCakesError {
 
 impl From<CrabCakesError> for Response<Full<Bytes>> {
     fn from(err: CrabCakesError) -> Self {
+        let error_message = err.to_string();
+        let (action_href, action_id, action_label) =
+            if error_message.contains("Credentials not found or expired") {
+                ("/login", "login-button", "Log In")
+            } else {
+                ("/admin", "back-button", "Go Back")
+            };
         let template = ErrorTemplate {
-            error_message: err.to_string(),
+            error_message,
+            action_href,
+            action_id,
+            action_label,
         };
 
         let html = match template.render() {

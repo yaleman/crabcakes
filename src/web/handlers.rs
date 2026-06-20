@@ -2063,6 +2063,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_expired_credentials_error_links_to_login() {
+        let response: Response<Full<Bytes>> =
+            CrabCakesError::other(&"Credentials not found or expired").into();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body should collect")
+            .to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes).expect("Body is not valid UTF-8");
+        assert!(body_str.contains("Credentials not found or expired"));
+        assert!(body_str.contains("href=\"/login\""));
+        assert!(body_str.contains(">Log In<"));
+        assert!(!body_str.contains(">Go Back<"));
+    }
+
+    #[tokio::test]
     async fn test_invalid_secret_length_error_response_is_validation_failure() {
         let response: Response<Full<Bytes>> = CrabCakesError::InvalidSecretLength.into();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);

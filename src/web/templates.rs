@@ -9,6 +9,9 @@ use askama::Template;
 #[template(path = "error.html")]
 pub(crate) struct ErrorTemplate {
     pub(crate) error_message: String,
+    pub(crate) action_href: &'static str,
+    pub(crate) action_id: &'static str,
+    pub(crate) action_label: &'static str,
 }
 
 /// Profile page template
