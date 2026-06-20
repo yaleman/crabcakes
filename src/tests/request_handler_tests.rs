@@ -451,9 +451,10 @@ async fn test_api_create_credential_duplicate() {
     // Try to create duplicate
     let result = handler
         .api_create_credential("dupuser".to_string(), secret2.into())
-        .await;
+        .await
+        .expect_err("Should reject duplicate access_key_id");
 
-    assert!(result.is_err(), "Should reject duplicate access_key_id");
+    assert_eq!(result.status_code(), http::StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -507,12 +508,10 @@ async fn test_api_update_credential_nonexistent() {
     // Try to update non-existent credential
     let result = handler
         .api_update_credential("nosuchuser".to_string(), "secret".to_string().into())
-        .await;
+        .await
+        .expect_err("Should fail to update nonexistent credential");
 
-    assert!(
-        result.is_err(),
-        "Should fail to update nonexistent credential"
-    );
+    assert_eq!(result.status_code(), http::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

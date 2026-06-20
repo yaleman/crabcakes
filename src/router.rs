@@ -46,7 +46,12 @@ fn healthcheck_response() -> WebServiceResponse {
 
 fn is_web_request<B>(request: &Request<B>) -> bool {
     let path = request.uri().path();
-    let is_signed_root = path == "/" && request.headers().contains_key(AUTHORIZATION);
+    let is_signed_root = path == "/"
+        && request
+            .headers()
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("AWS4-HMAC-SHA256 "));
 
     !is_signed_root
         && (path == "/"
@@ -145,6 +150,28 @@ mod tests {
             .expect("request should build");
 
         assert!(!is_web_request(&request));
+    }
+
+    #[test]
+    fn non_sigv4_authorization_on_root_is_routed_to_web_ui() {
+        for authorization in [
+            "Basic dXNlcjpwYXNz",
+            "Bearer token",
+            "",
+            "AWS4-HMAC-SHA256",
+            "not-an-authorization-scheme",
+        ] {
+            let request = Request::builder()
+                .uri("/")
+                .header(AUTHORIZATION, authorization)
+                .body(())
+                .expect("request should build");
+
+            assert!(
+                is_web_request(&request),
+                "{authorization:?} should not be treated as SigV4"
+            );
+        }
     }
 
     #[test]

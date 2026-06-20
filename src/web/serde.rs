@@ -1,6 +1,8 @@
 use iam_rs::EvaluationResult;
 use serde::{Deserialize, Serialize};
 
+use crate::error::CrabCakesError;
+
 /// Principal permission entry for policy detail page (one row per principal+action+resource)
 #[derive(Debug, Serialize, PartialEq, Eq, Hash)]
 pub(crate) struct PolicyPrincipalPermission {
@@ -102,9 +104,49 @@ pub(crate) struct VacuumResult {
     pub(crate) pages_freed: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct ApiErrorResponse<'a> {
+    success: bool,
+    error: &'a CrabCakesError,
+}
+
+impl<'a> ApiErrorResponse<'a> {
+    pub(crate) fn new(error: &'a CrabCakesError) -> Self {
+        Self {
+            success: false,
+            error,
+        }
+    }
+}
+
 // Parse request body
 #[derive(serde::Deserialize)]
 pub(crate) struct PolicyRequest {
     pub(crate) name: String,
     pub(crate) policy: iam_rs::IAMPolicy,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::error::CrabCakesError;
+
+    use super::ApiErrorResponse;
+
+    #[test]
+    fn api_error_response_serializes_the_existing_envelope() {
+        let error = CrabCakesError::BadRequest("invalid input".to_string());
+
+        let value = serde_json::to_value(ApiErrorResponse::new(&error))
+            .expect("API error response should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "success": false,
+                "error": {"BadRequest": "invalid input"},
+            })
+        );
+    }
 }
