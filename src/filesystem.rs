@@ -58,6 +58,52 @@ fn is_bucket_name_excluded(name: &str) -> bool {
     false
 }
 
+fn validate_bucket_name(bucket: &str) -> Result<(), std::io::Error> {
+    if is_bucket_name_excluded(bucket) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Bucket name '{bucket}' is reserved and cannot be used"),
+        ));
+    }
+
+    if bucket.is_empty() || bucket.len() > 63 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Bucket name must be between 1 and 63 characters",
+        ));
+    }
+
+    if !bucket
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Bucket name can only contain lowercase letters, numbers, and hyphens",
+        ));
+    }
+
+    if bucket.starts_with('-') || bucket.ends_with('-') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Bucket name cannot start or end with a hyphen",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_bucket_path_component(bucket: &str) -> Result<(), std::io::Error> {
+    if Path::new(bucket).file_name().and_then(|name| name.to_str()) != Some(bucket) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Bucket must be a single path component",
+        ));
+    }
+
+    Ok(())
+}
+
 impl FilesystemService {
     pub fn new(root_dir: PathBuf) -> Result<Self, CrabCakesError> {
         if !root_dir.exists() {
@@ -259,41 +305,7 @@ impl FilesystemService {
 
     pub async fn create_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
         debug!(bucket = %bucket, "Creating bucket");
-
-        // Check if bucket name is excluded (reserved, hidden, or system directory)
-        if is_bucket_name_excluded(bucket) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("Bucket name '{}' is reserved and cannot be used", bucket),
-            ));
-        }
-
-        // Validate bucket name
-        if bucket.is_empty() || bucket.len() > 63 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Bucket name must be between 1 and 63 characters",
-            ));
-        }
-
-        // Check for valid characters (lowercase letters, numbers, hyphens)
-        if !bucket
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Bucket name can only contain lowercase letters, numbers, and hyphens",
-            ));
-        }
-
-        // Bucket name cannot start or end with a hyphen
-        if bucket.starts_with('-') || bucket.ends_with('-') {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Bucket name cannot start or end with a hyphen",
-            ));
-        }
+        validate_bucket_name(bucket)?;
 
         let bucket_path = self.root_dir.join(bucket);
 
@@ -313,6 +325,7 @@ impl FilesystemService {
 
     pub async fn delete_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
         debug!(bucket = %bucket, "Deleting bucket");
+        validate_bucket_path_component(bucket)?;
         let bucket_path = self.root_dir.join(bucket);
 
         // Check if bucket exists
@@ -340,6 +353,30 @@ impl FilesystemService {
         // Remove the directory
         fs::remove_dir(&bucket_path).await?;
         debug!(bucket = %bucket, "Bucket deleted successfully");
+        Ok(())
+    }
+
+    pub async fn force_delete_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
+        debug!(bucket = %bucket, "Force deleting bucket");
+        validate_bucket_path_component(bucket)?;
+        let bucket_path = self.root_dir.join(bucket);
+
+        if !bucket_path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Bucket does not exist",
+            ));
+        }
+
+        if !bucket_path.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Path is not a bucket",
+            ));
+        }
+
+        fs::remove_dir_all(&bucket_path).await?;
+        debug!(bucket = %bucket, "Bucket force deleted successfully");
         Ok(())
     }
 

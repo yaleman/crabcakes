@@ -549,6 +549,7 @@ impl WebHandler {
         Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
+            .header(CACHE_CONTROL, "no-store")
             .header(
                 "Content-Security-Policy",
                 "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:;"

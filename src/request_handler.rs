@@ -164,23 +164,13 @@ impl RequestHandler {
         force: bool,
     ) -> Result<(), CrabCakesError> {
         if force {
-            // Delete all objects in the bucket first
-            let (entries, _) = self
+            return self
                 .filesystem
-                .list_directory(Some(&format!("{bucket}/")), 10000, None)
+                .force_delete_bucket(bucket)
                 .await
-                .map_err(CrabCakesError::from)?;
-
-            // Delete each object
-            for entry in entries {
-                self.filesystem
-                    .delete_file(&entry.key)
-                    .await
-                    .map_err(CrabCakesError::from)?;
-            }
+                .map_err(CrabCakesError::from);
         }
 
-        // Delete the bucket (will fail if not empty and force=false)
         self.filesystem
             .delete_bucket(bucket)
             .await

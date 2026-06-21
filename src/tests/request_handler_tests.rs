@@ -121,6 +121,21 @@ async fn test_api_delete_bucket_empty() {
 }
 
 #[tokio::test]
+async fn test_api_delete_existing_numeric_bucket() {
+    let handler = RequestHandler::new_test().await;
+    tokio::fs::create_dir(handler.filesystem.resolve_path("4"))
+        .await
+        .expect("Should create existing numeric bucket directory");
+
+    handler
+        .api_delete_bucket("4", false)
+        .await
+        .expect("Should delete existing numeric bucket");
+
+    assert!(!handler.filesystem.bucket_exists("4"));
+}
+
+#[tokio::test]
 async fn test_api_delete_bucket_with_objects_no_force() {
     let handler = RequestHandler::new_test().await;
 
@@ -174,6 +189,37 @@ async fn test_api_delete_bucket_with_objects_force() {
         .await
         .expect("Should list buckets");
     assert!(!buckets.contains(&"force-delete-bucket".to_string()));
+}
+
+#[tokio::test]
+async fn test_api_delete_bucket_with_nested_objects_force() {
+    let handler = RequestHandler::new_test().await;
+
+    handler
+        .api_create_bucket("force-delete-nested-bucket")
+        .await
+        .expect("Should create bucket");
+
+    handler
+        .filesystem
+        .write_file(
+            "force-delete-nested-bucket/nested/path/file.txt",
+            b"content",
+        )
+        .await
+        .expect("Should write nested file");
+
+    handler
+        .api_delete_bucket("force-delete-nested-bucket", true)
+        .await
+        .expect("Should force delete bucket containing nested objects");
+
+    let buckets = handler
+        .filesystem
+        .list_buckets()
+        .await
+        .expect("Should list buckets");
+    assert!(!buckets.contains(&"force-delete-nested-bucket".to_string()));
 }
 
 #[tokio::test]
