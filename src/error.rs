@@ -325,7 +325,10 @@ impl From<CrabCakesError> for Response<Full<Bytes>> {
 
         let mut res = Response::new(Full::new(Bytes::from(html)));
 
-        *res.status_mut() = status;
+        *res.status_mut() = match err {
+            CrabCakesError::InvalidSecretLength => StatusCode::BAD_REQUEST,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
         (*res.headers_mut()).append(
             CONTENT_TYPE,
             HeaderValue::from_static(TEXT_HTML_UTF_8.as_ref()),
