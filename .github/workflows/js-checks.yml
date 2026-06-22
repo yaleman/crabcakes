@@ -32,6 +32,10 @@ jobs:
         uses: actions/setup-node@v6
       - name: Run JavaScript tests
         run: pnpm test
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run Playwright tests
+        run: pnpm test:playwright
       - name: Check for outstanding changes
         run: |
           ./scripts/git-pre-commit.sh

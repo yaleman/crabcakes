@@ -21,8 +21,11 @@ use crate::web::templates::ErrorTemplate;
 #[serde_as]
 #[derive(Serialize, Debug)]
 pub enum CrabCakesError {
+    BadRequest(String),
     BucketNotFound(String),
+    Conflict(String),
     FileNotFound(PathBuf),
+    Forbidden(String),
     Configuration(String),
     CredentialAlreadyExists,
     Database(String),
@@ -39,6 +42,7 @@ pub enum CrabCakesError {
     NoAuthenticationSupplied(String),
     NoPolicies,
     NoUserIdInPrincipal,
+    NotFound(String),
     OidcDiscovery(String),
     OidcStateParameterExpired,
     Other(String),
@@ -49,11 +53,17 @@ pub enum CrabCakesError {
     Sigv4Verification(String),
     TemplateRendering(String),
     UnknownAction,
+    Unauthorized(String),
 }
 
 impl std::fmt::Display for CrabCakesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            CrabCakesError::BadRequest(msg) => write!(f, "Bad request: {msg}"),
+            CrabCakesError::Conflict(msg) => write!(f, "Conflict: {msg}"),
+            CrabCakesError::Forbidden(msg) => write!(f, "Forbidden: {msg}"),
+            CrabCakesError::NotFound(msg) => write!(f, "Not found: {msg}"),
+            CrabCakesError::Unauthorized(msg) => write!(f, "Unauthorized: {msg}"),
             CrabCakesError::IamEvaluation(e) => write!(f, "IAM Evaluation Error: {}", e),
             CrabCakesError::Other(msg) => write!(f, "Error: {}", msg),
             CrabCakesError::SerdeJson(e) => write!(f, "Serde-JSON Error: {}", e),
@@ -230,12 +240,70 @@ impl CrabCakesError {
     pub fn other(error: &impl ToString) -> Self {
         CrabCakesError::Other(error.to_string())
     }
+
+    pub fn status_code(&self) -> StatusCode {
+        if let CrabCakesError::Io(error) = self {
+            return match error.kind() {
+                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                    StatusCode::BAD_REQUEST
+                }
+                std::io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
+                std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
+                std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::DirectoryNotEmpty => {
+                    StatusCode::CONFLICT
+                }
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+        }
+
+        match self {
+            CrabCakesError::BadRequest(_)
+            | CrabCakesError::InvalidAccessKeyId
+            | CrabCakesError::InvalidBucketName
+            | CrabCakesError::InvalidPath
+            | CrabCakesError::InvalidPolicyName
+            | CrabCakesError::InvalidSecretLength
+            | CrabCakesError::OidcStateParameterExpired
+            | CrabCakesError::UnknownAction => StatusCode::BAD_REQUEST,
+            CrabCakesError::Unauthorized(_) | CrabCakesError::NoAuthenticationSupplied(_) => {
+                StatusCode::UNAUTHORIZED
+            }
+            CrabCakesError::Forbidden(_) | CrabCakesError::Sigv4Verification(_) => {
+                StatusCode::FORBIDDEN
+            }
+            CrabCakesError::NotFound(_)
+            | CrabCakesError::BucketNotFound(_)
+            | CrabCakesError::FileNotFound(_)
+            | CrabCakesError::InvalidCredential => StatusCode::NOT_FOUND,
+            CrabCakesError::Conflict(_) | CrabCakesError::CredentialAlreadyExists => {
+                StatusCode::CONFLICT
+            }
+            CrabCakesError::HttpResponseError(_)
+            | CrabCakesError::OidcDiscovery(_)
+            | CrabCakesError::Reqwest(_)
+            | CrabCakesError::Rustls(_) => StatusCode::BAD_GATEWAY,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }
 
 impl From<CrabCakesError> for Response<Full<Bytes>> {
     fn from(err: CrabCakesError) -> Self {
+        let requires_login = matches!(
+            err,
+            CrabCakesError::Unauthorized(_) | CrabCakesError::NoAuthenticationSupplied(_)
+        );
+        let error_message = err.to_string();
+        let (action_href, action_id, action_label) = if requires_login {
+            ("/login", "login-button", "Log In")
+        } else {
+            ("/admin", "back-button", "Go Back")
+        };
         let template = ErrorTemplate {
-            error_message: err.to_string(),
+            error_message,
+            action_href,
+            action_id,
+            action_label,
         };
 
         let html = match template.render() {
@@ -258,12 +326,120 @@ impl From<CrabCakesError> for Response<Full<Bytes>> {
 
         *res.status_mut() = match err {
             CrabCakesError::InvalidSecretLength => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
+            _ => err.status_code(),
         };
         (*res.headers_mut()).append(
             CONTENT_TYPE,
             HeaderValue::from_static(TEXT_HTML_UTF_8.as_ref()),
         );
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Error as IoError, ErrorKind};
+
+    use http::StatusCode;
+
+    use super::CrabCakesError;
+
+    #[test]
+    fn status_code_maps_typed_http_errors() {
+        let cases = [
+            (
+                CrabCakesError::BadRequest("bad".into()),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                CrabCakesError::Unauthorized("auth".into()),
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                CrabCakesError::Forbidden("denied".into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                CrabCakesError::NotFound("missing".into()),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                CrabCakesError::Conflict("duplicate".into()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                CrabCakesError::Reqwest("upstream".into()),
+                StatusCode::BAD_GATEWAY,
+            ),
+            (
+                CrabCakesError::Database("broken".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(
+                error.status_code(),
+                expected,
+                "unexpected status for {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_code_maps_existing_domain_errors() {
+        let cases = [
+            (CrabCakesError::InvalidSecretLength, StatusCode::BAD_REQUEST),
+            (
+                CrabCakesError::NoAuthenticationSupplied("missing".into()),
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                CrabCakesError::Sigv4Verification("invalid".into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                CrabCakesError::BucketNotFound("bucket".into()),
+                StatusCode::NOT_FOUND,
+            ),
+            (CrabCakesError::InvalidCredential, StatusCode::NOT_FOUND),
+            (
+                CrabCakesError::CredentialAlreadyExists,
+                StatusCode::CONFLICT,
+            ),
+            (
+                CrabCakesError::Other("internal".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(
+                error.status_code(),
+                expected,
+                "unexpected status for {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_code_maps_io_error_kinds() {
+        let cases = [
+            (ErrorKind::InvalidInput, StatusCode::BAD_REQUEST),
+            (ErrorKind::PermissionDenied, StatusCode::FORBIDDEN),
+            (ErrorKind::NotFound, StatusCode::NOT_FOUND),
+            (ErrorKind::AlreadyExists, StatusCode::CONFLICT),
+            (ErrorKind::DirectoryNotEmpty, StatusCode::CONFLICT),
+            (ErrorKind::Other, StatusCode::INTERNAL_SERVER_ERROR),
+        ];
+
+        for (kind, expected) in cases {
+            let error = CrabCakesError::Io(IoError::from(kind));
+            assert_eq!(
+                error.status_code(),
+                expected,
+                "unexpected status for {kind:?}"
+            );
+        }
     }
 }

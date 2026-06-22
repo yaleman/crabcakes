@@ -392,9 +392,8 @@ impl PolicyStore {
         {
             let policies = self.policies.read().await;
             if policies.contains_key(name) {
-                return Err(CrabCakesError::other(&format!(
-                    "Policy '{}' already exists",
-                    name
+                return Err(CrabCakesError::Conflict(format!(
+                    "Policy '{name}' already exists"
                 )));
             }
         }
@@ -472,9 +471,8 @@ impl PolicyStore {
         {
             let policies = self.policies.read().await;
             if !policies.contains_key(name) {
-                return Err(CrabCakesError::other(&format!(
-                    "Policy '{}' not found",
-                    name
+                return Err(CrabCakesError::NotFound(format!(
+                    "Policy '{name}' not found"
                 )));
             }
         }

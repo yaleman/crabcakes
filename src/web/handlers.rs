@@ -310,16 +310,11 @@ impl WebHandler {
                 Ok(response)
             }
             Err(e) => {
-                span.record(
-                    TRACE_STATUS_CODE,
-                    StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
-                );
+                let status = e.status_code();
+                span.record(TRACE_STATUS_CODE, status.as_u16());
                 if is_api_request {
                     debug!("API request error: {:?}", e);
-                    match self.build_json_response(json!({
-                        "success": false,
-                        "error": e
-                    })) {
+                    match self.build_api_error_response(&e) {
                         Ok(val) => Ok(val),
                         Err(err) => Ok(respond_500(&format!(
                             "Failed to build error response: {err}"
@@ -360,7 +355,7 @@ impl WebHandler {
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         // Extract query parameters
         let query = req.uri().query().ok_or_else(|| {
-            CrabCakesError::other(&"Missing query parameters in OAuth callback".to_string())
+            CrabCakesError::BadRequest("Missing query parameters in OAuth callback".to_string())
         })?;
 
         // Parse query string for code and state
@@ -370,11 +365,11 @@ impl WebHandler {
                 .collect();
 
         let code = params.get("code").ok_or_else(|| {
-            CrabCakesError::other(&"Missing 'code' parameter in OAuth callback".to_string())
+            CrabCakesError::BadRequest("Missing 'code' parameter in OAuth callback".to_string())
         })?;
 
         let state = params.get("state").ok_or_else(|| {
-            CrabCakesError::other(&"Missing 'state' parameter in OAuth callback".to_string())
+            CrabCakesError::BadRequest("Missing 'state' parameter in OAuth callback".to_string())
         })?;
 
         // Exchange code for tokens and get user info
@@ -477,17 +472,20 @@ impl WebHandler {
                 })?;
 
         if user_id.is_none() {
-            return Err(CrabCakesError::other(&"Not authenticated"));
+            return Err(CrabCakesError::Unauthorized(
+                "Not authenticated".to_string(),
+            ));
         }
 
-        let user_id = user_id.ok_or_else(|| CrabCakesError::other(&"User ID not found"))?;
+        let user_id =
+            user_id.ok_or_else(|| CrabCakesError::Unauthorized("User ID not found".to_string()))?;
         let user_email: String = session
             .get(SessionKey::UserEmail.as_ref())
             .await
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
             })?
-            .ok_or_else(|| CrabCakesError::other(&"User email not found"))?;
+            .ok_or_else(|| CrabCakesError::Unauthorized("User email not found".to_string()))?;
 
         Ok((user_id, user_email))
     }
@@ -522,7 +520,7 @@ impl WebHandler {
         let header_token = headers
             .get("X-CSRF-Token")
             .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| CrabCakesError::other(&"Missing CSRF token"))?;
+            .ok_or_else(|| CrabCakesError::Forbidden("Missing CSRF token".to_string()))?;
 
         // Get token from session
         let session_token: Option<String> = session
@@ -530,12 +528,12 @@ impl WebHandler {
             .await
             .map_err(|e| CrabCakesError::other(&format!("Failed to get CSRF token: {}", e)))?;
 
-        let session_token =
-            session_token.ok_or_else(|| CrabCakesError::other(&"No CSRF token in session"))?;
+        let session_token = session_token
+            .ok_or_else(|| CrabCakesError::Forbidden("No CSRF token in session".to_string()))?;
 
         // Compare tokens
         if header_token != session_token {
-            return Err(CrabCakesError::other(&"Invalid CSRF token"));
+            return Err(CrabCakesError::Forbidden("Invalid CSRF token".to_string()));
         }
 
         Ok(())
@@ -564,9 +562,17 @@ impl WebHandler {
         &self,
         json: impl Serialize,
     ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        self.build_json_response_with_status(json, StatusCode::OK)
+    }
+
+    fn build_json_response_with_status(
+        &self,
+        json: impl Serialize,
+        status: StatusCode,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
         let mut res = Response::new(Full::new(Bytes::from(json!(json).to_string())));
 
-        *res.status_mut() = StatusCode::OK;
+        *res.status_mut() = status;
 
         res.headers_mut().extend(vec![
             (CONTENT_TYPE, HeaderValue::from_static("application/json")),
@@ -580,6 +586,14 @@ impl WebHandler {
         ]);
 
         Ok(res)
+    }
+
+    fn build_api_error_response(
+        &self,
+        error: &CrabCakesError,
+    ) -> Result<Response<Full<Bytes>>, CrabCakesError> {
+        let status = error.status_code();
+        self.build_json_response_with_status(ApiErrorResponse::new(error), status)
     }
 
     /// GET /admin/profile - User profile page
@@ -596,7 +610,7 @@ impl WebHandler {
                 CrabCakesError::other(&format!("Failed to get access_key_id from session: {}", e))
             })?
             .ok_or_else(|| {
-                CrabCakesError::other(&"Access key ID not found in session".to_string())
+                CrabCakesError::Unauthorized("Access key ID not found in session".to_string())
             })?;
 
         // Get credentials to show expiry
@@ -605,7 +619,7 @@ impl WebHandler {
             .get_temporary_credentials(&access_key_id)
             .await?
             .ok_or_else(|| {
-                CrabCakesError::other(&"Credentials not found or expired".to_string())
+                CrabCakesError::Unauthorized("Credentials not found or expired".to_string())
             })?;
 
         // Render template
@@ -675,7 +689,7 @@ impl WebHandler {
             .policy_store
             .get_policy(policy_name)
             .await
-            .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
+            .ok_or_else(|| CrabCakesError::NotFound("Policy not found".to_string()))?;
 
         let policy_json = serde_json::to_string_pretty(&policy)
             .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
@@ -785,7 +799,7 @@ impl WebHandler {
                 .policy_store
                 .get_policy(&copy_from)
                 .await
-                .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
+                .ok_or_else(|| CrabCakesError::NotFound("Policy not found".to_string()))?;
             serde_json::to_string_pretty(&policy)
                 .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?
         } else {
@@ -816,7 +830,7 @@ impl WebHandler {
             .policy_store
             .get_policy(policy_name)
             .await
-            .ok_or_else(|| CrabCakesError::other(&"Policy not found"))?;
+            .ok_or_else(|| CrabCakesError::NotFound("Policy not found".to_string()))?;
 
         let policy_json = serde_json::to_string_pretty(&policy)
             .map_err(|e| CrabCakesError::other(&format!("Failed to serialize policy: {}", e)))?;
@@ -1134,7 +1148,7 @@ impl WebHandler {
         // Read request body
         let body_bytes = body.collect().await?.to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid UTF-8: {e}")))?;
 
         // Parse request body
         #[derive(serde::Deserialize)]
@@ -1143,7 +1157,7 @@ impl WebHandler {
         }
 
         let request: CreateBucketRequest = serde_json::from_str(body_str)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid JSON: {e}")))?;
 
         // Call extracted business logic
         self.request_handler
@@ -1246,7 +1260,7 @@ impl WebHandler {
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_id from session: {}", e))
             })?
-            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
+            .ok_or_else(|| CrabCakesError::Unauthorized("Not authenticated".to_string()))?;
 
         let user_email: String = session
             .get(SessionKey::UserEmail.as_ref())
@@ -1254,7 +1268,7 @@ impl WebHandler {
             .map_err(|e| {
                 CrabCakesError::other(&format!("Failed to get user_email from session: {}", e))
             })?
-            .ok_or_else(|| CrabCakesError::other(&"Not authenticated".to_string()))?;
+            .ok_or_else(|| CrabCakesError::Unauthorized("Not authenticated".to_string()))?;
 
         // Save the session to ensure we have a session ID
         session
@@ -1371,13 +1385,13 @@ impl WebHandler {
         let body_bytes = body
             .collect()
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to read request body: {}", e)))?
+            .map_err(|e| CrabCakesError::BadRequest(format!("Failed to read request body: {e}")))?
             .to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid UTF-8: {e}")))?;
 
         let request: PolicyRequest = serde_json::from_str(body_str)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid JSON: {e}")))?;
 
         self.request_handler
             .api_create_policy(&request.name, request.policy)
@@ -1413,21 +1427,13 @@ impl WebHandler {
         let body_bytes = body
             .collect()
             .await
-            .map_err(|e| CrabCakesError::other(&format!("Failed to read request body: {}", e)))?
+            .map_err(|e| CrabCakesError::BadRequest(format!("Failed to read request body: {e}")))?
             .to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid UTF-8: {e}")))?;
 
-        // Parse policy from request body
-        let policy: PolicyRequest = match serde_json::from_str(body_str) {
-            Ok(p) => p,
-            Err(e) => {
-                return self.build_json_response(json!({
-                    "success": false,
-                    "error": format!("Invalid JSON: {}", e)
-                }));
-            }
-        };
+        let policy: PolicyRequest = serde_json::from_str(body_str)
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid JSON: {e}")))?;
 
         // Call extracted business logic
         self.request_handler
@@ -1501,7 +1507,7 @@ impl WebHandler {
         // Read request body
         let body_bytes = body.collect().await?.to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid UTF-8: {e}")))?;
 
         // Parse request body
         #[derive(serde::Deserialize)]
@@ -1511,7 +1517,7 @@ impl WebHandler {
         }
 
         let request: CreateCredentialRequest = serde_json::from_str(body_str)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid JSON: {e}")))?;
 
         // Call extracted business logic
         self.request_handler
@@ -1547,7 +1553,7 @@ impl WebHandler {
         // Read request body
         let body_bytes = body.collect().await?.to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid UTF-8: {e}")))?;
 
         // Parse secret key from request body
         #[derive(serde::Deserialize)]
@@ -1556,7 +1562,7 @@ impl WebHandler {
         }
 
         let request: UpdateCredentialRequest = serde_json::from_str(body_str)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid JSON: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid JSON: {e}")))?;
 
         // Call extracted business logic
         self.request_handler
@@ -1721,9 +1727,10 @@ impl WebHandler {
         let body = req.into_body();
         let body_bytes = body.collect().await?.to_bytes();
         let body_str = std::str::from_utf8(&body_bytes)
-            .map_err(|e| CrabCakesError::other(&format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| CrabCakesError::BadRequest(format!("Invalid UTF-8: {e}")))?;
 
-        let form: TroubleShooterForm = serde_json::from_str(body_str)?;
+        let form: TroubleShooterForm = serde_json::from_str(body_str)
+            .map_err(|error| CrabCakesError::BadRequest(format!("Invalid JSON: {error}")))?;
 
         let response = self.request_handler.api_troubleshooter(form).await?;
         self.build_json_response(response)
@@ -1978,7 +1985,8 @@ mod tests {
                 session.clone(),
             )
             .await;
-        assert!(duplicate_result.is_err(), "duplicate create should fail");
+        let duplicate_error = duplicate_result.expect_err("duplicate create should fail");
+        assert_eq!(duplicate_error.status_code(), StatusCode::CONFLICT);
 
         let update_response = test_handler
             .handler
@@ -2047,6 +2055,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_admin_api_behavioral_errors_are_typed() {
+        let test_handler = test_web_handler().await;
+        let unauthenticated = Session::new(None, Arc::new(MemoryStore::default()), None);
+        let auth_error = test_handler
+            .handler
+            .check_auth(&unauthenticated)
+            .await
+            .expect_err("missing session identity should fail");
+        assert!(matches!(auth_error, CrabCakesError::Unauthorized(_)));
+
+        let authenticated = authenticated_session("expected-token").await;
+        let csrf_error = test_handler
+            .handler
+            .validate_csrf_token(&authenticated, &http::HeaderMap::new())
+            .await
+            .expect_err("missing CSRF header should fail");
+        assert!(matches!(csrf_error, CrabCakesError::Forbidden(_)));
+
+        let malformed_request = Request::builder()
+            .method(Method::PUT)
+            .uri("/admin/api/policies")
+            .header("X-CSRF-Token", "expected-token")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::new(Bytes::from_static(b"not-json")))
+            .expect("malformed policy request should build");
+        let parse_error = test_handler
+            .handler
+            .handle_api_update_policy(malformed_request, authenticated)
+            .await
+            .expect_err("malformed JSON should fail");
+        assert!(matches!(parse_error, CrabCakesError::BadRequest(_)));
+    }
+
+    #[tokio::test]
     async fn test_error_response() {
         let response: Response<Full<Bytes>> = CrabCakesError::other(&"Test error").into();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -2060,6 +2102,77 @@ mod tests {
             .expect("Failed to get bytes from frame");
         let body_str = std::str::from_utf8(&body_bytes).expect("Body is not valid UTF-8");
         assert!(body_str.contains("Test error"));
+    }
+
+    #[tokio::test]
+    async fn test_expired_credentials_error_links_to_login() {
+        let response: Response<Full<Bytes>> =
+            CrabCakesError::Unauthorized("Credentials not found or expired".into()).into();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body should collect")
+            .to_bytes();
+        let body_str = std::str::from_utf8(&body_bytes).expect("Body is not valid UTF-8");
+        assert!(body_str.contains("Credentials not found or expired"));
+        assert!(body_str.contains("href=\"/login\""));
+        assert!(body_str.contains(">Log In<"));
+        assert!(!body_str.contains(">Go Back<"));
+    }
+
+    #[tokio::test]
+    async fn test_api_error_responses_use_typed_status_codes() {
+        let test_handler = test_web_handler().await;
+        let cases = [
+            (CrabCakesError::InvalidSecretLength, StatusCode::BAD_REQUEST),
+            (
+                CrabCakesError::BadRequest("bad".into()),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                CrabCakesError::Unauthorized("auth".into()),
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                CrabCakesError::Forbidden("denied".into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                CrabCakesError::NotFound("missing".into()),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                CrabCakesError::Conflict("duplicate".into()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                CrabCakesError::Reqwest("upstream".into()),
+                StatusCode::BAD_GATEWAY,
+            ),
+            (
+                CrabCakesError::Other("internal".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected) in cases {
+            let response = test_handler
+                .handler
+                .build_api_error_response(&error)
+                .expect("error response should build");
+            assert_eq!(response.status(), expected);
+            assert_eq!(
+                response.headers().get(CONTENT_TYPE),
+                Some(&HeaderValue::from_static("application/json"))
+            );
+
+            let body = response_json(response).await;
+            assert_eq!(body["success"], false);
+            assert!(body.get("error").is_some());
+        }
     }
 
     #[tokio::test]

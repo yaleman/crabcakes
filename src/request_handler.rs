@@ -314,8 +314,8 @@ impl RequestHandler {
         confirm: bool,
     ) -> Result<crate::web::serde::VacuumResult, CrabCakesError> {
         if !confirm {
-            return Err(CrabCakesError::other(
-                &"Must confirm vacuum operation with confirm=true",
+            return Err(CrabCakesError::BadRequest(
+                "Must confirm vacuum operation with confirm=true".to_string(),
             ));
         }
 
