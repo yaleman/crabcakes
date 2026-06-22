@@ -289,7 +289,6 @@ impl CrabCakesError {
 
 impl From<CrabCakesError> for Response<Full<Bytes>> {
     fn from(err: CrabCakesError) -> Self {
-        let status = err.status_code();
         let requires_login = matches!(
             err,
             CrabCakesError::Unauthorized(_) | CrabCakesError::NoAuthenticationSupplied(_)
