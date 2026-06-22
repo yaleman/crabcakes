@@ -326,7 +326,7 @@ impl From<CrabCakesError> for Response<Full<Bytes>> {
 
         *res.status_mut() = match err {
             CrabCakesError::InvalidSecretLength => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
+            _ => err.status_code(),
         };
         (*res.headers_mut()).append(
             CONTENT_TYPE,
