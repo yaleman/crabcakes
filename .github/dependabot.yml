@@ -5,12 +5,20 @@ updates:
   schedule:
     interval: weekly
     day: saturday
-    time: "02:00"
-    timezone: "Australia/Brisbane"
+    time: 02:00
+    timezone: Australia/Brisbane
+  groups:
+    cargo:
+      patterns:
+      - '*'
 - package-ecosystem: github-actions
   directory: /
   schedule:
     interval: weekly
     day: saturday
-    time: "02:00"
-    timezone: "Australia/Brisbane"
+    time: 02:00
+    timezone: Australia/Brisbane
+  groups:
+    github-actions:
+      patterns:
+      - '*'
