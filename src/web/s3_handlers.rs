@@ -191,6 +191,7 @@ impl S3Handler {
     /// Verify AWS Signature V4 and buffer the request body
     /// Returns Ok with (parts, buffered_body, SigV4AuthenticatorResponse) or Err with error response
     #[instrument(level = "debug", skip_all)]
+    #[allow(clippy::result_large_err)]
     async fn verify_and_buffer_request(
         &self,
         request: Request<hyper::body::Incoming>,
