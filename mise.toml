@@ -19,6 +19,7 @@ description = "lint JavaScript and CSS files"
 run = "pnpm run lint"
 
 [tasks.js-test]
+depends = ["build-js"]
 description = "run JavaScript tests"
 run = "pnpm test"
 
