@@ -18,19 +18,19 @@ jobs:
         env:
             MDBOOK_CONTAINER_VERSION: "0.5.0"
         steps:
-            - uses: actions/checkout@v7
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
             - name: Build book in docker
               run: docker run --rm --mount "type=bind,src=$(pwd)/docs,target=/book" --mount "type=bind,src=$(pwd)/README.md,target=/README.md" ghcr.io/peaceiris/mdbook:v${MDBOOK_CONTAINER_VERSION} build
             - name: Upload build artifacts
-              uses: actions/upload-artifact@v7
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                   name: book
                   path: ./docs/book
                   if-no-files-found: error
                   retention-days: 1
             - name: Deploy
-              uses: peaceiris/actions-gh-pages@v4
+              uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.0.1
               if: ${{ github.ref == 'refs/heads/main' }}
               with:
                   github_token: ${{ secrets.GITHUB_TOKEN }}

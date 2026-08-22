@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    uses: docker/github-builder/.github/workflows/build.yml@v1
+    uses: docker/github-builder/.github/workflows/build.yml@6f3b6a76398c5bb8be2c385effa1a927af60e67a # v1.17.0
     permissions:
       contents: read
       packages: write
