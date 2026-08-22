@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-JS_BUILD_RESULT=$(just build-js 2>&1);
+JS_BUILD_RESULT=$(mise build-js 2>&1);
 
 if [ "$(git status --porcelain | grep -E '^\s*$' | grep -c 'static/js/')" -gt 0 ]; then
 

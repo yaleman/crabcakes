@@ -1,0 +1,97 @@
+[tasks.fmt]
+run = "cargo fmt"
+
+[tasks.clippy]
+depends = ["fmt"]
+run = "cargo clippy --all-targets --quiet --workspace"
+
+[tasks.test]
+depends = ["fmt"]
+run = "cargo test --workspace --quiet"
+
+[tasks.shellcheck]
+description = "run shellcheck on scripts"
+run = "shellcheck *.sh scripts/*.sh"
+
+[tasks.lint-web]
+depends = ["build-js"]
+description = "lint JavaScript and CSS files"
+run = "pnpm run lint"
+
+[tasks.js-test]
+description = "run JavaScript tests"
+run = "pnpm test"
+
+[tasks.lint-css]
+description = "lint CSS only"
+run = "pnpm run lint:css"
+
+[tasks.build-js]
+run = [
+    "echo \"Installing dependencies...\"",
+    "pnpm install",
+    "echo \"Bundling files...\"",
+    "pnpm run build",
+    "echo \"Finished at $(date)\"",
+]
+
+[tasks.check]
+depends = ["test", "clippy", "lint-web"]
+
+[tasks.coverage]
+description = "run coverage checks"
+run = [
+    "cargo tarpaulin --workspace --exclude-files=src/main.rs --out=Html",
+    "echo \"Coverage report should be at file://$(pwd)/tarpaulin-report.html\"",
+]
+
+[tasks.coveralls]
+description = "send coverage report to Coveralls"
+run = [
+    "cargo tarpaulin --workspace --exclude-files=src/main.rs --out=Html --coveralls $COVERALLS_REPO_TOKEN",
+    "echo \"Coverage report should be at https://coveralls.io/github/yaleman/crabcakes?branch=$(git branch --show-current)\"",
+]
+
+[tasks.start]
+depends = ["build-js"]
+description = "start the application"
+run = ["cargo run --"]
+
+[tasks.start_debug]
+depends = ["build-js"]
+description = "start the application in debug mode"
+env = { RUST_LOG = "debug" }
+run = ["cargo run --"]
+
+[tasks.serve_docs]
+dir = "./docs"
+run = "mdbook serve"
+
+[tasks.semgrep]
+run = "semgrep ci --config auto --exclude-rule \"yaml.github-actions.security.third-party-action-not-pinned-to-commit-sha.third-party-action-not-pinned-to-commit-sha\""
+
+[tasks.docker_build]
+description = "build the docker image"
+run = """docker buildx build \
+        --load \
+        --build-arg "GITHUB_SHA=$(git rev-parse HEAD)" \
+        --platform linux/$(uname -m) \
+        --build-arg "DESCRIPTION=$(./scripts/get_description.sh)" \
+        --tag ghcr.io/yaleman/crabcakes:latest \
+        ."""
+
+[tasks.docker_run]
+description = "build and run the docker image, mounting ./config as the config dir"
+depends = ["docker_build"]
+run = """docker run --rm -it \
+-p 9000:9000 \
+--mount type=bind,src=$(pwd)/config,target=/config \
+--platform linux/$(uname -m) \
+ghcr.io/yaleman/crabcakes:latest
+"""
+
+[tools]
+mdbook = "latest"
+pnpm = "latest"
+semgrep = "latest"
+shellcheck = "latest"
