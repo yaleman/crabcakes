@@ -66,17 +66,15 @@ impl ResultCache {
         Self(Arc::new(RwLock::new(HashMap::new())))
     }
     pub async fn get(&self, key: &str, expiry_secs: u32) -> Option<CachedResult> {
-        let cache = self.0.read().await;
-        match cache.get(key).as_ref() {
-            Some(value) => {
-                if value.expired(expiry_secs) {
-                    self.0.write().await.remove(key);
-                    None
-                } else {
-                    Some((*value).clone())
-                }
+        // Expiry can remove an entry, so acquire the write lock once rather
+        // than trying to upgrade a read lock while still holding it.
+        let mut cache = self.0.write().await;
+        match cache.get(key) {
+            Some(value) if value.expired(expiry_secs) => {
+                cache.remove(key);
+                None
             }
-            None => None,
+            value => value.cloned(),
         }
     }
     pub async fn insert(&self, key: String, value: CachedResult) {
@@ -503,6 +501,65 @@ impl PolicyStore {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn expired_policy_cache_does_not_block_requests() {
+        use std::time::Duration;
+
+        use iam_rs::{Arn, Decision, IAMRequest, Principal, PrincipalId};
+
+        let (_tempdir, store) = super::PolicyStore::new_test().await;
+        store.add_policy("allow-test", serde_json::from_value(serde_json::json!({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"AWS": format!("arn:aws:iam::{}:user/testuser", crate::constants::MOCK_ACCOUNT_ID)},
+                "Action": "s3:ListBucket",
+                "Resource": "arn:aws:s3:::bucket2"
+            }]
+        })).expect("Should parse policy")).await.expect("Should add policy");
+        let request = IAMRequest::new(
+            Principal::Aws(PrincipalId::String("arn:aws:iam:::user/testuser".into())),
+            "s3:ListBucket",
+            Arn::parse("arn:aws:s3:::bucket2").expect("Should parse bucket ARN"),
+        );
+        assert_eq!(
+            store
+                .evaluate_request(&request)
+                .await
+                .expect("Should authorize request"),
+            Decision::Allow
+        );
+        // Expire the cached decision deterministically, without sleeping.
+        *store.expiry_secs.write().await = 0;
+        let decision =
+            tokio::time::timeout(Duration::from_secs(1), store.evaluate_request(&request))
+                .await
+                .expect("Expired cache lookup must not deadlock")
+                .expect("Should re-evaluate expired request");
+        assert_eq!(decision, Decision::Allow);
+
+        *store.expiry_secs.write().await = 300;
+        let mut denied_request = request.clone();
+        denied_request.resource =
+            Arn::parse("arn:aws:s3:::not-allowed").expect("Should parse bucket ARN");
+        let (cached, uncached) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(
+                store.evaluate_request(&request),
+                store.evaluate_request(&denied_request)
+            )
+        })
+        .await
+        .expect("Requests after cache expiry must remain responsive");
+        assert_eq!(
+            cached.expect("Cached authorization should succeed"),
+            Decision::Allow
+        );
+        assert_ne!(
+            uncached.expect("Uncached authorization should succeed"),
+            Decision::Allow
+        );
+    }
+
     #[tokio::test]
     async fn test_invalid_name() {
         let (_tempdir, store) = super::PolicyStore::new_test().await;
