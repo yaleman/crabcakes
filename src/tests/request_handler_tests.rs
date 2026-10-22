@@ -121,6 +121,89 @@ async fn test_api_delete_bucket_empty() {
 }
 
 #[tokio::test]
+async fn test_api_delete_bucket_with_empty_directories() {
+    for force in [false, true] {
+        let handler = RequestHandler::new_test().await;
+        let bucket = "empty-directories";
+        let path = handler.filesystem.resolve_path(bucket);
+        tokio::fs::create_dir_all(path.join("6/d"))
+            .await
+            .expect("Should create nested empty directories");
+        tokio::fs::create_dir_all(path.join("another/.hidden"))
+            .await
+            .expect("Should create sibling empty directories");
+
+        let empty_object = path.join("6/d/empty-object");
+        tokio::fs::write(&empty_object, b"")
+            .await
+            .expect("Should create zero-byte object");
+        assert!(matches!(
+            handler.api_delete_bucket(bucket, false).await,
+            Err(CrabCakesError::BucketNotEmpty(_))
+        ));
+        tokio::fs::remove_file(empty_object)
+            .await
+            .expect("Should remove zero-byte object");
+
+        handler
+            .api_delete_bucket(bucket, force)
+            .await
+            .expect("Empty directories must not prevent bucket deletion");
+        assert!(!path.exists());
+    }
+}
+
+#[tokio::test]
+async fn test_api_delete_bucket_preserves_nested_objects() {
+    let handler = RequestHandler::new_test().await;
+    let bucket = "nested-objects";
+    let path = handler.filesystem.resolve_path(bucket);
+    tokio::fs::create_dir_all(path.join("empty/child"))
+        .await
+        .expect("Should create empty directories");
+    handler
+        .filesystem
+        .write_file("nested-objects/6/d/.object", b"keep me")
+        .await
+        .expect("Should create nested object");
+
+    let error = handler
+        .api_delete_bucket(bucket, false)
+        .await
+        .expect_err("Nested objects must block bucket deletion");
+    assert!(matches!(error, CrabCakesError::BucketNotEmpty(ref name) if name == bucket));
+    assert_eq!(error.status_code(), http::StatusCode::CONFLICT);
+    assert_eq!(
+        tokio::fs::read(path.join("6/d/.object"))
+            .await
+            .expect("Object must remain"),
+        b"keep me"
+    );
+    assert!(
+        path.join("empty/child").is_dir(),
+        "Rejected deletion must leave the tree intact"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_api_delete_bucket_does_not_follow_symlinks() {
+    let handler = RequestHandler::new_test().await;
+    let outside = tempfile::tempdir().expect("Should create external directory");
+    let path = handler.filesystem.resolve_path("symlinks");
+    tokio::fs::create_dir(&path)
+        .await
+        .expect("Should create bucket");
+    std::os::unix::fs::symlink(outside.path(), path.join("link"))
+        .expect("Should create directory symlink");
+
+    let result = handler.api_delete_bucket("symlinks", false).await;
+    assert!(matches!(result, Err(CrabCakesError::BucketNotEmpty(_))));
+    assert!(outside.path().is_dir());
+    assert!(path.join("link").is_symlink());
+}
+
+#[tokio::test]
 async fn test_api_delete_bucket_with_objects_no_force() {
     let handler = RequestHandler::new_test().await;
 
@@ -138,7 +221,7 @@ async fn test_api_delete_bucket_with_objects_no_force() {
 
     // Try to delete without force flag
     let result = handler.api_delete_bucket("bucket-with-files", false).await;
-    assert!(result.is_err(), "Should fail to delete non-empty bucket");
+    assert!(matches!(result, Err(CrabCakesError::BucketNotEmpty(_))));
 }
 
 #[tokio::test]
@@ -159,7 +242,7 @@ async fn test_api_delete_bucket_with_objects_force() {
 
     handler
         .filesystem
-        .write_file("force-delete-bucket/file2.txt", b"content2")
+        .write_file("force-delete-bucket/nested/child/file2.txt", b"content2")
         .await
         .expect("Should write file2");
 

@@ -181,10 +181,7 @@ impl RequestHandler {
         }
 
         // Delete the bucket (will fail if not empty and force=false)
-        self.filesystem
-            .delete_bucket(bucket)
-            .await
-            .map_err(CrabCakesError::from)
+        self.filesystem.delete_bucket(bucket).await
     }
 
     pub(crate) async fn api_create_bucket(&self, bucket_name: &str) -> Result<(), CrabCakesError> {

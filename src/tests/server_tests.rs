@@ -620,6 +620,58 @@ async fn test_delete_bucket() {
 }
 
 #[tokio::test]
+async fn test_delete_bucket_after_deleting_nested_object() {
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let (handle, port) = start_test_server(temp_dir.path()).await;
+    let client = create_s3_client(port).await;
+    let bucket = TEST_ALLOWED_BUCKET2;
+    let key = "testuser/6/d/object.txt";
+    client
+        .create_bucket()
+        .bucket(bucket)
+        .send()
+        .await
+        .expect("Should create bucket");
+    client
+        .put_object()
+        .bucket(bucket)
+        .key(key)
+        .body(b"keep until deleted".to_vec().into())
+        .send()
+        .await
+        .expect("Should upload nested object");
+    client
+        .delete_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .expect("Should delete object");
+    let bucket_path = temp_dir.path().join(bucket);
+    assert!(bucket_path.join("testuser/6/d").is_dir());
+
+    let unsigned = reqwest::Client::new()
+        .delete(format!("http://127.0.0.1:{port}/{bucket}"))
+        .send()
+        .await
+        .expect("Should send unsigned request");
+    assert_eq!(unsigned.status(), http::StatusCode::UNAUTHORIZED);
+    assert!(
+        bucket_path.is_dir(),
+        "Unsigned deletion must not remove the bucket"
+    );
+
+    client
+        .delete_bucket()
+        .bucket(bucket)
+        .send()
+        .await
+        .expect("Empty parent directories must not block signed bucket deletion");
+    assert!(!bucket_path.exists());
+    handle.abort();
+}
+
+#[tokio::test]
 async fn test_delete_bucket_not_empty() {
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let (handle, port) = start_test_server(temp_dir.path()).await;

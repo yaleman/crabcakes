@@ -311,34 +311,52 @@ impl FilesystemService {
         Ok(())
     }
 
-    pub async fn delete_bucket(&self, bucket: &str) -> Result<(), std::io::Error> {
+    pub async fn delete_bucket(&self, bucket: &str) -> Result<(), CrabCakesError> {
         debug!(bucket = %bucket, "Deleting bucket");
         let bucket_path = self.root_dir.join(bucket);
 
-        // Check if bucket exists
-        if !bucket_path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Bucket does not exist",
-            ));
-        }
-
-        // Check if it's a directory
-        if !bucket_path.is_dir() {
+        let metadata = match fs::symlink_metadata(&bucket_path).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(CrabCakesError::BucketNotFound(bucket.to_string()));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.is_dir() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Path is not a bucket",
-            ));
+            )
+            .into());
         }
 
-        // Check if bucket is empty
-        let mut entries = fs::read_dir(&bucket_path).await?;
-        if entries.next_entry().await?.is_some() {
-            return Err(std::io::Error::other("Bucket is not empty"));
+        // Empty directories are storage scaffolding, not S3 objects. Check the
+        // entire tree before removing anything, without following symlinks.
+        let mut directories = vec![bucket_path];
+        let mut index = 0;
+        while index < directories.len() {
+            let mut entries = fs::read_dir(&directories[index]).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                if !entry.file_type().await?.is_dir() {
+                    return Err(CrabCakesError::BucketNotEmpty(bucket.to_string()));
+                }
+                directories.push(entry.path());
+            }
+            index += 1;
         }
 
-        // Remove the directory
-        fs::remove_dir(&bucket_path).await?;
+        // Remove children first using only empty-directory removal: a file
+        // created after the scan must block deletion rather than be erased.
+        for directory in directories.into_iter().rev() {
+            if let Err(error) = fs::remove_dir(directory).await {
+                return Err(match error.kind() {
+                    std::io::ErrorKind::DirectoryNotEmpty => {
+                        CrabCakesError::BucketNotEmpty(bucket.to_string())
+                    }
+                    _ => error.into(),
+                });
+            }
+        }
         debug!(bucket = %bucket, "Bucket deleted successfully");
         Ok(())
     }

@@ -78,6 +78,7 @@ Returns 409 Conflict if bucket already exists.
 #### DeleteBucket (DELETE /bucket)
 
 Deletes an empty bucket. Returns 409 Conflict with BucketNotEmpty error if the bucket contains objects.
+Empty subdirectories do not count as objects and are removed with the bucket. Deletion checks the full tree before removing directories, rejects symlinks, and uses empty-directory removal to avoid deleting objects added during cleanup. Admin and S3 deletion share this behavior; non-empty buckets use the typed `CrabCakesError::BucketNotEmpty` error.
 
 #### GetBucketLocation (GET /bucket?location)
 
