@@ -360,6 +360,8 @@ fi
 
 rm "$TEMPDIR2/$TEST_BATCH_FILE1" "$TEMPDIR2/$TEST_BATCH_FILE2" "$TEMPDIR2/$TEST_BATCH_FILE3" 2>/dev/null
 
+# Empty filesystem directories must not count as objects for signed DeleteBucket.
+mkdir -p "$TEMPDIR/${TEST_BUCKET2}1/6/d" "$TEMPDIR/${TEST_BUCKET2}1/another/empty"
 # Test DeleteBucket on empty bucket (should succeed)
 if aws s3 rb \
     "s3://${TEST_BUCKET2}1" \

@@ -23,6 +23,7 @@ use crate::web::templates::ErrorTemplate;
 pub enum CrabCakesError {
     BadRequest(String),
     BucketNotFound(String),
+    BucketNotEmpty(String),
     Conflict(String),
     FileNotFound(PathBuf),
     Forbidden(String),
@@ -89,6 +90,9 @@ impl std::fmt::Display for CrabCakesError {
             }
             CrabCakesError::BucketNotFound(bucket) => {
                 write!(f, "Bucket '{bucket}' Not Found")
+            }
+            CrabCakesError::BucketNotEmpty(bucket) => {
+                write!(f, "Bucket '{bucket}' is not empty")
             }
             CrabCakesError::Configuration(msg) => {
                 write!(f, "Configuration Error: {}", msg)
@@ -275,9 +279,9 @@ impl CrabCakesError {
             | CrabCakesError::BucketNotFound(_)
             | CrabCakesError::FileNotFound(_)
             | CrabCakesError::InvalidCredential => StatusCode::NOT_FOUND,
-            CrabCakesError::Conflict(_) | CrabCakesError::CredentialAlreadyExists => {
-                StatusCode::CONFLICT
-            }
+            CrabCakesError::Conflict(_)
+            | CrabCakesError::BucketNotEmpty(_)
+            | CrabCakesError::CredentialAlreadyExists => StatusCode::CONFLICT,
             CrabCakesError::HttpResponseError(_)
             | CrabCakesError::OidcDiscovery(_)
             | CrabCakesError::Reqwest(_)
@@ -389,6 +393,10 @@ mod tests {
     #[test]
     fn status_code_maps_existing_domain_errors() {
         let cases = [
+            (
+                CrabCakesError::BucketNotEmpty("bucket".into()),
+                StatusCode::CONFLICT,
+            ),
             (CrabCakesError::InvalidSecretLength, StatusCode::BAD_REQUEST),
             (
                 CrabCakesError::NoAuthenticationSupplied("missing".into()),

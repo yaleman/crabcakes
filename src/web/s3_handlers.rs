@@ -42,6 +42,7 @@ use crate::constants::{
 };
 use crate::credentials::CredentialStore;
 use crate::db::DBService;
+use crate::error::CrabCakesError;
 use crate::filesystem::FilesystemService;
 use crate::multipart::MultipartManager;
 use crate::policy::PolicyStore;
@@ -1750,19 +1751,17 @@ impl S3Handler {
                 debug!(bucket = %bucket, "DeleteBucket success");
                 response_body_status(Bytes::new(), StatusCode::NO_CONTENT)
             }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    warn!(bucket = %bucket, "Bucket does not exist");
-                    self.no_such_bucket_response(bucket)
-                } else if e.kind() == std::io::ErrorKind::Other
-                    && e.to_string().contains("not empty")
-                {
-                    warn!(bucket = %bucket, "Bucket is not empty");
-                    self.bucket_not_empty_response(bucket)
-                } else {
-                    error!(bucket = %bucket, error = %e, "Failed to delete bucket");
-                    self.internal_error_response()
-                }
+            Err(CrabCakesError::BucketNotFound(_)) => {
+                warn!(bucket = %bucket, "Bucket does not exist");
+                self.no_such_bucket_response(bucket)
+            }
+            Err(CrabCakesError::BucketNotEmpty(_)) => {
+                warn!(bucket = %bucket, "Bucket is not empty");
+                self.bucket_not_empty_response(bucket)
+            }
+            Err(error) => {
+                error!(bucket = %bucket, error = %error, "Failed to delete bucket");
+                self.internal_error_response()
             }
         }
     }
