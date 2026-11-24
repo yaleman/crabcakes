@@ -7,15 +7,13 @@ description = "A wrapper around strings that hides their contents when printed o
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 
 [dependencies]
 serde = { workspace = true, optional = true, features = ["derive"] }
-serde_with = { workspace = true, optional = true, features = ["json"] }
 
 [dev-dependencies]
 serde_json = "1.0.151"
 
 [features]
 default = []
-serde = ["dep:serde", "dep:serde_with"]
+serde = ["dep:serde"]

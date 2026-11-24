@@ -16,9 +16,8 @@ use tower_http::trace::ResponseBody;
 use crate::web::handlers::respond_500;
 use crate::web::s3_handlers::S3Handler;
 
-/// BoxBody type that can handle any response body - using Box<dyn Error> for maximum flexibility
-pub(crate) type BoxBody =
-    http_body_util::combinators::BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+/// Boxed response body shared by infallible S3, web, and healthcheck responses.
+pub(crate) type BoxBody = http_body_util::combinators::BoxBody<Bytes, Infallible>;
 
 pub(crate) type WebServiceResponse = Response<BoxBody>;
 
@@ -35,11 +34,7 @@ pub(crate) type WebServiceWithSession = tower::util::BoxCloneService<
 
 /// Returns "OK"
 fn healthcheck_response() -> WebServiceResponse {
-    let mut response = Response::new(
-        Full::new(Bytes::from("OK"))
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-            .boxed(),
-    );
+    let mut response = Response::new(Full::new(Bytes::from("OK")).boxed());
     *response.status_mut() = hyper::StatusCode::OK;
     response
 }
@@ -89,11 +84,7 @@ pub async fn route_request(
                 .handle_request(req, remote_addr, start_time)
                 .await?;
             let (parts, body) = response.into_parts();
-            return Ok(Response::from_parts(
-                parts,
-                body.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-                    .boxed(),
-            ));
+            return Ok(Response::from_parts(parts, body.boxed()));
         }
     }
 
@@ -103,19 +94,11 @@ pub async fn route_request(
             // Call web service and convert TracedResponseBody to BoxBody
             let response = web_service.call(req).await?;
             let (parts, body) = response.into_parts();
-            Ok(Response::from_parts(
-                parts,
-                body.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-                    .boxed(),
-            ))
+            Ok(Response::from_parts(parts, body.boxed()))
         } else {
             let response = respond_500(&"Web handler not configured");
             let (parts, body) = response.into_parts();
-            Ok(Response::from_parts(
-                parts,
-                body.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-                    .boxed(),
-            ))
+            Ok(Response::from_parts(parts, body.boxed()))
         }
     } else {
         // S3 request (or web handler not configured) - handle with S3 handler
@@ -123,11 +106,7 @@ pub async fn route_request(
             .handle_request(req, remote_addr, start_time)
             .await?;
         let (parts, body) = response.into_parts();
-        Ok(Response::from_parts(
-            parts,
-            body.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-                .boxed(),
-        ))
+        Ok(Response::from_parts(parts, body.boxed()))
     }
 }
 
