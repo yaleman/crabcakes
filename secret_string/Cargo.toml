@@ -7,7 +7,6 @@ description = "A wrapper around strings that hides their contents when printed o
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 
 [dependencies]
 serde = { workspace = true, optional = true, features = ["derive"] }
