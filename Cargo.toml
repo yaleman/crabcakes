@@ -80,8 +80,8 @@ sea-orm-migration = { version = "1.1.20", features = [
     "sqlx-sqlite",
     "runtime-tokio-rustls",
 ] }
-tower-sessions = "0.14.0"
-tower-sessions-sqlx-store = { version = "0.15.0", features = ["sqlite"] }
+tower-sessions = "0.15.0"
+tower-sessions-sqlx-store = { version = "0.15.1", features = ["sqlite"] }
 openidconnect = "4.0.1"
 rand = "0.9.5"
 reqwest = { version = "0.12.28", default-features = false, features = [
